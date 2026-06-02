@@ -47,7 +47,7 @@ def build_matrix_ui(app):
         content_frame.columnconfigure(1, weight=1)
         content_frame.rowconfigure(0, weight=1)
         
-        listbox = tk.Listbox(content_frame, bg=color, height=20)
+        listbox = tk.Listbox(content_frame, bg=color, height=20, selectmode=tk.EXTENDED)
         listbox.grid(row=0, column=1, sticky="nsew", padx=(0, 5))
         listbox.bind('<Double-1>', lambda e, c=cat: app.edit_matrix_task(c))
         listbox.bind('<Delete>', lambda e, c=cat: app.delete_matrix_task(c))

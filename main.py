@@ -63,6 +63,43 @@ class TaskDialog:
         self.result = (title, content)
         self.window.destroy()
 
+class MatrixSelectionDialog:
+    def __init__(self, parent, multiple=False, title="Select Matrix Quadrant"):
+        self.window = tk.Toplevel(parent)
+        self.window.title(title)
+        self.window.geometry("300x180")
+        self.window.transient(parent)
+        self.window.grab_set()
+        self.result = None
+        self.multiple = multiple
+        
+        ttk.Label(self.window, text="Select Matrix Quadrant:", font=("Helvetica", 10, "bold")).pack(pady=10)
+        
+        frame = ttk.Frame(self.window)
+        frame.pack(fill="x", padx=20)
+        
+        quadrants = [
+            ("Do First (Urgent/Important)", "do_first"),
+            ("Schedule (Not Urgent/Important)", "schedule"),
+            ("Delegate (Urgent/Not Important)", "delegate"),
+            ("Eliminate (Not Urgent/Not Important)", "eliminate")
+        ]
+        
+        self.selected_quadrant = tk.StringVar(value="do_first")
+        
+        for text, value in quadrants:
+            ttk.Radiobutton(frame, text=text, variable=self.selected_quadrant, value=value).pack(anchor="w", pady=2)
+        
+        button_frame = ttk.Frame(self.window)
+        button_frame.pack(pady=15)
+        action_text = "Move Task(s)" if multiple else "Move Task"
+        ttk.Button(button_frame, text=action_text, command=self.ok).pack(side="left", padx=5)
+        ttk.Button(button_frame, text="Cancel", command=self.window.destroy).pack(side="left", padx=5)
+    
+    def ok(self):
+        self.result = self.selected_quadrant.get()
+        self.window.destroy()
+
 class CognitiveOffloadApp(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -259,6 +296,7 @@ class CognitiveOffloadApp(tk.Tk):
         ttk.Button(task_buttons, text="Add Tag", command=self.add_tag_to_task).pack(side="left", padx=(0, 6))
         ttk.Button(task_buttons, text="Edit Details", command=self.edit_task_details).pack(side="left", padx=(0, 6))
         ttk.Button(task_buttons, text="To Matrix", command=self.move_to_matrix).pack(side="left", padx=(0, 6))
+        ttk.Button(task_buttons, text="Batch to Matrix", command=self.move_selected_tasks_to_matrix).pack(side="left", padx=(0, 6))
         
         filter_frame = ttk.Frame(tasks_card)
         filter_frame.grid(row=2, column=0, sticky="ew", pady=(0, 5))
@@ -275,7 +313,7 @@ class CognitiveOffloadApp(tk.Tk):
         sort_combo.pack(side="left", padx=(5, 5))
         sort_combo.bind("<<ComboboxSelected>>", self.apply_sorting)
         
-        self.task_list = tk.Listbox(tasks_card, activestyle="dotbox", height=13)
+        self.task_list = tk.Listbox(tasks_card, activestyle="dotbox", height=13, selectmode=tk.EXTENDED)
         self.task_list.grid(row=3, column=0, sticky="nsew")
         task_scroll = ttk.Scrollbar(tasks_card, orient="vertical", command=self.task_list.yview)
         task_scroll.grid(row=3, column=1, sticky="ns")
@@ -342,6 +380,7 @@ class CognitiveOffloadApp(tk.Tk):
         self.bind_all("<Control-m>", lambda e: self.notebook.select(1))
         self.bind_all("<Control-1>", lambda e: self.notebook.select(0))
         self.bind_all("<Control-2>", lambda e: self.notebook.select(1))
+        self.bind_all("<Control-Shift-B>", lambda e: self.move_selected_tasks_to_matrix())
 
     def focus_search(self):
         self.search_var.set("")
@@ -374,18 +413,10 @@ class CognitiveOffloadApp(tk.Tk):
         sel = self.task_list.curselection()
         if not sel:
             return None
-        return sel[0]
+        return sel[0] if len(sel) == 1 else sel
 
-    def _refresh_all(self):
-        self._refresh_tasks()
-        self._refresh_notes()
-        self._refresh_tag_filter()
-        self.timer_label.config(text=self._format_timer())
-        self.path_label.config(text=str(self.db_path))
-        self.matrix_path_label.config(text=str(self.matrix_db_path))
-
-    def _refresh_tasks(self):
-        self.task_list.delete(0, tk.END)
+    def _get_display_tasks(self):
+        """Get currently displayed tasks accounting for filters and sorting"""
         display_tasks = self.tasks
         
         search_term = self.search_var.get().lower().strip()
@@ -403,6 +434,20 @@ class CognitiveOffloadApp(tk.Tk):
             display_tasks = sorted(display_tasks, key=lambda t: t.created_at, reverse=True)
         elif self.sort_order == "completed":
             display_tasks = sorted(display_tasks, key=lambda t: (not t.done, t.completed_at or "9999"), reverse=True)
+            
+        return display_tasks
+
+    def _refresh_all(self):
+        self._refresh_tasks()
+        self._refresh_notes()
+        self._refresh_tag_filter()
+        self.timer_label.config(text=self._format_timer())
+        self.path_label.config(text=str(self.db_path))
+        self.matrix_path_label.config(text=str(self.matrix_db_path))
+
+    def _refresh_tasks(self):
+        self.task_list.delete(0, tk.END)
+        display_tasks = self._get_display_tasks()
             
         for t in display_tasks:
             prefix = "✓" if t.done else "•"
@@ -436,24 +481,11 @@ class CognitiveOffloadApp(tk.Tk):
         self.after(100, self._show_selected_task_details)
 
     def _show_selected_task_details(self):
-        idx = self._selected_task_index()
-        if idx is not None:
-            display_tasks = self.tasks
-            search_term = self.search_var.get().lower().strip()
-            if search_term:
-                display_tasks = [t for t in display_tasks if search_term in t.text.lower() or 
-                                search_term in t.description.lower() or
-                                any(search_term in tag for tag in t.tags)]
-            if self.tag_filter:
-                display_tasks = [t for t in display_tasks if self.tag_filter in t.tags]
-                
-            if self.sort_order == "priority":
-                display_tasks = sorted(display_tasks, key=lambda t: (-t.priority, t.created_at), reverse=True)
-            elif self.sort_order == "created":
-                display_tasks = sorted(display_tasks, key=lambda t: t.created_at, reverse=True)
-            elif self.sort_order == "completed":
-                display_tasks = sorted(display_tasks, key=lambda t: (not t.done, t.completed_at or "9999"), reverse=True)
-                
+        sel = self.task_list.curselection()
+        if sel:
+            idx = sel[0] if len(sel) == 1 else sel[0]
+            display_tasks = self._get_display_tasks()
+            
             if idx < len(display_tasks):
                 task = display_tasks[idx]
                 details = f"Task: {task.text}"
@@ -699,91 +731,71 @@ class CognitiveOffloadApp(tk.Tk):
             self.save_state()
 
     def mark_task_done(self):
-        idx = self._selected_task_index()
-        if idx is None:
+        sel = self.task_list.curselection()
+        if not sel:
             return
             
-        display_tasks = self.tasks
-        search_term = self.search_var.get().lower().strip()
-        if search_term:
-            display_tasks = [t for t in display_tasks if search_term in t.text.lower() or 
-                            search_term in t.description.lower() or
-                            any(search_term in tag for tag in t.tags)]
-        if self.tag_filter:
-            display_tasks = [t for t in display_tasks if self.tag_filter in t.tags]
-            
-        if self.sort_order == "priority":
-            display_tasks = sorted(display_tasks, key=lambda t: (-t.priority, t.created_at), reverse=True)
-        elif self.sort_order == "created":
-            display_tasks = sorted(display_tasks, key=lambda t: t.created_at, reverse=True)
-        elif self.sort_order == "completed":
-            display_tasks = sorted(display_tasks, key=lambda t: (not t.done, t.completed_at or "9999"), reverse=True)
-            
-        if idx < len(display_tasks):
-            task = display_tasks[idx]
-            actual_idx = self.tasks.index(task)
-            self.tasks[actual_idx].done = not self.tasks[actual_idx].done
-            if self.tasks[actual_idx].done:
-                self.tasks[actual_idx].completed_at = self._timestamp()
-            else:
-                self.tasks[actual_idx].completed_at = None
-            self._refresh_all()
-            self.task_list.selection_set(idx)
-            self._set_status("Toggled task completion.")
-            if self.auto_save_enabled:
-                self.save_state()
+        display_tasks = self._get_display_tasks()
+        
+        # Handle multiple selections
+        if len(sel) > 1:
+            # Process in reverse order to maintain indices
+            for idx in reversed(sel):
+                if idx < len(display_tasks):
+                    task = display_tasks[idx]
+                    actual_idx = self.tasks.index(task)
+                    self.tasks[actual_idx].done = not self.tasks[actual_idx].done
+                    if self.tasks[actual_idx].done:
+                        self.tasks[actual_idx].completed_at = self._timestamp()
+                    else:
+                        self.tasks[actual_idx].completed_at = None
+        else:
+            # Single selection
+            idx = sel[0]
+            if idx < len(display_tasks):
+                task = display_tasks[idx]
+                actual_idx = self.tasks.index(task)
+                self.tasks[actual_idx].done = not self.tasks[actual_idx].done
+                if self.tasks[actual_idx].done:
+                    self.tasks[actual_idx].completed_at = self._timestamp()
+                else:
+                    self.tasks[actual_idx].completed_at = None
+        
+        self._refresh_all()
+        self.task_list.selection_set(sel)
+        self._set_status(f"Toggled {len(sel)} task(s) completion.")
+        if self.auto_save_enabled:
+            self.save_state()
 
     def delete_selected_task(self):
-        idx = self._selected_task_index()
-        if idx is None:
+        sel = self.task_list.curselection()
+        if not sel:
             return
             
-        display_tasks = self.tasks
-        search_term = self.search_var.get().lower().strip()
-        if search_term:
-            display_tasks = [t for t in display_tasks if search_term in t.text.lower() or 
-                            search_term in t.description.lower() or
-                            any(search_term in tag for tag in t.tags)]
-        if self.tag_filter:
-            display_tasks = [t for t in display_tasks if self.tag_filter in t.tags]
-            
-        if self.sort_order == "priority":
-            display_tasks = sorted(display_tasks, key=lambda t: (-t.priority, t.created_at), reverse=True)
-        elif self.sort_order == "created":
-            display_tasks = sorted(display_tasks, key=lambda t: t.created_at, reverse=True)
-        elif self.sort_order == "completed":
-            display_tasks = sorted(display_tasks, key=lambda t: (not t.done, t.completed_at or "9999"), reverse=True)
-            
-        if idx < len(display_tasks):
-            task = display_tasks[idx]
-            actual_idx = self.tasks.index(task)
-            del self.tasks[actual_idx]
-            self._refresh_all()
-            self._set_status("Task deleted.")
-            if self.auto_save_enabled:
-                self.save_state()
+        display_tasks = self._get_display_tasks()
+        
+        # Process in reverse order to maintain indices
+        deleted_count = 0
+        for idx in reversed(sel):
+            if idx < len(display_tasks):
+                task = display_tasks[idx]
+                actual_idx = self.tasks.index(task)
+                del self.tasks[actual_idx]
+                deleted_count += 1
+        
+        self._refresh_all()
+        self._set_status(f"Deleted {deleted_count} task(s).")
+        if self.auto_save_enabled:
+            self.save_state()
 
     def promote_selected_task(self):
-        idx = self._selected_task_index()
-        if idx is None:
+        sel = self.task_list.curselection()
+        if not sel or len(sel) > 1:  # Only allow promoting one task at a time
             return
             
-        display_tasks = self.tasks
-        search_term = self.search_var.get().lower().strip()
-        if search_term:
-            display_tasks = [t for t in display_tasks if search_term in t.text.lower() or 
-                            search_term in t.description.lower() or
-                            any(search_term in tag for tag in t.tags)]
-        if self.tag_filter:
-            display_tasks = [t for t in display_tasks if self.tag_filter in t.tags]
-            
-        if self.sort_order == "priority":
-            display_tasks = sorted(display_tasks, key=lambda t: (-t.priority, t.created_at), reverse=True)
-        elif self.sort_order == "created":
-            display_tasks = sorted(display_tasks, key=lambda t: t.created_at, reverse=True)
-        elif self.sort_order == "completed":
-            display_tasks = sorted(display_tasks, key=lambda t: (not t.done, t.completed_at or "9999"), reverse=True)
-            
+        idx = sel[0]
+        display_tasks = self._get_display_tasks()
+        
         if idx < len(display_tasks):
             task = display_tasks[idx]
             actual_idx = self.tasks.index(task)
@@ -798,91 +810,66 @@ class CognitiveOffloadApp(tk.Tk):
                 self.save_state()
 
     def toggle_high_priority(self):
-        idx = self._selected_task_index()
-        if idx is None:
+        sel = self.task_list.curselection()
+        if not sel:
             return
             
-        display_tasks = self.tasks
-        search_term = self.search_var.get().lower().strip()
-        if search_term:
-            display_tasks = [t for t in display_tasks if search_term in t.text.lower() or 
-                            search_term in t.description.lower() or
-                            any(search_term in tag for tag in t.tags)]
-        if self.tag_filter:
-            display_tasks = [t for t in display_tasks if self.tag_filter in t.tags]
-            
-        if self.sort_order == "priority":
-            display_tasks = sorted(display_tasks, key=lambda t: (-t.priority, t.created_at), reverse=True)
-        elif self.sort_order == "created":
-            display_tasks = sorted(display_tasks, key=lambda t: t.created_at, reverse=True)
-        elif self.sort_order == "completed":
-            display_tasks = sorted(display_tasks, key=lambda t: (not t.done, t.completed_at or "9999"), reverse=True)
-            
-        if idx < len(display_tasks):
-            task = display_tasks[idx]
-            actual_idx = self.tasks.index(task)
-            self.tasks[actual_idx].priority = 1 - self.tasks[actual_idx].priority
-            self._refresh_all()
-            self.task_list.selection_set(idx)
-            self._set_status("Toggled high priority.")
-            if self.auto_save_enabled:
-                self.save_state()
+        display_tasks = self._get_display_tasks()
+        
+        # Handle multiple selections
+        toggled_count = 0
+        for idx in sel:
+            if idx < len(display_tasks):
+                task = display_tasks[idx]
+                actual_idx = self.tasks.index(task)
+                self.tasks[actual_idx].priority = 1 - self.tasks[actual_idx].priority
+                toggled_count += 1
+        
+        self._refresh_all()
+        self.task_list.selection_set(sel)
+        self._set_status(f"Toggled high priority for {toggled_count} task(s).")
+        if self.auto_save_enabled:
+            self.save_state()
 
     def add_tag_to_task(self):
-        idx = self._selected_task_index()
-        if idx is None:
+        sel = self.task_list.curselection()
+        if not sel:
             return
             
-        display_tasks = self.tasks
-        search_term = self.search_var.get().lower().strip()
-        if search_term:
-            display_tasks = [t for t in display_tasks if search_term in t.text.lower() or 
-                            search_term in t.description.lower() or
-                            any(search_term in tag for tag in t.tags)]
-        if self.tag_filter:
-            display_tasks = [t for t in display_tasks if self.tag_filter in t.tags]
+        display_tasks = self._get_display_tasks()
+        
+        tag = simpledialog.askstring("Add Tag", "Enter tag name:")
+        if not tag:
+            return
             
-        if self.sort_order == "priority":
-            display_tasks = sorted(display_tasks, key=lambda t: (-t.priority, t.created_at), reverse=True)
-        elif self.sort_order == "created":
-            display_tasks = sorted(display_tasks, key=lambda t: t.created_at, reverse=True)
-        elif self.sort_order == "completed":
-            display_tasks = sorted(display_tasks, key=lambda t: (not t.done, t.completed_at or "9999"), reverse=True)
+        tag = tag.strip().lower()
+        if not tag:
+            return
             
-        if idx < len(display_tasks):
-            task = display_tasks[idx]
-            actual_idx = self.tasks.index(task)
-            tag = simpledialog.askstring("Add Tag", "Enter tag name:")
-            if tag:
-                tag = tag.strip().lower()
-                if tag and tag not in self.tasks[actual_idx].tags:
+        # Handle multiple selections
+        tagged_count = 0
+        for idx in sel:
+            if idx < len(display_tasks):
+                task = display_tasks[idx]
+                actual_idx = self.tasks.index(task)
+                if tag not in self.tasks[actual_idx].tags:
                     self.tasks[actual_idx].tags.append(tag)
-                    self._refresh_all()
-                    self._set_status(f"Added tag '{tag}' to task.")
-                    if self.auto_save_enabled:
-                        self.save_state()
+                    tagged_count += 1
+        
+        self._refresh_all()
+        self.task_list.selection_set(sel)
+        self._set_status(f"Added tag '{tag}' to {tagged_count} task(s).")
+        if self.auto_save_enabled:
+            self.save_state()
 
     def edit_task_details(self):
-        idx = self._selected_task_index()
-        if idx is None:
+        sel = self.task_list.curselection()
+        if not sel or len(sel) > 1:  # Only allow editing one task at a time
             return
             
-        display_tasks = self.tasks
-        search_term = self.search_var.get().lower().strip()
-        if search_term:
-            display_tasks = [t for t in display_tasks if search_term in t.text.lower() or 
-                            search_term in t.description.lower() or
-                            any(search_term in tag for tag in t.tags)]
-        if self.tag_filter:
-            display_tasks = [t for t in display_tasks if self.tag_filter in t.tags]
-            
-        if self.sort_order == "priority":
-            display_tasks = sorted(display_tasks, key=lambda t: (-t.priority, t.created_at), reverse=True)
-        elif self.sort_order == "created":
-            display_tasks = sorted(display_tasks, key=lambda t: t.created_at, reverse=True)
-        elif self.sort_order == "completed":
-            display_tasks = sorted(display_tasks, key=lambda t: (not t.done, t.completed_at or "9999"), reverse=True)
-            
+        idx = sel[0]
+        display_tasks = self._get_display_tasks()
+        
         if idx < len(display_tasks):
             task = display_tasks[idx]
             actual_idx = self.tasks.index(task)
@@ -927,55 +914,22 @@ class CognitiveOffloadApp(tk.Tk):
             dialog.geometry(f"+{x}+{y}")
 
     def move_to_matrix(self):
-        idx = self._selected_task_index()
-        if idx is None:
+        sel = self.task_list.curselection()
+        if not sel or len(sel) > 1:  # Only allow moving one task at a time with this method
             return
             
-        display_tasks = self.tasks
-        search_term = self.search_var.get().lower().strip()
-        if search_term:
-            display_tasks = [t for t in display_tasks if search_term in t.text.lower() or 
-                            search_term in t.description.lower() or
-                            any(search_term in tag for tag in t.tags)]
-        if self.tag_filter:
-            display_tasks = [t for t in display_tasks if self.tag_filter in t.tags]
-            
-        if self.sort_order == "priority":
-            display_tasks = sorted(display_tasks, key=lambda t: (-t.priority, t.created_at), reverse=True)
-        elif self.sort_order == "created":
-            display_tasks = sorted(display_tasks, key=lambda t: t.created_at, reverse=True)
-        elif self.sort_order == "completed":
-            display_tasks = sorted(display_tasks, key=lambda t: (not t.done, t.completed_at or "9999"), reverse=True)
-            
+        idx = sel[0]
+        display_tasks = self._get_display_tasks()
+        
         if idx < len(display_tasks):
             task = display_tasks[idx]
             actual_idx = self.tasks.index(task)
             
-            dialog = tk.Toplevel(self)
-            dialog.title("Move to Matrix")
-            dialog.geometry("300x180")
-            dialog.transient(self)
-            dialog.grab_set()
+            dialog = MatrixSelectionDialog(self)
+            self.wait_window(dialog.window)
             
-            ttk.Label(dialog, text="Select Matrix Quadrant:", font=("Helvetica", 10, "bold")).pack(pady=10)
-            
-            frame = ttk.Frame(dialog)
-            frame.pack(fill="x", padx=20)
-            
-            quadrants = [
-                ("Do First (Urgent/Important)", "do_first"),
-                ("Schedule (Not Urgent/Important)", "schedule"),
-                ("Delegate (Urgent/Not Important)", "delegate"),
-                ("Eliminate (Not Urgent/Not Important)", "eliminate")
-            ]
-            
-            selected_quadrant = tk.StringVar(value="do_first")
-            
-            for text, value in quadrants:
-                ttk.Radiobutton(frame, text=text, variable=selected_quadrant, value=value).pack(anchor="w", pady=2)
-            
-            def move_task():
-                quadrant = selected_quadrant.get()
+            if dialog.result:
+                quadrant = dialog.result
                 title = self.tasks[actual_idx].text
                 content = self.tasks[actual_idx].description or ""
                 
@@ -997,15 +951,66 @@ class CognitiveOffloadApp(tk.Tk):
                 del self.tasks[actual_idx]
                 self._refresh_all()
                 self.refresh_matrix_task_list()
-                dialog.destroy()
                 self._set_status(f"Task moved to {quadrant.replace('_', ' ').title()} quadrant.")
                 # Switch to matrix tab to show the moved task
                 self.notebook.select(1)
+
+    def move_selected_tasks_to_matrix(self):
+        """Move multiple selected tasks to matrix"""
+        sel = self.task_list.curselection()
+        if not sel:
+            messagebox.showwarning("No Selection", "Please select tasks to move")
+            return
+        
+        # Get actual task indices (accounting for sorting/filtering)
+        display_tasks = self._get_display_tasks()
+        selected_tasks = []
+        
+        for idx in sel:
+            if idx < len(display_tasks):
+                task = display_tasks[idx]
+                actual_idx = self.tasks.index(task)
+                selected_tasks.append((actual_idx, task))
+        
+        # Show matrix selection dialog
+        dialog = MatrixSelectionDialog(self, multiple=True, title="Select Matrix Quadrant for Batch Move")
+        self.wait_window(dialog.window)
+        
+        if dialog.result:
+            quadrant = dialog.result
+            moved_count = 0
             
-            button_frame = ttk.Frame(dialog)
-            button_frame.pack(pady=15)
-            ttk.Button(button_frame, text="Move Task", command=move_task).pack(side="left", padx=5)
-            ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(side="left", padx=5)
+            # Move tasks in reverse order to maintain indices
+            for actual_idx, task in sorted(selected_tasks, key=lambda x: x[0], reverse=True):
+                title = self.tasks[actual_idx].text
+                content = self.tasks[actual_idx].description or ""
+                
+                filename = f"{self.sanitize_filename(title)}.task"
+                filepath = self.get_category_path(quadrant) / filename
+                
+                # Handle duplicates
+                counter = 1
+                base_name = title
+                while filepath.exists():
+                    title = f"{base_name}_{counter}"
+                    filename = f"{self.sanitize_filename(title)}.task"
+                    filepath = self.get_category_path(quadrant) / filename
+                    counter += 1
+                
+                # Save to matrix
+                task_data = {"title": title, "content": content}
+                with open(filepath, "w") as f:
+                    json.dump(task_data, f)
+                
+                # Remove from main list
+                del self.tasks[actual_idx]
+                moved_count += 1
+            
+            self._refresh_all()
+            self.refresh_matrix_task_list()
+            self._set_status(f"Moved {moved_count} tasks to {quadrant.replace('_', ' ').title()}")
+            # Switch to matrix tab to show the moved tasks
+            self.notebook.select(1)
 
     def apply_tag_filter(self, event=None):
         self.tag_filter = self.tag_filter_var.get()
