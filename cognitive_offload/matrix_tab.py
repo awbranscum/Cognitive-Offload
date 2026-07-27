@@ -14,8 +14,7 @@ from .widgets import RowList
 # happens, and booking a time is what turns it into something the brain will
 # actually respond to.
 QUADRANT_ADVICE = {
-    "do_first": "Crises and real deadlines. Do these now — then notice how many "
-                "of them started life in Schedule.",
+    "do_first": "Crises and real deadlines. Do these now.",
     "schedule": "The quadrant that decides how your year goes: goals, health, "
                 "relationships, the slow important things. They have no deadline to "
                 "make you start, so give them one — book a time on each.",

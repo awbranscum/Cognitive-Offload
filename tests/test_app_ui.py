@@ -57,6 +57,25 @@ class AppSmokeTests(unittest.TestCase):
     def visible_texts(self):
         return [self.app.task_list.get(i) for i in range(self.app.task_list.size())]
 
+    def answer_session_end(self, choice):
+        """Answer the end-of-session dialog without opening a real window."""
+        patcher = mock.patch("cognitive_offload.app.SessionEndDialog")
+        dialog = patcher.start()
+        dialog.return_value.show.return_value = choice
+        self.addCleanup(patcher.stop)
+        return mock.patch("cognitive_offload.app.messagebox.askyesno", return_value=False)
+
+    def run_session(self, minutes=15, first_step="", choice="carry_on"):
+        """Start a focus session on the selection and run it to expiry."""
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": minutes, "first_step": first_step, "warmup_done": 0,
+            }
+            self.app.focus_on_selected()
+        self.app._timer_deadline -= 10_000
+        with self.answer_session_end(choice):
+            self.app._tick_timer()
+
     # -- tests ---------------------------------------------------------
     def test_starts_empty(self):
         self.assertEqual(self.app.tasks, [])
@@ -297,7 +316,7 @@ class AppSmokeTests(unittest.TestCase):
 
         # Jump the clock to the end instead of waiting fifteen minutes.
         self.app._timer_deadline = self.app._timer_deadline - 10_000
-        with mock.patch("cognitive_offload.app.messagebox.askyesno", return_value=False):
+        with self.answer_session_end("carry_on"):
             self.app._tick_timer()
 
         self.assertFalse(self.app._timer_running)
@@ -315,7 +334,7 @@ class AppSmokeTests(unittest.TestCase):
             }
             self.app.focus_on_selected()
         self.app._timer_deadline -= 10_000
-        with mock.patch("cognitive_offload.app.messagebox.askyesno", return_value=True):
+        with self.answer_session_end("break"):
             self.app._tick_timer()  # finishes focus, starts the break
 
         self.assertTrue(self.app._timer_running)
@@ -558,11 +577,175 @@ class AppSmokeTests(unittest.TestCase):
             self.app.focus_on_selected()
         self.app._timer_deadline -= 300  # five minutes in
         self.app._tick_timer()
-        with mock.patch("cognitive_offload.app.messagebox.askyesno", return_value=False):
+        with self.answer_session_end("carry_on"):
             self.app.finish_session_early()
         self.assertEqual(self.app.session_log.count_today(), 1)
         self.assertEqual(self.app.session_log.sessions[0].minutes, 5)
         self.assertFalse(self.app._timer_running)
+
+    # -- regressions found by the audit --------------------------------
+    def test_done_early_after_a_finished_session_banks_nothing_extra(self):
+        """The one place that could invent minutes the user had not earned."""
+        self.capture("deep work")
+        self.select(0)
+        self.run_session(minutes=15)
+        self.assertEqual(self.app.session_log.count_today(), 1)
+        self.assertEqual(self.app.session_log.minutes_today(), 15)
+
+        self.app.open_focus_window()
+        with self.answer_session_end("carry_on"):
+            self.app._focus_window._done()
+        self.assertEqual(self.app.session_log.count_today(), 1)
+        self.assertEqual(self.app.session_log.minutes_today(), 15)
+
+    def test_done_early_after_a_break_logs_nothing(self):
+        self.capture("something")
+        self.select(0)
+        self.run_session(minutes=15, choice="break")
+        self.assertEqual(self.app._timer_mode, "break")
+        self.app._timer_deadline -= 10_000
+        with mock.patch("cognitive_offload.app.messagebox.askyesno", return_value=False):
+            self.app._tick_timer()  # break expires
+        before = self.app.session_log.count_today()
+        self.app.finish_session_early()
+        self.assertEqual(self.app.session_log.count_today(), before)
+
+    def test_pausing_updates_the_pop_out_button(self):
+        self.app.start_timer(minutes=10)
+        self.app.open_focus_window()
+        self.assertEqual(self.app._focus_window.pause_button.cget("text"), "Pause")
+        self.app.pause_timer()
+        self.assertEqual(self.app._focus_window.pause_button.cget("text"), "Resume")
+
+    def test_switching_theme_keeps_the_pop_out_alive(self):
+        self.app.start_timer(minutes=10)
+        self.app.open_focus_window()
+        window = self.app._focus_window
+        self.app.toggle_theme()
+        self.assertIs(self.app._focus_window, window)
+        self.assertTrue(window.winfo_exists())
+        self.assertTrue(self.app._timer_running)
+        self.app.pause_timer()
+
+    def test_reset_clears_the_focus_task(self):
+        self.capture("a task")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "", "warmup_done": 0}
+            self.app.focus_on_selected()
+        self.assertIsNotNone(self.app._focus_task_id)
+        self.app.reset_timer()
+        self.assertIsNone(self.app._focus_task_id)
+        self.assertEqual(self.app.focus_task_var.get(), "Nothing picked yet")
+
+    def test_starting_a_second_session_asks_before_dropping_the_first(self):
+        self.capture("first")
+        self.capture("second")
+        self.select(1)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "", "warmup_done": 0}
+            self.app.focus_on_selected()
+        running_id = self.app._focus_task_id
+
+        self.select(0)
+        with mock.patch("cognitive_offload.app.messagebox.askyesno", return_value=False) as ask, \
+             mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            self.app.focus_on_selected()
+            ask.assert_called_once()
+            starter.assert_not_called()
+        self.assertEqual(self.app._focus_task_id, running_id)
+        self.assertTrue(self.app._timer_running)
+        self.app.pause_timer()
+
+    def test_momentum_hover_restores_the_previous_status(self):
+        self.app.set_status("Deleted 3 task(s).")
+        self.app.on_momentum_hover("2026-07-27: 2 sessions")
+        self.assertIn("2 sessions", self.app.status_var.get())
+        self.app.on_momentum_hover("")
+        self.assertEqual(self.app.status_var.get(), "Deleted 3 task(s).")
+
+    def test_selection_set_clamps_and_accepts_end(self):
+        for text in ("one", "two"):
+            self.capture(text)
+        self.app.task_list.selection_set(99)
+        self.assertEqual(self.app.task_list.curselection(), (1,))
+        self.app.task_list.selection_clear()
+        self.app.task_list.selection_set(tk.END)
+        self.assertEqual(self.app.task_list.curselection(), (1,))
+        self.app.task_list.selection_clear()
+        self.app.task_list.selection_set(-5)
+        self.assertEqual(self.app.task_list.curselection(), (0,))
+
+    def test_selection_set_on_an_empty_list_is_a_no_op(self):
+        self.app.task_list.selection_set(0)
+        self.assertEqual(self.app.task_list.curselection(), ())
+
+    def test_space_in_a_matrix_quadrant_does_nothing(self):
+        self.app.matrix.create("do_first", "a matrix task", "")
+        self.app.refresh_matrix()
+        listing = self.app.matrix_lists["do_first"]
+        listing.selection_set(0)
+        with mock.patch("cognitive_offload.app.TaskEditorDialog") as dialog:
+            listing._activate_toggle()
+            dialog.assert_not_called()
+
+    def test_calm_mode_clears_the_filters_it_hides(self):
+        self.capture("findable")
+        self.capture("other")
+        self.app.search_var.set("findable")
+        self.app.refresh_tasks()
+        self.assertEqual(self.app.task_list.size(), 1)
+
+        self.app.calm_var.set(True)
+        self.app.apply_calm_mode()
+        self.assertEqual(self.app.search_var.get(), "")
+        self.assertEqual(self.app.task_list.size(), 2)
+
+    def test_ctrl_f_leaves_calm_mode_so_the_search_box_is_there(self):
+        self.app.calm_var.set(True)
+        self.app.apply_calm_mode()
+        self.app.focus_search()
+        self.assertFalse(self.app.calm_var.get())
+        self.assertEqual(self.app.search_row.winfo_manager(), "grid")
+
+    def test_done_is_reachable_in_calm_mode(self):
+        self.capture("finish me")
+        self.app.calm_var.set(True)
+        self.app.apply_calm_mode()
+        self.select(0)
+        self.app.toggle_selected_done()  # the button lives outside the hidden toolbar
+        self.assertTrue(self.app.tasks[0].done)
+
+    # -- what got done today -------------------------------------------
+    def test_done_today_appears_only_once_there_is_something_to_show(self):
+        self.capture("a thing")
+        self.assertEqual(self.app.today_var.get(), "")
+        self.select(0)
+        self.app.toggle_selected_done()
+        self.assertIn("1 done today", self.app.today_var.get())
+
+    def test_finishing_a_session_can_close_the_task(self):
+        self.capture("the whole job")
+        self.select(0)
+        self.run_session(minutes=15, choice="done")
+        self.assertTrue(self.app.tasks[0].done)
+        self.assertIn("1 done today", self.app.today_var.get())
+        self.app.undo()  # and it is undoable like every other mutation
+        self.assertFalse(self.app.tasks[0].done)
+
+    def test_finishing_a_session_can_leave_the_task_open(self):
+        self.capture("more to do")
+        self.select(0)
+        self.run_session(minutes=15, choice="carry_on")
+        self.assertFalse(self.app.tasks[0].done)
+
+    def test_finish_time_is_shown_while_running_and_cleared_when_not(self):
+        self.app.start_timer(minutes=10)
+        self.assertRegex(self.app.finish_var.get(), r"^ends \d{2}:\d{2}$")
+        self.app.pause_timer()
+        self.assertEqual(self.app.finish_var.get(), "")
 
     def test_dirty_flag_tracks_edits_and_saves(self):
         self.assertFalse(self.app._dirty)

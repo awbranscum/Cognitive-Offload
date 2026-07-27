@@ -124,7 +124,9 @@ def _build_focus_card(app, top: ttk.Frame) -> None:
     app.timer_label.pack(fill="x")
 
     app.timer_progress = ttk.Progressbar(body, mode="determinate", maximum=1000)
-    app.timer_progress.pack(fill="x", pady=(2, 12))
+    app.timer_progress.pack(fill="x", pady=(2, 2))
+    ttk.Label(body, textvariable=app.finish_var, style="CardMuted.TLabel",
+              anchor="center").pack(fill="x", pady=(0, 10))
 
     controls = ttk.Frame(body, style="Card.TFrame")
     controls.pack(fill="x")
@@ -165,6 +167,11 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
     heading.grid(row=0, column=0, sticky="ew")
     ttk.Label(heading, text="Active stack", style="CardTitle.TLabel").pack(side="left")
     ttk.Label(heading, textvariable=app.counts_var, style="CardMuted.TLabel").pack(side="right")
+    # Sits by the counts rather than in the button row, which runs out of width.
+    app.today_label = ttk.Label(heading, textvariable=app.today_var, style="CardMuted.TLabel",
+                                cursor="hand2")
+    app.today_label.pack(side="right", padx=(0, 12))
+    app.today_label.bind("<Button-1>", lambda _e: app.show_today())
 
     # The way in when the list itself is the thing you cannot face.
     start_row = ttk.Frame(inner, style="Card.TFrame")
@@ -173,6 +180,10 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
                command=app.start_here).pack(side="left")
     ttk.Button(start_row, text="Focus on selected", style="Outline.TButton",
                command=app.focus_on_selected).pack(side="left", padx=(6, 0))
+    # Done lives here, not in the toolbar: Calm mode hides the toolbar, and
+    # hiding the primary verb while keeping Save/Open/Export is backwards.
+    ttk.Button(start_row, text="Done", style="Outline.TButton",
+               command=app.toggle_selected_done).pack(side="left", padx=(6, 0))
     app.due_label = ttk.Label(start_row, textvariable=app.due_var, style="CardMuted.TLabel",
                               cursor="hand2")
     app.due_label.pack(side="left", padx=(12, 0))
@@ -184,7 +195,7 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
     app.search_entry = ttk.Entry(search_row, textvariable=app.search_var)
     app.search_entry.grid(row=0, column=0, sticky="ew")
     app.search_entry.bind("<KeyRelease>", lambda _e: app.refresh_tasks())
-    app.search_entry.bind("<Escape>", lambda _e: app.clear_search())
+    app.search_entry.bind("<Escape>", lambda _e: app.clear_search() or "break")
     ttk.Button(search_row, text="Clear", style="SmGhost.TButton",
                command=app.clear_search).grid(row=0, column=1, padx=(6, 0))
     app.search_row = search_row
@@ -228,22 +239,19 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
     for column in range(4):
         toolbar.columnconfigure(column, weight=1, uniform="tools")
     rows = [
-        [("Done", app.toggle_selected_done, "SmOutline.TButton"),
-         ("Priority", app.toggle_selected_priority, "SmOutline.TButton"),
+        [("Priority", app.toggle_selected_priority, "SmOutline.TButton"),
          ("Tag", app.tag_selected, "SmOutline.TButton"),
-         ("Edit", app.edit_selected_details, "SmOutline.TButton")],
-        [("Move to top", app.promote_selected, "SmGhost.TButton"),
-         ("To matrix", app.send_selected_to_matrix, "SmGhost.TButton"),
-         ("Delete", app.delete_selected, "SmDestructive.TButton")],
+         ("Edit", app.edit_selected_details, "SmOutline.TButton"),
+         ("Move to top", app.promote_selected, "SmGhost.TButton")],
+        [("To matrix", app.send_selected_to_matrix, "SmGhost.TButton"),
+         ("Delete", app.delete_selected, "SmDestructive.TButton"),
+         ("Clear completed", app.clear_completed, "SmGhost.TButton")],
     ]
     for row_index, row in enumerate(rows):
         for column, (label, command, style) in enumerate(row):
             ttk.Button(toolbar, text=label, style=style, command=command).grid(
                 row=row_index, column=column, sticky="ew", padx=(0, 4), pady=(0, 4))
     app.task_toolbar = toolbar
-
-    ttk.Button(inner, text="Clear completed", style="SmGhost.TButton",
-               command=app.clear_completed).grid(row=6, column=0, sticky="w", pady=(6, 0))
 
 
 def _build_scratchpad_card(app, body: ttk.Frame) -> None:

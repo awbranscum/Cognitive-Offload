@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import math
 import time
 import tkinter as tk
@@ -11,6 +12,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 from . import APP_TITLE, __version__
 from .dialogs import (
     QuadrantDialog,
+    SessionEndDialog,
     ShortcutsDialog,
     StartFocusDialog,
     StartHereDialog,
@@ -25,6 +27,7 @@ from .queries import (
     SORT_ORDERS,
     all_tags,
     counts,
+    done_today,
     due_tasks,
     split_lines,
     visible_tasks,
@@ -75,6 +78,7 @@ class CognitiveOffloadApp(tk.Tk):
         self._autosave_blocked = False
         self._suppress_scratch_event = False
         self._status_token = 0
+        self._status_before_hover: str | None = None
         self._autosave_job = None
         self._timer_job = None
         self._timer_running = False
@@ -97,6 +101,8 @@ class CognitiveOffloadApp(tk.Tk):
         self.focus_task_var = tk.StringVar(value="Nothing picked yet")
         self.momentum_var = tk.StringVar(value="")
         self.due_var = tk.StringVar(value="")
+        self.today_var = tk.StringVar(value="")
+        self.finish_var = tk.StringVar(value="")
         self.path_var = tk.StringVar(value="")
         self.matrix_path_var = tk.StringVar(value="")
         self.calm_var = tk.BooleanVar(value=self.config_store.calm_mode)
@@ -193,6 +199,15 @@ class CognitiveOffloadApp(tk.Tk):
         self.status_var.set(message)
         self.after(6000, lambda: self._clear_status(token))
 
+    def hold_status(self, message: str) -> None:
+        """Contextual text that should stay put, not a transient message.
+
+        Bumping the token stops an in-flight clear from an earlier
+        ``set_status`` matching and wiping it six seconds later.
+        """
+        self._status_token += 1
+        self.status_var.set(message)
+
     def _clear_status(self, token: int) -> None:
         if token == self._status_token:
             self.status_var.set("Ready.")
@@ -212,8 +227,6 @@ class CognitiveOffloadApp(tk.Tk):
         self.set_status(f"Copied path: {self.state_store.path}")
 
     def refresh_tasks(self, keep_selection: bool = True) -> None:
-        selected_ids = {t.id for t in self.selected_tasks()} if keep_selection else set()
-
         self._refresh_tag_choices()
         self._visible = visible_tasks(
             self.tasks,
@@ -224,11 +237,11 @@ class CognitiveOffloadApp(tk.Tk):
             kind=self._active_kind(),
         )
 
-        self.task_list.set_rows([_task_row(t) for t in self._visible], keep_selection=False)
-        if selected_ids:
-            for index, task in enumerate(self._visible):
-                if task.id in selected_ids:
-                    self.task_list.selection_set(index)
+        # set_rows already restores the selection by row id, which is the same
+        # matching this used to do by hand - once per selected row, each time
+        # repainting every row.
+        self.task_list.set_rows([_task_row(t) for t in self._visible],
+                                keep_selection=keep_selection)
 
         open_count, done_count, flagged = counts(self.tasks)
         hidden = len(self.tasks) - len(self._visible)
@@ -238,6 +251,10 @@ class CognitiveOffloadApp(tk.Tk):
         if hidden > 0:
             summary += f" · {hidden} hidden"
         self.counts_var.set(summary)
+        finished = len(done_today(self.tasks))
+        # Only ever shown when there is something to show: "0 done today" is
+        # the kind of scoreboard this app is meant not to keep.
+        self.today_var.set(f"{finished} done today →" if finished else "")
         self.refresh_due()
 
     def _refresh_tag_choices(self) -> None:
@@ -270,6 +287,10 @@ class CognitiveOffloadApp(tk.Tk):
 
     def focus_search(self) -> None:
         self.notebook.select(0)
+        if self.calm_var.get():
+            # Searching needs the search box back; asking for it is consent.
+            self.calm_var.set(False)
+            self.apply_calm_mode()
         self.search_entry.focus_set()
         self.search_entry.select_range(0, tk.END)
 
@@ -303,9 +324,9 @@ class CognitiveOffloadApp(tk.Tk):
             if task.description.strip():
                 first_line = task.description.strip().splitlines()[0]
                 details += f"  ·  {first_line[:60]}"
-            self.status_var.set(details[:160])
+            self.hold_status(details[:160])
         elif len(tasks) > 1:
-            self.status_var.set(f"{len(tasks)} tasks selected.")
+            self.hold_status(f"{len(tasks)} tasks selected.")
 
     # ------------------------------------------------------------------
     # undo
@@ -718,7 +739,7 @@ class CognitiveOffloadApp(tk.Tk):
         self.refresh_matrix()
         self.refresh_momentum()
         if self._focus_window is not None:
-            self._focus_window.close()
+            self._focus_window.restyle()
         self.set_status(f"{name.title()} theme.")
 
     def _themable_frames(self) -> list:
@@ -743,11 +764,18 @@ class CognitiveOffloadApp(tk.Tk):
         """
         calm = bool(self.calm_var.get())
         self.config_store.calm_mode = calm
+        if calm:
+            # Never hide a control that is still filtering the list: a shorter
+            # list with no visible reason why is worse than the clutter.
+            self.search_var.set("")
+            self.tag_filter_var.set(ALL_TAGS)
+            self.kind_filter_var.set(ALL_KINDS)
         for widget in (self.filter_row, self.task_toolbar, self.header_extras, self.search_row):
             if calm:
                 widget.grid_remove()
             else:
                 widget.grid()
+        self.refresh_tasks()
         self.set_status("Calm mode on — the extras are hidden, not gone." if calm
                         else "Calm mode off.")
 
@@ -775,6 +803,20 @@ class CognitiveOffloadApp(tk.Tk):
 
     def begin_focus(self, task: Task | None) -> None:
         """Warm-up ladder, then run the session."""
+        if self._timer_running and self._timer_mode == "focus":
+            # Losing track that a block is already running is the exact failure
+            # mode this app exists for, so say so instead of silently
+            # mis-crediting the log.
+            current = self._focus_task()
+            name = f'"{current.text}"' if current else "the current block"
+            if not messagebox.askyesno(
+                "A session is already running",
+                f"You are {self._timer_remaining // 60} minutes into {name}.\n\n"
+                "Drop it and start a new one?",
+            ):
+                return
+            self._stop_ticking()
+            self._timer_remaining = self._timer_total
         result = StartFocusDialog(
             self,
             task_text=task.text if task else "",
@@ -835,6 +877,30 @@ class CognitiveOffloadApp(tk.Tk):
         )
         self._sync_focus_window()
 
+    @contextlib.contextmanager
+    def _ask_over_focus(self):
+        """Ask where the user is actually looking.
+
+        Drops the pop-out's always-on-top for the duration of a dialog, so the
+        question cannot end up hidden behind it.
+        """
+        window = self._focus_window
+        lowered = False
+        if window is not None:
+            try:
+                window.attributes("-topmost", False)
+                lowered = True
+            except tk.TclError:
+                pass
+        try:
+            yield
+        finally:
+            if lowered and self._focus_window is window:
+                try:
+                    window.attributes("-topmost", True)
+                except tk.TclError:
+                    pass
+
     def _forget_focus_window(self) -> None:
         self._focus_window = None
 
@@ -846,7 +912,8 @@ class CognitiveOffloadApp(tk.Tk):
         elapsed = max(0, self._timer_total - self._timer_remaining)
         try:
             self._focus_window.update_session(
-                task.text if task else ("Break" if self._timer_mode == "break" else ""),
+                "Break — step away" if self._timer_mode == "break"
+                else (task.text if task else ""),
                 task.first_step if task and self._timer_mode == "focus" else "",
                 f"{minutes:02d}:{seconds:02d}",
                 elapsed / self._timer_total if self._timer_total else 0,
@@ -857,7 +924,11 @@ class CognitiveOffloadApp(tk.Tk):
 
     def finish_session_early(self) -> None:
         """Stop now and keep the minutes you actually did."""
-        if not self._timer_running and self._timer_remaining >= self._timer_total:
+        if not self._timer_running and (
+            self._timer_remaining <= 0 or self._timer_remaining >= self._timer_total
+        ):
+            # Nothing left to bank: the block either already logged itself on
+            # expiry, or never started. Logging here would invent minutes.
             return
         elapsed = max(1, round((self._timer_total - self._timer_remaining) / 60))
         self._stop_ticking()
@@ -875,8 +946,14 @@ class CognitiveOffloadApp(tk.Tk):
         self.momentum_var.set(self.session_log.summary())
 
     def on_momentum_hover(self, text: str) -> None:
+        """Show the day under the pointer, and restore the status line after."""
         if text:
-            self.status_var.set(text)
+            if self._status_before_hover is None:
+                self._status_before_hover = self.status_var.get()
+            self.hold_status(text)
+        elif self._status_before_hover is not None:
+            self.hold_status(self._status_before_hover)
+            self._status_before_hover = None
 
     def _finish_session(self, minutes: int) -> None:
         """Log a completed focus block and offer the break."""
@@ -889,13 +966,26 @@ class CognitiveOffloadApp(tk.Tk):
         self.set_status(message)
         self.bell()
 
-        take_break = messagebox.askyesno(
-            "Session finished",
-            f"{message}\n\nTake a {self.config_store.break_minutes}-minute break now?",
-        )
-        if take_break:
+        with self._ask_over_focus():
+            if task is not None:
+                choice = SessionEndDialog(self, message, task.text,
+                                          self.config_store.break_minutes).show()
+            else:
+                choice = "break" if messagebox.askyesno(
+                    "Session finished",
+                    f"{message}\n\nTake a {self.config_store.break_minutes}-minute break now?",
+                ) else "carry_on"
+
+        if choice == "done" and task is not None:
+            self.push_undo("finish task")
+            task.set_done(True)
+            self.refresh_tasks()
+            self.mark_dirty()
+            self.set_status(f"{minutes} min, and it's finished. Nice.")
+            self._focus_task_id = None
+        if choice in ("break", "done_break"):
             self.start_timer(minutes=self.config_store.break_minutes, mode="break")
-        else:
+        elif choice != "done":
             self.focus_task_var.set(
                 f"{minutes} min logged. Another round when you're ready."
             )
@@ -905,7 +995,10 @@ class CognitiveOffloadApp(tk.Tk):
         self.set_status("Break finished.")
         self.bell()
         task = self._focus_task()
-        if messagebox.askyesno("Break over", "Start another focus session?"):
+        self._focus_task_id = None  # the block it belonged to is over
+        with self._ask_over_focus():
+            again = messagebox.askyesno("Break over", "Start another focus session?")
+        if again:
             self.begin_focus(task)
 
     # ------------------------------------------------------------------
@@ -919,6 +1012,24 @@ class CognitiveOffloadApp(tk.Tk):
             self.due_var.set(f"{total} booked for today →")
         else:
             self.due_var.set("")
+
+    def show_today(self) -> None:
+        """What you actually finished today, plus the minutes you focused."""
+        finished = done_today(self.tasks)
+        if not finished:
+            return
+        lines = [f"·  {t.text}" for t in finished]
+        minutes = self.session_log.minutes_today()
+        sessions = self.session_log.count_today()
+        footer = ""
+        if sessions:
+            footer = (f"\n\nPlus {sessions} focus session"
+                      f"{'s' if sessions != 1 else ''} — {minutes} minutes.")
+        with self._ask_over_focus():
+            messagebox.showinfo(
+                "Today",
+                "Finished today:\n\n" + "\n".join(lines) + footer,
+            )
 
     def show_booked(self) -> None:
         due = due_tasks(self.tasks)
@@ -1002,6 +1113,7 @@ class CognitiveOffloadApp(tk.Tk):
         self._timer_remaining = max(0, int(round(self._timer_deadline - time.monotonic())))
         self._stop_ticking()
         self.timer_button.config(text="Resume")
+        self._update_timer_label()  # also syncs the pop-out's button and clock
         # Pausing is not failing; say so plainly.
         self.set_status("Paused. Pick it up whenever.")
 
@@ -1012,6 +1124,8 @@ class CognitiveOffloadApp(tk.Tk):
 
     def reset_timer(self) -> None:
         self._stop_ticking()
+        self._focus_task_id = None
+        self.focus_task_var.set("Nothing picked yet")
         self._timer_mode = "focus"
         self._timer_total = self._minutes() * 60
         self._timer_remaining = self._timer_total
@@ -1065,6 +1179,14 @@ class CognitiveOffloadApp(tk.Tk):
     def _update_timer_label(self) -> None:
         minutes, seconds = divmod(max(0, self._timer_remaining), 60)
         self.timer_label.config(text=f"{minutes:02d}:{seconds:02d}")
+        # "ends 15:42" is anchorable in a way "22:00 left" is not, which is the
+        # whole difficulty with time blindness.
+        if self._timer_running and self._timer_remaining > 0:
+            ends = time.localtime(time.time() + self._timer_remaining)
+            self.finish_var.set(("break ends " if self._timer_mode == "break" else "ends ")
+                                + time.strftime("%H:%M", ends))
+        else:
+            self.finish_var.set("")
         # A visible bar of time left is easier to feel than digits alone.
         elapsed = max(0, self._timer_total - self._timer_remaining)
         fraction = elapsed / self._timer_total if self._timer_total else 0

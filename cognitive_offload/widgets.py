@@ -18,6 +18,13 @@ from . import theme
 from .theme import RADIUS_PILL, font, rounded_rect, tokens
 
 
+# Badge texts are a small closed set ("admin", "ready", "#work", dates), so
+# measuring each one once is enough. Building a Tcl font object per badge per
+# draw was the bulk of the cost of rendering a long list.
+_TEXT_WIDTHS: dict[tuple, int] = {}
+_FONTS: dict[tuple, object] = {}
+
+
 @dataclass
 class Badge:
     text: str
@@ -71,12 +78,21 @@ class BadgeStrip(tk.Canvas):
         self._draw()
 
     def _text_width(self, text: str) -> int:
+        key = (self._font, text)
+        cached = _TEXT_WIDTHS.get(key)
+        if cached is not None:
+            return cached
         from tkinter import font as tkfont
 
         try:
-            return tkfont.Font(font=self._font).measure(text)
+            measurer = _FONTS.get(self._font)
+            if measurer is None:
+                measurer = _FONTS[self._font] = tkfont.Font(root=self, font=self._font)
+            width = measurer.measure(text)
         except tk.TclError:
-            return 7 * len(text)
+            return 7 * len(text)  # no Tk available; good enough to lay out
+        _TEXT_WIDTHS[key] = width
+        return width
 
     def _draw(self) -> None:
         self.delete("all")
@@ -113,9 +129,10 @@ class RowList(ttk.Frame):
         self._empty_text = empty_text
         self._surface = surface  # None -> card colour
         self._rows: list[Row] = []
-        self._row_frames: list[tk.Frame] = []
+        self._pool: list[dict] = []
         self._selected: set[int] = set()
         self._anchor: int | None = None
+        self._row_tag = f"rowlist{id(self)}"
 
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
@@ -144,6 +161,9 @@ class RowList(ttk.Frame):
         self.canvas.bind("<Delete>", lambda _e: self._fire(self._on_delete))
         self.canvas.bind("<Button-1>", lambda _e: self.canvas.focus_set())
 
+        self._empty_label = tk.Label(self.inner, justify="left", anchor="w",
+                                     font=font(theme.SIZE_SM), padx=14, pady=16)
+        self._bind_row_events()
         self.restyle()
 
     # -- theming -------------------------------------------------------
@@ -159,6 +179,7 @@ class RowList(ttk.Frame):
         self.canvas.configure(background=self._bg(), highlightbackground=t.border,
                               highlightcolor=t.border)
         self.inner.configure(background=self._bg())
+        self._empty_label.configure(background=self._bg(), foreground=t.muted_foreground)
         self.render()
 
     # -- data ----------------------------------------------------------
@@ -171,94 +192,139 @@ class RowList(ttk.Frame):
         self.render()
 
     def render(self) -> None:
-        for frame in self._row_frames:
-            frame.destroy()
-        self._row_frames = []
-        t = tokens()
+        """Refill the pooled row widgets rather than rebuilding them.
+
+        Creating a Tk widget is expensive (~0.5ms), and a row is six of them.
+        Destroying and recreating the list on every keystroke of a search made
+        a 300-task list take about a second per letter, which punishes exactly
+        the user this app tells to capture everything.
+        """
+        self._empty_label.pack_forget()
+        for index, row in enumerate(self._rows):
+            self._apply_row(self._ensure_row(index), index, row)
+        for spare in self._pool[len(self._rows):]:
+            if spare["visible"]:
+                spare["frame"].pack_forget()
+                spare["separator"].pack_forget()
+                spare["visible"] = False
 
         if not self._rows:
-            empty = tk.Label(self.inner, text=self._empty_text, background=self._bg(),
-                             foreground=t.muted_foreground, font=font(theme.SIZE_SM),
-                             justify="left", anchor="w", padx=14, pady=16)
-            empty.pack(fill="x")
-            self._row_frames.append(empty)
+            self._empty_label.configure(text=self._empty_text, background=self._bg(),
+                                        foreground=tokens().muted_foreground)
+            self._empty_label.pack(fill="x")
             return
-
-        for index, row in enumerate(self._rows):
-            self._row_frames.append(self._build_row(index, row))
         self._paint_selection()
 
-    def _build_row(self, index: int, row: Row) -> tk.Frame:
-        t = tokens()
+    def _ensure_row(self, index: int) -> dict:
+        """Return the pooled widgets for a row, building them the first time."""
+        while len(self._pool) <= index:
+            self._pool.append(self._build_row())
+        cell = self._pool[index]
+        if not cell["visible"]:
+            # Re-packed in ascending order, and every lower index is still
+            # packed, so rows always land back in the right place.
+            cell["frame"].pack(fill="x")
+            cell["separator"].pack(fill="x")
+            cell["visible"] = True
+        return cell
+
+    def _build_row(self) -> dict:
         bg = self._bg()
         frame = tk.Frame(self.inner, background=bg, padx=self.ROW_PAD_X, pady=self.ROW_PAD_Y,
                          highlightthickness=0)
         frame.pack(fill="x")
         frame.columnconfigure(1, weight=1)
 
-        marker = row.marker or ("✓" if row.done else ("●" if row.flagged else "○"))
-        colour = t.muted_foreground if row.done else (t.destructive if row.flagged else t.border)
-        mark = tk.Label(frame, text=marker, background=bg, foreground=colour,
-                        font=font(theme.SIZE_BASE), width=2)
+        mark = tk.Label(frame, background=bg, font=font(theme.SIZE_BASE), width=2)
         mark.grid(row=0, column=0, rowspan=2, sticky="n", padx=(0, 8))
+        title = tk.Label(frame, background=bg, anchor="w", justify="left")
+        title.grid(row=0, column=1, sticky="w")
+        badges = BadgeStrip(frame, [], background=bg)
+        badges.grid(row=0, column=2, sticky="e", padx=(8, 0))
+        subtitle = tk.Label(frame, background=bg, font=font(theme.SIZE_SM),
+                            anchor="w", justify="left")
+        subtitle.grid(row=1, column=1, columnspan=2, sticky="w")
+        separator = tk.Frame(self.inner, height=1, background=tokens().border)
+        separator.pack(fill="x")
 
-        title = tk.Label(
-            frame, text=row.title, background=bg,
+        cells = [frame, mark, title, badges, subtitle]
+        for widget in cells:
+            # One shared bindtag instead of nine bindings per widget: at 300
+            # rows that was ~14k bind calls per refresh.
+            widget.bindtags((self._row_tag,) + widget.bindtags())
+        return {"frame": frame, "mark": mark, "title": title, "badges": badges,
+                "subtitle": subtitle, "separator": separator, "cells": cells,
+                "visible": True}
+
+    def _apply_row(self, cell: dict, index: int, row: Row) -> None:
+        t = tokens()
+        bg = self._bg()
+        for widget in cell["cells"]:
+            widget._row_index = index  # read back by the shared bindtag handlers
+
+        marker = row.marker or ("✓" if row.done else ("●" if row.flagged else "○"))
+        cell["mark"].configure(
+            text=marker, background=bg,
+            foreground=t.muted_foreground if row.done else (
+                t.destructive if row.flagged else t.border),
+        )
+        cell["title"].configure(
+            text=row.title, background=bg,
             foreground=t.muted_foreground if row.done else t.card_foreground,
             font=font(theme.SIZE_BASE, "normal" if row.done else "bold"),
-            anchor="w", justify="left",
         )
-        title.grid(row=0, column=1, sticky="w")
-
-        widgets = [frame, mark, title]
-
+        cell["badges"].set_badges(row.badges, background=bg)
         if row.badges:
-            strip = BadgeStrip(frame, row.badges, background=bg)
-            strip.grid(row=0, column=2, sticky="e", padx=(8, 0))
-            widgets.append(strip)
-
+            cell["badges"].grid()
+        else:
+            cell["badges"].grid_remove()
+        cell["subtitle"].configure(text=row.subtitle, background=bg,
+                                   foreground=t.muted_foreground)
         if row.subtitle:
-            subtitle = tk.Label(frame, text=row.subtitle, background=bg,
-                                foreground=t.muted_foreground, font=font(theme.SIZE_SM),
-                                anchor="w", justify="left")
-            subtitle.grid(row=1, column=1, columnspan=2, sticky="w")
-            widgets.append(subtitle)
+            cell["subtitle"].grid()
+        else:
+            cell["subtitle"].grid_remove()
+        cell["separator"].configure(background=t.border)
 
-        separator = tk.Frame(self.inner, height=1, background=t.border)
-        separator.pack(fill="x")
-        self._row_frames.append(separator)
+    def _bind_row_events(self) -> None:
+        """Bind the row interactions once, on a tag shared by every row widget."""
+        def index_of(event):
+            return getattr(event.widget, "_row_index", None)
 
-        for widget in widgets:
-            widget.bind("<Button-1>", lambda e, i=index: self._click(i, e))
-            widget.bind("<Control-Button-1>", lambda e, i=index: self._click(i, e, toggle=True))
-            widget.bind("<Shift-Button-1>", lambda e, i=index: self._click(i, e, extend=True))
-            widget.bind("<Double-Button-1>", lambda _e, i=index: self._double(i))
-            widget.bind("<MouseWheel>", self._on_wheel)
-            widget.bind("<Button-4>", self._on_wheel)
-            widget.bind("<Button-5>", self._on_wheel)
-            widget.bind("<Enter>", lambda _e, i=index: self._hover(i, True))
-            widget.bind("<Leave>", lambda _e, i=index: self._hover(i, False))
-        frame._cell_widgets = widgets  # noqa: SLF001 - used by _paint_selection
-        return frame
+        def on_click(event, toggle=False, extend=False):
+            index = index_of(event)
+            return None if index is None else self._click(index, event, toggle, extend)
+
+        self.bind_class(self._row_tag, "<Button-1>", on_click)
+        self.bind_class(self._row_tag, "<Control-Button-1>",
+                        lambda e: on_click(e, toggle=True))
+        self.bind_class(self._row_tag, "<Shift-Button-1>",
+                        lambda e: on_click(e, extend=True))
+        self.bind_class(self._row_tag, "<Double-Button-1>",
+                        lambda e: self._double(index_of(e)) if index_of(e) is not None else None)
+        for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self.bind_class(self._row_tag, sequence, self._on_wheel)
+        self.bind_class(self._row_tag, "<Enter>",
+                        lambda e: self._hover(index_of(e), True) if index_of(e) is not None else None)
+        self.bind_class(self._row_tag, "<Leave>",
+                        lambda e: self._hover(index_of(e), False) if index_of(e) is not None else None)
 
     # -- selection -----------------------------------------------------
     def _row_widgets(self, index: int):
-        frames = [f for f in self._row_frames if getattr(f, "_cell_widgets", None)]
-        if index < len(frames):
-            return frames[index], frames[index]._cell_widgets
+        if 0 <= index < len(self._rows) and index < len(self._pool):
+            cell = self._pool[index]
+            return cell["frame"], cell["cells"]
         return None, []
 
     def _paint_selection(self) -> None:
         t = tokens()
         for index in range(len(self._rows)):
-            colour = t.selected if index in self._selected else self._bg()
-            self._paint_row(index, colour)
+            self._paint_row(index, t.selected if index in self._selected else self._bg())
 
     def _paint_row(self, index: int, colour: str) -> None:
         frame, widgets = self._row_widgets(index)
         if frame is None:
             return
-        frame.configure(background=colour)
         for widget in widgets:
             try:
                 widget.configure(background=colour)
@@ -292,7 +358,9 @@ class RowList(ttk.Frame):
         return "break"
 
     def _activate_toggle(self, _event=None):
-        self._fire(self._on_toggle or self._on_activate)
+        # Space toggles done where rows have a done state. The matrix has none,
+        # so it stays inert; Return and double click still activate.
+        self._fire(self._on_toggle)
         return "break"
 
     def _fire(self, callback):
@@ -326,10 +394,19 @@ class RowList(ttk.Frame):
     def curselection(self) -> tuple:
         return tuple(sorted(i for i in self._selected if i < len(self._rows)))
 
+    def _index(self, value) -> int:
+        """Coerce a Listbox-style index ('end' or an int) into a valid row."""
+        if isinstance(value, str):
+            value = len(self._rows) - 1 if value.startswith("end") else int(value)
+        return max(0, min(len(self._rows) - 1, int(value)))
+
     def selection_set(self, first, last=None) -> None:
-        last = first if last is None else last
-        self._selected.update(range(int(first), int(last) + 1))
-        self._anchor = int(first)
+        if not self._rows:
+            return
+        first = self._index(first)
+        last = first if last is None else self._index(last)
+        self._selected.update(range(min(first, last), max(first, last) + 1))
+        self._anchor = first
         self._paint_selection()
 
     def selection_clear(self, _first=None, _last=None) -> None:
@@ -445,6 +522,7 @@ class FocusWindow(tk.Toplevel):
         except tk.TclError:
             pass
         self.protocol("WM_DELETE_WINDOW", self.close)
+        self.bind("<Escape>", lambda _e: self._pause())
 
         t = tokens()
         self.configure(background=t.card)
@@ -477,6 +555,13 @@ class FocusWindow(tk.Toplevel):
 
         self.update_idletasks()
         self.geometry(f"320x{max(210, self.winfo_reqheight())}")
+
+    def restyle(self) -> None:
+        """Follow a theme switch instead of being closed mid-session."""
+        try:
+            self.configure(background=tokens().card)
+        except tk.TclError:
+            pass
 
     def update_session(self, task: str, step: str, time_text: str, fraction: float,
                        running: bool) -> None:

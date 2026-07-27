@@ -87,6 +87,17 @@ def counts(tasks: list[Task]) -> tuple[int, int, int]:
     return len(tasks) - done, done, flagged
 
 
+def done_today(tasks: list[Task], on: str | None = None) -> list[Task]:
+    """What you finished today, most recent last.
+
+    The app records ``completed_at`` but never showed it back, so the only
+    number on screen was how much was left. This is the other half.
+    """
+    on = on or today_iso()
+    finished = [t for t in tasks if t.done and (t.completed_at or "")[:10] == on]
+    return sorted(finished, key=lambda t: t.completed_at or "")
+
+
 def due_tasks(tasks: list[Task], on: str | None = None) -> list[Task]:
     """Open tasks with a booked time of today or earlier, soonest first."""
     on = on or today_iso()
@@ -119,7 +130,10 @@ def rank_for_starting(tasks: list[Task], kind: str | None = None, on: str | None
             -(3 if task.is_ready else 0)
             - (3 if task.is_due(on) else 0)
             - (2 if task.priority else 0)
-            - (1 if kind and task.kind == kind else 0),
+            - (1 if kind and task.kind == kind else 0)
+            # Captured today: it is the thing currently on your mind, and the
+            # age tiebreak below would otherwise bury it under everything old.
+            - (1 if task.created_at[:10] == on else 0),
             task.created_at,  # older first: it has waited long enough
             task.text.casefold(),
         )
@@ -132,9 +146,10 @@ def suggest_tasks(
     kind: str | None = None,
     limit: int = 3,
     offset: int = 0,
+    on: str | None = None,
 ) -> list[Task]:
     """A short shortlist. Long lists are the thing that causes the freeze."""
-    ranked = rank_for_starting(tasks, kind)
+    ranked = rank_for_starting(tasks, kind, on)
     if not ranked:
         return []
     limit = max(1, limit)

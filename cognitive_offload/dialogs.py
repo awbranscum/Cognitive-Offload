@@ -30,7 +30,9 @@ class ModalDialog(tk.Toplevel):
         self.body = ttk.Frame(self, padding=12)
         self.body.pack(fill="both", expand=True)
         self.protocol("WM_DELETE_WINDOW", self.cancel)
-        self.bind("<Escape>", lambda _e: self.cancel())
+        # "or \"break\"" stops the global Escape binding from also pausing a
+        # running session behind the dialog.
+        self.bind("<Escape>", lambda _e: self.cancel() or "break")
 
     def button_row(self, ok_text: str = "OK") -> ttk.Frame:
         row = ttk.Frame(self.body)
@@ -377,6 +379,41 @@ class QuadrantDialog(ModalDialog):
         return self.choice.get()
 
 
+class SessionEndDialog(ModalDialog):
+    """What happens now the block is over.
+
+    A session ends at the one moment the app knows something got worked on,
+    and it used to ask only about a break — leaving the user to remember to go
+    and tick the task off later, which is precisely the kind of remembering
+    this app exists to take over.
+    """
+
+    def __init__(self, parent: tk.Misc, message: str, task_text: str, break_minutes: int = 5):
+        super().__init__(parent, "Session finished")
+        self.resizable(False, False)
+        ttk.Label(self.body, text=message, font=font(SIZE_SM + 3, "bold"),
+                  wraplength=380, justify="left").pack(anchor="w")
+        ttk.Label(self.body, text=task_text, style="Muted.TLabel",
+                  wraplength=380, justify="left").pack(anchor="w", pady=(6, 14))
+
+        for label, value, style in (
+            ("It's finished — mark it done", "done", "Default.TButton"),
+            (f"Not yet — take {break_minutes} minutes", "break", "Outline.TButton"),
+            ("Not yet — keep going", "carry_on", "Ghost.TButton"),
+        ):
+            ttk.Button(self.body, text=label, style=style,
+                       command=lambda v=value: self._choose(v)).pack(fill="x", pady=2)
+
+    def _choose(self, value: str) -> None:
+        self.result = value
+        self.destroy()
+
+    def cancel(self, _event=None):
+        # Closing the window is "no answer", which means carry on.
+        self.result = "carry_on"
+        self.destroy()
+
+
 class ShortcutsDialog(ModalDialog):
     """A cheat-sheet, so the shortcuts are actually discoverable."""
 
@@ -393,11 +430,12 @@ class ShortcutsDialog(ModalDialog):
             ("Ctrl+B", "Send scratchpad lines to tasks"),
         ]),
         ("Tasks", [
-            ("Double click / Space", "Toggle done"),
+            ("Double click / Ctrl+D", "Edit details"),
+            ("Space", "Toggle done"),
+            ("Up / Down", "Move through the list"),
             ("Delete", "Delete selected"),
             ("Ctrl+P", "Toggle high priority"),
             ("Ctrl+T", "Add a tag"),
-            ("Ctrl+D", "Edit details"),
             ("Ctrl+Up", "Move to top"),
             ("Ctrl+M", "Send selection to the matrix"),
             ("Ctrl+Z", "Undo the last change"),

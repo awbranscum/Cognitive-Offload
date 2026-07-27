@@ -36,6 +36,18 @@ not urgent work has no deadline to make you start it, so you can **book a time**
 on it (`today`, `tomorrow`, `fri`, or a date) and it surfaces on the main tab as
 "booked for today".
 
+**What you actually finished.** The app used to count only what was left. It
+now shows "N done today" beside the task counts — click it for the list, plus
+the minutes you focused. It appears only when there is something in it; there is
+no "0 done today". When a session ends, it asks whether the task is finished, so
+closing it out happens at the moment you are already thinking about it instead
+of being one more thing to remember.
+
+**Where the block lands on the clock.** The timer shows "ends 15:42" under the
+countdown as well as the time remaining — a duration is exactly the
+representation that time blindness struggles with, and a clock time is
+something you can anchor to.
+
 **Less on screen when you need less.** *Calm mode* (top right) folds away
 search, filters, sort and the task toolbar, leaving a capture box, the list, and
 the button that starts something. Nothing is deleted — untick it and everything
@@ -75,6 +87,8 @@ reinstall from python.org).
 - Each task can carry a first step, a "feels like" category, and a booked date.
 - Search across titles, descriptions, first steps and tags; filter by tag or by
   feel; hide completed.
+- Anything captured today is nudged up the "Where do I start?" ranking — it is
+  what is on your mind, and the age tiebreak would otherwise bury it.
 - Sort by priority, creation date, alphabetically, or by completion time.
   Priority sorting keeps open work at the top: unfinished first, flagged first,
   then newest.
@@ -97,7 +111,9 @@ reinstall from python.org).
 - Light and dark themes, toggled in the header and remembered between runs.
   Dark is not decoration: a bright white slab at 11pm is its own barrier.
 - Tasks are rows, not lines of text — title, the first step underneath, and
-  colour-coded badges for feel, readiness, bookings and tags.
+  colour-coded badges for feel, readiness, bookings and tags. The row widgets
+  are pooled and refilled rather than rebuilt, so a 300-task list re-renders in
+  ~50ms instead of locking the window for a second on every keystroke.
 
 **Matrix**
 - Add, edit, delete and move tasks between any two quadrants (not just into
