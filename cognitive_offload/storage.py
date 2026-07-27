@@ -1,0 +1,358 @@
+"""Persistence: config, the main JSON state file and the matrix file store.
+
+No tkinter here either - failures are raised as :class:`StorageError` and the
+UI decides how to report them.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import shutil
+import tempfile
+from pathlib import Path
+
+from .models import MatrixTask, Note, Task, now_stamp
+
+STATE_VERSION = 2
+
+DEFAULT_DB_PATH = Path.home() / ".cognitive_offload"
+DEFAULT_MATRIX_PATH = Path.home() / "MatrixTasks"
+CONFIG_PATH = Path.home() / ".cognitive_offload_config.json"
+
+STATE_FILENAME = "data.json"
+
+# key -> (folder name, short label, long label)
+CATEGORIES: dict[str, tuple[str, str, str]] = {
+    "do_first": ("DoFirst", "Do First", "Do First (Urgent / Important)"),
+    "schedule": ("Schedule", "Schedule", "Schedule (Not Urgent / Important)"),
+    "delegate": ("Delegate", "Delegate", "Delegate (Urgent / Not Important)"),
+    "eliminate": ("Eliminate", "Eliminate", "Eliminate (Not Urgent / Not Important)"),
+}
+CATEGORY_KEYS = tuple(CATEGORIES)
+
+
+class StorageError(Exception):
+    """Raised when data cannot be read from or written to disk."""
+
+
+def display_path(path, limit: int = 58) -> str:
+    """Shorten a path for a label: ``~`` for home, an ellipsis for the rest."""
+    text = str(path)
+    home = str(Path.home())
+    if text.startswith(home):
+        text = "~" + text[len(home):]
+    if len(text) > limit:
+        text = "…" + text[-(limit - 1):]
+    return text
+
+
+def category_label(category: str, long: bool = False) -> str:
+    entry = CATEGORIES.get(category)
+    if not entry:
+        return category.replace("_", " ").title()
+    return entry[2] if long else entry[1]
+
+
+def atomic_write_text(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` without risking a truncated file.
+
+    The old code wrote straight into the target, so an error (or a crash)
+    mid-write destroyed the previous contents.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp",
+        delete=False,
+    )
+    try:
+        with handle as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(handle.name, path)
+    except BaseException:
+        try:
+            os.unlink(handle.name)
+        except OSError:
+            pass
+        raise
+
+
+def write_json(path: Path, data, indent: int = 2) -> None:
+    atomic_write_text(path, json.dumps(data, indent=indent, ensure_ascii=False))
+
+
+def read_json(path: Path):
+    with open(path, "r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+class Config:
+    """User preferences, stored next to the home directory."""
+
+    def __init__(self, path: Path = CONFIG_PATH):
+        self.path = Path(path)
+        self.db_path = DEFAULT_DB_PATH
+        self.matrix_db_path = DEFAULT_MATRIX_PATH
+        self.timer_minutes = 25
+        self.show_done = True
+        self.sort_order = "priority"
+        self.autosave = True
+
+    @property
+    def state_file(self) -> Path:
+        return self.db_path / STATE_FILENAME
+
+    def load(self) -> "Config":
+        """Load config, falling back to defaults for anything unusable."""
+        try:
+            data = read_json(self.path)
+        except FileNotFoundError:
+            return self
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            # A corrupt config must never stop the app from starting.
+            return self
+        if not isinstance(data, dict):
+            return self
+        self.db_path = _path_or(data.get("db_path"), DEFAULT_DB_PATH)
+        self.matrix_db_path = _path_or(data.get("matrix_db_path"), DEFAULT_MATRIX_PATH)
+        self.timer_minutes = _int_or(data.get("timer_minutes"), 25, 1, 240)
+        self.show_done = bool(data.get("show_done", True))
+        order = data.get("sort_order")
+        self.sort_order = order if order in {"priority", "created", "alpha", "completed"} else "priority"
+        self.autosave = bool(data.get("autosave", True))
+        return self
+
+    def save(self) -> None:
+        try:
+            write_json(
+                self.path,
+                {
+                    "db_path": str(self.db_path),
+                    "matrix_db_path": str(self.matrix_db_path),
+                    "timer_minutes": self.timer_minutes,
+                    "show_done": self.show_done,
+                    "sort_order": self.sort_order,
+                    "autosave": self.autosave,
+                },
+            )
+        except OSError as exc:
+            raise StorageError(f"Could not save settings: {exc}") from exc
+
+
+def _path_or(value, fallback: Path) -> Path:
+    if isinstance(value, str) and value.strip():
+        return Path(value).expanduser()
+    return fallback
+
+
+def _int_or(value, fallback: int, low: int, high: int) -> int:
+    try:
+        return max(low, min(high, int(value)))
+    except (TypeError, ValueError):
+        return fallback
+
+
+class StateStore:
+    """Reads/writes the tasks + scratchpad document."""
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+
+    def set_path(self, path: Path) -> None:
+        self.path = Path(path)
+
+    def exists(self) -> bool:
+        return self.path.exists()
+
+    def load(self) -> dict:
+        """Return ``{"tasks": [...], "scratchpad": str, "timer_minutes": int}``."""
+        try:
+            data = read_json(self.path)
+        except FileNotFoundError:
+            return {"tasks": [], "scratchpad": "", "timer_minutes": 25}
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise StorageError(f"Could not read {self.path}: {exc}") from exc
+        if not isinstance(data, dict):
+            raise StorageError(f"{self.path} does not contain a saved session")
+        return self.deserialize(data)
+
+    @staticmethod
+    def deserialize(data: dict) -> dict:
+        tasks: list[Task] = []
+        for record in data.get("tasks") or []:
+            try:
+                task = Task.from_dict(record)
+            except (ValueError, TypeError):
+                continue
+            if task.text:
+                tasks.append(task)
+
+        scratchpad = data.get("scratchpad")
+        if not isinstance(scratchpad, str):
+            # Pre-2.0 files kept a list of timestamped notes instead.
+            notes = [Note.from_dict(n) for n in data.get("notes") or [] if isinstance(n, dict)]
+            scratchpad = "\n".join(n.render() for n in notes)
+
+        return {
+            "tasks": tasks,
+            "scratchpad": scratchpad,
+            "timer_minutes": _int_or(data.get("timer_minutes"), 25, 1, 240),
+        }
+
+    @staticmethod
+    def serialize(tasks: list[Task], scratchpad: str, timer_minutes: int) -> dict:
+        return {
+            "version": STATE_VERSION,
+            "tasks": [t.to_dict() for t in tasks],
+            "scratchpad": scratchpad,
+            "timer_minutes": int(timer_minutes),
+            "saved_at": now_stamp(),
+        }
+
+    def save(self, tasks: list[Task], scratchpad: str, timer_minutes: int) -> None:
+        payload = self.serialize(tasks, scratchpad, timer_minutes)
+        try:
+            self._backup()
+            write_json(self.path, payload)
+        except OSError as exc:
+            raise StorageError(f"Could not save to {self.path}: {exc}") from exc
+
+    def _backup(self) -> None:
+        """Keep one generation of the previous save as ``data.json.bak``."""
+        if not self.path.exists():
+            return
+        try:
+            shutil.copy2(self.path, self.path.with_suffix(self.path.suffix + ".bak"))
+        except OSError:
+            pass  # A missing backup should never block the real save.
+
+
+_SLUG_RE = re.compile(r"[^A-Za-z0-9._ -]+")
+
+
+def slugify(name: str, fallback: str = "task") -> str:
+    """Filesystem-safe stem for a task title."""
+    cleaned = _SLUG_RE.sub("", name).strip(" .")
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return (cleaned[:60].strip() or fallback)
+
+
+class MatrixStore:
+    """One folder per quadrant, one ``.task`` JSON file per task.
+
+    Files are named ``<slug>-<id>.task`` so two tasks may share a title and a
+    rename never has to move data (the id in the name keeps it unique).
+    """
+
+    def __init__(self, root: Path):
+        self.root = Path(root)
+
+    def set_root(self, root: Path) -> None:
+        self.root = Path(root)
+
+    def ensure(self) -> None:
+        try:
+            for key in CATEGORY_KEYS:
+                self.path_for(key).mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise StorageError(f"Could not create matrix folders in {self.root}: {exc}") from exc
+
+    def path_for(self, category: str) -> Path:
+        if category not in CATEGORIES:
+            raise KeyError(f"unknown quadrant: {category}")
+        return self.root / CATEGORIES[category][0]
+
+    def list(self, category: str) -> list[MatrixTask]:
+        folder = self.path_for(category)
+        if not folder.is_dir():
+            return []
+        tasks: list[MatrixTask] = []
+        for path in sorted(folder.glob("*.task")):
+            task = self._read(path, category)
+            if task is not None:
+                tasks.append(task)
+        tasks.sort(key=lambda t: (t.created_at, t.title.casefold()))
+        return tasks
+
+    def _read(self, path: Path, category: str) -> MatrixTask | None:
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return None
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            data = None
+        if isinstance(data, dict):
+            task = MatrixTask.from_dict(data, category)
+        else:
+            # Legacy plain-text file: the filename was the title.
+            task = MatrixTask(title=path.stem, content=raw, category=category)
+        if not task.title:
+            task.title = path.stem
+        task.category = category
+        task.path = path
+        return task
+
+    def _new_path(self, category: str, task: MatrixTask) -> Path:
+        folder = self.path_for(category)
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder / f"{slugify(task.title)}-{task.id[:8]}.task"
+
+    def create(self, category: str, title: str, content: str = "") -> MatrixTask:
+        task = MatrixTask(title=title.strip(), content=content, category=category)
+        task.path = self._new_path(category, task)
+        self._write(task)
+        return task
+
+    def update(self, task: MatrixTask, title: str, content: str) -> MatrixTask:
+        title = title.strip()
+        renamed = title != task.title
+        task.title = title
+        task.content = content
+        task.updated_at = now_stamp()
+        old_path = Path(task.path) if task.path else None
+        if renamed or old_path is None:
+            task.path = self._new_path(task.category, task)
+        self._write(task)
+        if renamed and old_path is not None and old_path != Path(task.path):
+            self._unlink(old_path)
+        return task
+
+    def move(self, task: MatrixTask, category: str) -> MatrixTask:
+        if category == task.category:
+            return task
+        old_path = Path(task.path) if task.path else None
+        task.category = category
+        task.updated_at = now_stamp()
+        task.path = self._new_path(category, task)
+        self._write(task)
+        if old_path is not None:
+            self._unlink(old_path)
+        return task
+
+    def delete(self, task: MatrixTask) -> None:
+        if task.path:
+            self._unlink(Path(task.path))
+
+    def add_from_task(self, category: str, task: Task) -> MatrixTask:
+        return self.create(category, task.text, task.description)
+
+    def _write(self, task: MatrixTask) -> None:
+        try:
+            write_json(Path(task.path), task.to_dict())
+        except OSError as exc:
+            raise StorageError(f"Could not save '{task.title}': {exc}") from exc
+
+    @staticmethod
+    def _unlink(path: Path) -> None:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            raise StorageError(f"Could not remove {path}: {exc}") from exc
