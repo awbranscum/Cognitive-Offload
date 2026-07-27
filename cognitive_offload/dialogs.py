@@ -13,7 +13,7 @@ from tkinter import messagebox, ttk
 from .models import KIND_UNSET, TASK_KINDS, Task, parse_date_input
 from .queries import suggest_tasks
 from .storage import CATEGORIES, CATEGORY_KEYS
-from .theme import PALETTE, style_text
+from .theme import SIZE_SM, font, style_text, tokens
 
 
 class ModalDialog(tk.Toplevel):
@@ -22,7 +22,7 @@ class ModalDialog(tk.Toplevel):
         self.result = None
         self._parent = parent
         self.title(title)
-        self.configure(background=PALETTE["bg"])
+        self.configure(background=tokens().background)
         self.transient(parent.winfo_toplevel())
         if size:
             self.minsize(*size)
@@ -35,8 +35,8 @@ class ModalDialog(tk.Toplevel):
     def button_row(self, ok_text: str = "OK") -> ttk.Frame:
         row = ttk.Frame(self.body)
         row.pack(fill="x", pady=(10, 0))
-        ttk.Button(row, text="Cancel", command=self.cancel).pack(side="right")
-        ttk.Button(row, text=ok_text, style="Accent.TButton", command=self.ok).pack(
+        ttk.Button(row, text="Cancel", style="Outline.TButton", command=self.cancel).pack(side="right")
+        ttk.Button(row, text=ok_text, style="Default.TButton", command=self.ok).pack(
             side="right", padx=(0, 8)
         )
         return row
@@ -112,7 +112,7 @@ class TaskEditorDialog(ModalDialog):
             self.body,
             text="The two-minute physical action that starts it — \"open the doc\", "
                  "\"find Dana's email\". This is the part that gets you moving.",
-            style="Hint.TLabel",
+            style="Muted.TLabel",
             wraplength=470,
             justify="left",
         ).pack(anchor="w", pady=(2, 10))
@@ -132,7 +132,7 @@ class TaskEditorDialog(ModalDialog):
         self.date_entry = ttk.Entry(row, width=14)
         self.date_entry.pack(side="left", padx=(6, 0))
         self.date_entry.insert(0, scheduled_for)
-        ttk.Label(row, text="today / tomorrow / fri / 2026-08-01", style="Hint.TLabel").pack(
+        ttk.Label(row, text="today / tomorrow / fri / 2026-08-01", style="Muted.TLabel").pack(
             side="left", padx=(6, 0)
         )
 
@@ -203,7 +203,7 @@ class StartHereDialog(ModalDialog):
             self.body,
             text="Pick the shape of the work, not the most important thing. "
                  "Starting anything beats picking perfectly.",
-            style="Hint.TLabel",
+            style="Muted.TLabel",
             wraplength=510,
             justify="left",
         ).pack(anchor="w", pady=(2, 10))
@@ -223,9 +223,9 @@ class StartHereDialog(ModalDialog):
 
         controls = ttk.Frame(self.body)
         controls.pack(fill="x", pady=(10, 0))
-        ttk.Button(controls, text="Show me others", command=self._cycle).pack(side="left")
-        ttk.Button(controls, text="Cancel", command=self.cancel).pack(side="right")
-        ttk.Button(controls, text="Start on this", style="Accent.TButton", command=self.ok).pack(
+        ttk.Button(controls, text="Show me others", style="Outline.TButton", command=self._cycle).pack(side="left")
+        ttk.Button(controls, text="Cancel", style="Ghost.TButton", command=self.cancel).pack(side="right")
+        ttk.Button(controls, text="Start on this", style="Default.TButton", command=self.ok).pack(
             side="right", padx=(0, 8)
         )
 
@@ -242,7 +242,7 @@ class StartHereDialog(ModalDialog):
                 self.choices,
                 text="Nothing open in that shape. Try 'Anything', or capture "
                      "something new — an empty list is allowed.",
-                style="Hint.TLabel",
+                style="Muted.TLabel",
                 wraplength=510,
                 justify="left",
             ).pack(anchor="w", pady=6)
@@ -258,7 +258,7 @@ class StartHereDialog(ModalDialog):
             ).pack(anchor="w")
             detail = task.first_step or "No first step yet — you'll be asked for one."
             ttk.Label(
-                frame, text=f"    → {detail}", style="Hint.TLabel", wraplength=490, justify="left"
+                frame, text=f"    → {detail}", style="Muted.TLabel", wraplength=490, justify="left"
             ).pack(anchor="w")
 
     def _cycle(self) -> None:
@@ -293,7 +293,7 @@ class StartFocusDialog(ModalDialog):
     ):
         super().__init__(parent, "Start a focus session", size=(520, 460))
 
-        ttk.Label(self.body, text="Working on", style="Hint.TLabel").pack(anchor="w")
+        ttk.Label(self.body, text="Working on", style="Muted.TLabel").pack(anchor="w")
         ttk.Label(
             self.body,
             text=task_text or "Free focus (no task selected)",
@@ -309,7 +309,7 @@ class StartFocusDialog(ModalDialog):
         ttk.Label(
             self.body,
             text="Name the smallest physical action. You are only committing to this.",
-            style="Hint.TLabel",
+            style="Muted.TLabel",
         ).pack(anchor="w", pady=(0, 12))
 
         self.warmup_vars: list[tk.BooleanVar] = []
@@ -321,7 +321,7 @@ class StartFocusDialog(ModalDialog):
                 self.body,
                 text="Step down towards the task instead of leaping at it. "
                      "Tick what you've done — skipping them is fine too.",
-                style="Hint.TLabel",
+                style="Muted.TLabel",
                 wraplength=470,
                 justify="left",
             ).pack(anchor="w", pady=(2, 6))
@@ -337,7 +337,7 @@ class StartFocusDialog(ModalDialog):
         ttk.Spinbox(length, from_=1, to=120, width=5, textvariable=self.minutes_var).pack(
             side="left", padx=(8, 6)
         )
-        ttk.Label(length, text="minutes", style="Hint.TLabel").pack(side="left")
+        ttk.Label(length, text="minutes", style="Muted.TLabel").pack(side="left")
 
         self.button_row("Start")
         self.step_entry.focus_set()
@@ -424,10 +424,10 @@ class ShortcutsDialog(ModalDialog):
             grid.pack(fill="x")
             grid.columnconfigure(1, weight=1)
             for row, (keys, description) in enumerate(rows):
-                ttk.Label(grid, text=keys, foreground=PALETTE["accent"]).grid(
+                ttk.Label(grid, text=keys, style="Muted.TLabel", font=font(SIZE_SM, "bold")).grid(
                     row=row, column=0, sticky="w", padx=(0, 12)
                 )
-                ttk.Label(grid, text=description, style="Sub.TLabel").grid(
+                ttk.Label(grid, text=description, style="Muted.TLabel").grid(
                     row=row, column=1, sticky="w"
                 )
-        ttk.Button(self.body, text="Close", command=self.cancel).pack(anchor="e", pady=(14, 0))
+        ttk.Button(self.body, text="Close", style="Outline.TButton", command=self.cancel).pack(anchor="e", pady=(14, 0))

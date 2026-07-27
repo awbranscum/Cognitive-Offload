@@ -134,6 +134,28 @@ class ConfigTests(TempDirTest):
         self.assertEqual(config.timer_minutes, 240)
         self.assertEqual(config.sort_order, "priority")
 
+    def test_appearance_settings_round_trip(self):
+        path = self.root / "cfg.json"
+        config = Config(path)
+        config.theme = "dark"
+        config.calm_mode = True
+        config.focus_minutes = 20
+        config.save()
+        reloaded = Config(path).load()
+        self.assertEqual(reloaded.theme, "dark")
+        self.assertTrue(reloaded.calm_mode)
+        self.assertEqual(reloaded.focus_minutes, 20)
+
+    def test_unknown_theme_falls_back_to_light(self):
+        path = self.root / "cfg.json"
+        path.write_text(json.dumps({"theme": "neon"}), encoding="utf-8")
+        self.assertEqual(Config(path).load().theme, "light")
+
+    def test_sessions_file_follows_db_path(self):
+        config = Config(self.root / "cfg.json")
+        config.db_path = self.root / "elsewhere"
+        self.assertEqual(config.sessions_file, self.root / "elsewhere" / "sessions.json")
+
     def test_state_file_follows_db_path(self):
         config = Config(self.root / "cfg.json")
         config.db_path = self.root / "elsewhere"

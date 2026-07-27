@@ -450,6 +450,120 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(task.kind, "deadline")
         self.assertEqual(task.scheduled_for, "2026-09-09")
 
+    # -- appearance ----------------------------------------------------
+    def test_theme_toggles_and_is_remembered(self):
+        from cognitive_offload import theme
+        from cognitive_offload.storage import Config
+
+        self.assertEqual(self.app.theme_name, "light")
+        self.app.toggle_theme()
+        self.assertEqual(self.app.theme_name, "dark")
+        self.assertEqual(theme.tokens().name, "dark")
+        self.assertEqual(self.app.theme_button.cget("text"), "Light")
+
+        self.app._save_config()
+        reloaded = Config(self.app.config_store.path).load()
+        self.assertEqual(reloaded.theme, "dark")
+
+        self.app.toggle_theme()
+        self.assertEqual(theme.tokens().name, "light")
+
+    def test_switching_theme_keeps_the_tasks_rendered(self):
+        self.capture("still here")
+        self.app.toggle_theme()
+        self.assertEqual(self.app.task_list.size(), 1)
+        self.assertIn("still here", self.app.task_list.get(0))
+
+    def test_calm_mode_hides_the_extras_without_losing_them(self):
+        self.app.calm_var.set(True)
+        self.app.apply_calm_mode()
+        for widget in (self.app.filter_row, self.app.task_toolbar, self.app.search_row):
+            self.assertEqual(widget.winfo_manager(), "")  # un-gridded
+
+        self.app.calm_var.set(False)
+        self.app.apply_calm_mode()
+        for widget in (self.app.filter_row, self.app.task_toolbar, self.app.search_row):
+            self.assertEqual(widget.winfo_manager(), "grid")
+
+    def test_calm_mode_is_persisted(self):
+        from cognitive_offload.storage import Config
+
+        self.app.calm_var.set(True)
+        self.app.apply_calm_mode()
+        self.app._save_config()
+        self.assertTrue(Config(self.app.config_store.path).load().calm_mode)
+
+    # -- row list behaviour --------------------------------------------
+    def test_ctrl_click_extends_and_unpicks_a_selection(self):
+        for text in ("one", "two", "three"):
+            self.capture(text)
+        self.app.task_list._click(0)
+        self.app.task_list._click(2, toggle=True)
+        self.assertEqual(self.app.task_list.curselection(), (0, 2))
+        self.app.task_list._click(2, toggle=True)
+        self.assertEqual(self.app.task_list.curselection(), (0,))
+
+    def test_shift_click_selects_the_range(self):
+        for text in ("one", "two", "three"):
+            self.capture(text)
+        self.app.task_list._click(0)
+        self.app.task_list._click(2, extend=True)
+        self.assertEqual(self.app.task_list.curselection(), (0, 1, 2))
+
+    def test_arrow_keys_move_the_selection(self):
+        for text in ("one", "two"):
+            self.capture(text)
+        self.app.task_list._click(0)
+        self.app.task_list._move(1)
+        self.assertEqual(self.app.task_list.curselection(), (1,))
+        self.app.task_list._move(-1)
+        self.assertEqual(self.app.task_list.curselection(), (0,))
+        self.app.task_list._move(-1)  # already at the top: stays put
+        self.assertEqual(self.app.task_list.curselection(), (0,))
+
+    def test_row_list_reports_an_empty_state_rather_than_a_blank_box(self):
+        self.assertEqual(self.app.task_list.size(), 0)
+        self.assertIn("Capture a thought", self.app.task_list._empty_text)
+
+    # -- focus window --------------------------------------------------
+    def test_focus_window_opens_updates_and_closes(self):
+        self.capture("deep work")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "open it", "warmup_done": 1,
+            }
+            self.app.focus_on_selected()
+        self.app.open_focus_window()
+        window = self.app._focus_window
+        self.assertIsNotNone(window)
+        self.assertEqual(window.task_var.get(), "deep work")
+        self.assertIn("open it", window.step_var.get())
+
+        self.app._timer_deadline -= 60
+        self.app._tick_timer()
+        self.assertNotEqual(window.time_var.get(), "00:00")
+
+        window.close()
+        self.assertIsNone(self.app._focus_window)
+        self.app.pause_timer()
+
+    def test_finishing_early_banks_the_minutes_actually_done(self):
+        self.capture("something")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 20, "first_step": "", "warmup_done": 0,
+            }
+            self.app.focus_on_selected()
+        self.app._timer_deadline -= 300  # five minutes in
+        self.app._tick_timer()
+        with mock.patch("cognitive_offload.app.messagebox.askyesno", return_value=False):
+            self.app.finish_session_early()
+        self.assertEqual(self.app.session_log.count_today(), 1)
+        self.assertEqual(self.app.session_log.sessions[0].minutes, 5)
+        self.assertFalse(self.app._timer_running)
+
     def test_dirty_flag_tracks_edits_and_saves(self):
         self.assertFalse(self.app._dirty)
         self.capture("something")

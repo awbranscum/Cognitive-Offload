@@ -39,7 +39,8 @@ from .storage import (
     category_label,
     display_path,
 )
-from .theme import apply_theme
+from .theme import apply_theme, style_text, tokens
+from .widgets import Badge, FocusWindow, Row
 
 ALL_TAGS = "(all)"
 AUTOSAVE_SECONDS = 30
@@ -58,8 +59,8 @@ class CognitiveOffloadApp(tk.Tk):
     def __init__(self, config: Config | None = None):
         super().__init__()
         self.title(f"{APP_TITLE} {__version__}")
-        self.geometry("1120x760")
-        self.minsize(940, 620)
+        self.geometry("1240x880")
+        self.minsize(1020, 700)
 
         self.config_store = config or Config().load()
         self.state_store = StateStore(self.config_store.state_file)
@@ -83,6 +84,7 @@ class CognitiveOffloadApp(tk.Tk):
         self._timer_mode = "focus"  # or "break"
         self._focus_task_id: str | None = None
         self._session_count = 0
+        self._focus_window: FocusWindow | None = None
 
         # Tk variables have to exist before the tabs that bind to them.
         self.search_var = tk.StringVar()
@@ -95,10 +97,15 @@ class CognitiveOffloadApp(tk.Tk):
         self.focus_task_var = tk.StringVar(value="Nothing picked yet")
         self.momentum_var = tk.StringVar(value="")
         self.due_var = tk.StringVar(value="")
+        self.path_var = tk.StringVar(value="")
+        self.matrix_path_var = tk.StringVar(value="")
+        self.calm_var = tk.BooleanVar(value=self.config_store.calm_mode)
 
-        apply_theme(self)
+        self.theme_name = self.config_store.theme
+        apply_theme(self, self.theme_name)
         self._build_ui()
         self._bind_shortcuts()
+        self.apply_calm_mode()
 
         self._ensure_folders()
         self.load_state(initial=True)
@@ -195,8 +202,8 @@ class CognitiveOffloadApp(tk.Tk):
 
     def refresh_all(self) -> None:
         self.refresh_tasks()
-        self.path_label.config(text=display_path(self.state_store.path))
-        self.matrix_path_label.config(text=display_path(self.matrix.root))
+        self.path_var.set(display_path(self.state_store.path))
+        self.matrix_path_var.set(display_path(self.matrix.root))
 
     def copy_session_path(self) -> None:
         """The label only shows a shortened path, so make the full one reachable."""
@@ -217,14 +224,7 @@ class CognitiveOffloadApp(tk.Tk):
             kind=self._active_kind(),
         )
 
-        self.task_list.delete(0, tk.END)
-        for task in self._visible:
-            self.task_list.insert(tk.END, _render_task(task))
-            if task.done:
-                self.task_list.itemconfig(tk.END, foreground="#8a94a3")
-            elif task.priority:
-                self.task_list.itemconfig(tk.END, foreground="#c0392b")
-
+        self.task_list.set_rows([_task_row(t) for t in self._visible], keep_selection=False)
         if selected_ids:
             for index, task in enumerate(self._visible):
                 if task.id in selected_ids:
@@ -347,11 +347,8 @@ class CognitiveOffloadApp(tk.Tk):
         self._add_tasks([text], "Captured as task.")
 
     def add_task_direct(self) -> None:
-        text = self.task_entry.get().strip()
-        if not text:
-            return
-        self.task_entry.delete(0, tk.END)
-        self._add_tasks([text], "Task added.")
+        """Kept as an alias for quick capture: one obvious way to add a task."""
+        self.add_task_from_capture()
 
     def add_note_from_capture(self) -> None:
         text = self.capture_entry.get().strip()
@@ -542,16 +539,14 @@ class CognitiveOffloadApp(tk.Tk):
             except (OSError, StorageError):
                 tasks = []
             self._matrix_cache[key] = tasks
-            listbox = self.matrix_lists[key]
-            listbox.delete(0, tk.END)
-            for task in tasks:
-                listbox.insert(tk.END, _render_matrix_task(task))
+            self.matrix_lists[key].set_rows([_matrix_row(t) for t in tasks],
+                                            keep_selection=False)
             self.matrix_count_labels[key].config(
                 text=f"{len(tasks)} task{'s' if len(tasks) != 1 else ''}"
             )
             suffix = f" ({len(tasks)})" if tasks else ""
             self.matrix_notebook.tab(index, text=f"{category_label(key)}{suffix}")
-        self.matrix_path_label.config(text=display_path(self.matrix.root))
+        self.matrix_path_var.set(display_path(self.matrix.root))
         self.refresh_due()
 
     def _selected_matrix_tasks(self, category: str) -> list:
@@ -701,6 +696,62 @@ class CognitiveOffloadApp(tk.Tk):
         self.notebook.select(1)
 
     # ------------------------------------------------------------------
+    # appearance
+    # ------------------------------------------------------------------
+    def toggle_theme(self) -> None:
+        self.set_theme("dark" if self.theme_name == "light" else "light")
+
+    def set_theme(self, name: str) -> None:
+        """Re-skin every widget. Dark is not decoration here — a bright slab of
+        white at 11pm is its own barrier to sitting down and starting."""
+        self.theme_name = name
+        self.config_store.theme = name
+        apply_theme(self, name)
+        self.theme_button.configure(text="Light" if name == "dark" else "Dark")
+        style_text(self.note_text)
+        for widget in self._themable_frames():
+            widget.configure(background=tokens().border)
+        self.task_list.restyle()
+        for key, listing in self.matrix_lists.items():
+            listing.set_surface(tokens().quadrants.get(key))
+        self.refresh_tasks()
+        self.refresh_matrix()
+        self.refresh_momentum()
+        if self._focus_window is not None:
+            self._focus_window.close()
+        self.set_status(f"{name.title()} theme.")
+
+    def _themable_frames(self) -> list:
+        """Card borders are plain frames, so they need recolouring by hand."""
+        found = []
+
+        def walk(widget):
+            for child in widget.winfo_children():
+                if isinstance(child, tk.Frame) and getattr(child, "inner", None) is not None:
+                    found.append(child)
+                walk(child)
+
+        walk(self)
+        return found
+
+    def apply_calm_mode(self) -> None:
+        """Hide everything that is not needed to capture or to start.
+
+        Filters, sort, the toolbar and the file paths are all useful and all
+        noise. Calm mode is one click to a screen with a capture box, a list,
+        and the button that starts something.
+        """
+        calm = bool(self.calm_var.get())
+        self.config_store.calm_mode = calm
+        for widget in (self.filter_row, self.task_toolbar, self.header_extras, self.search_row):
+            if calm:
+                widget.grid_remove()
+            else:
+                widget.grid()
+        self.set_status("Calm mode on — the extras are hidden, not gone." if calm
+                        else "Calm mode off.")
+
+    # ------------------------------------------------------------------
     # starting: the part that actually hurts
     # ------------------------------------------------------------------
     def start_here(self) -> None:
@@ -767,6 +818,57 @@ class CognitiveOffloadApp(tk.Tk):
         if not self._focus_task_id:
             return None
         return next((t for t in self.tasks if t.id == self._focus_task_id), None)
+
+    def open_focus_window(self) -> None:
+        """A small always-on-top companion so the countdown stays visible."""
+        if self._focus_window is not None:
+            try:
+                self._focus_window.lift()
+                return
+            except tk.TclError:
+                self._focus_window = None
+        self._focus_window = FocusWindow(
+            self,
+            on_pause=self.toggle_timer,
+            on_done=self.finish_session_early,
+            on_close=self._forget_focus_window,
+        )
+        self._sync_focus_window()
+
+    def _forget_focus_window(self) -> None:
+        self._focus_window = None
+
+    def _sync_focus_window(self) -> None:
+        if self._focus_window is None:
+            return
+        task = self._focus_task()
+        minutes, seconds = divmod(max(0, self._timer_remaining), 60)
+        elapsed = max(0, self._timer_total - self._timer_remaining)
+        try:
+            self._focus_window.update_session(
+                task.text if task else ("Break" if self._timer_mode == "break" else ""),
+                task.first_step if task and self._timer_mode == "focus" else "",
+                f"{minutes:02d}:{seconds:02d}",
+                elapsed / self._timer_total if self._timer_total else 0,
+                self._timer_running,
+            )
+        except tk.TclError:
+            self._focus_window = None
+
+    def finish_session_early(self) -> None:
+        """Stop now and keep the minutes you actually did."""
+        if not self._timer_running and self._timer_remaining >= self._timer_total:
+            return
+        elapsed = max(1, round((self._timer_total - self._timer_remaining) / 60))
+        self._stop_ticking()
+        mode, self._timer_mode = self._timer_mode, "focus"
+        self._timer_remaining = self._timer_total
+        self.timer_button.config(text="Start")
+        self._update_timer_label()
+        if mode == "break":
+            self.set_status("Break ended.")
+            return
+        self._finish_session(elapsed)
 
     def refresh_momentum(self) -> None:
         self.momentum_strip.render(self.session_log.counts_by_day(14))
@@ -967,6 +1069,7 @@ class CognitiveOffloadApp(tk.Tk):
         elapsed = max(0, self._timer_total - self._timer_remaining)
         fraction = elapsed / self._timer_total if self._timer_total else 0
         self.timer_progress["value"] = int(min(1.0, fraction) * 1000)
+        self._sync_focus_window()
 
     # ------------------------------------------------------------------
     # persistence
@@ -1081,6 +1184,8 @@ class CognitiveOffloadApp(tk.Tk):
         self.config_store.show_done = bool(self.show_done_var.get())
         self.config_store.sort_order = SORT_ORDERS.get(self.sort_var.get(), DEFAULT_SORT)
         self.config_store.break_minutes = self.config_store.break_minutes or DEFAULT_BREAK_MINUTES
+        self.config_store.theme = self.theme_name
+        self.config_store.calm_mode = bool(self.calm_var.get())
         try:
             self.config_store.save()
         except StorageError as exc:
@@ -1104,6 +1209,8 @@ class CognitiveOffloadApp(tk.Tk):
                 return
         self._save_config()
         self._stop_ticking()
+        if self._focus_window is not None:
+            self._focus_window.close()
         if self._autosave_job is not None:
             try:
                 self.after_cancel(self._autosave_job)
@@ -1112,37 +1219,52 @@ class CognitiveOffloadApp(tk.Tk):
         self.destroy()
 
 
-def _render_task(task: Task) -> str:
-    prefix = "✓" if task.done else ("❗" if task.priority else "•")
-    parts = [f"{prefix} {task.text}"]
-    # "ready" flags a task that already names its first move. There is no
-    # matching mark for the ones that don't: a row per task quietly telling
-    # you what you haven't done yet is exactly the wrong tone.
-    if task.is_ready and not task.done:
-        parts.append("▸ ready")
-    if task.kind:
-        parts.append(f"· {kind_label(task.kind).split(' ')[0].lower()}")
-    if task.scheduled_for and not task.done:
-        parts.append(f"· booked {task.scheduled_for}")
-    if task.tags:
-        parts.append(f"#{' #'.join(task.tags)}")
-    if task.description.strip():
-        parts.append("ⓘ")
+def _task_row(task: Task) -> Row:
+    """A task as a list row: title, first step underneath, badges alongside."""
+    badges = []
+    if task.done:
+        badges.append(Badge("done", "done"))
+    else:
+        if task.kind:
+            badges.append(Badge(kind_label(task.kind).split(" ")[0].lower(), task.kind))
+        if task.is_ready:
+            badges.append(Badge("ready", "ready"))
+        if task.scheduled_for:
+            badges.append(Badge(
+                "today" if task.is_due() else f"booked {task.scheduled_for}",
+                "today" if task.is_due() else "booked",
+            ))
+    badges.extend(Badge(f"#{tag}", "tag") for tag in task.tags)
+
     if task.done and task.completed_at:
-        parts.append(f"({task.completed_at})")
-    return "  ".join(parts)
+        subtitle = f"done {task.completed_at}"
+    elif task.first_step:
+        subtitle = f"→ {task.first_step}"
+    elif task.description.strip():
+        subtitle = task.description.strip().splitlines()[0][:80]
+    else:
+        subtitle = ""
+
+    return Row(id=task.id, title=task.text, subtitle=subtitle, badges=badges,
+               done=task.done, flagged=bool(task.priority))
 
 
-def _render_matrix_task(task) -> str:
-    parts = [task.title]
+def _matrix_row(task) -> Row:
+    badges = []
+    if task.kind:
+        badges.append(Badge(kind_label(task.kind).split(" ")[0].lower(), task.kind))
     if task.is_ready:
-        parts.append("▸ ready")
+        badges.append(Badge("ready", "ready"))
     if task.scheduled_for:
         # An overdue booking is a nudge, not a telling-off.
-        parts.append(f"· booked {task.scheduled_for}{' (today)' if task.is_due() else ''}")
-    if task.content.strip():
-        parts.append("ⓘ")
-    return "  ".join(parts)
+        badges.append(Badge(
+            "today" if task.is_due() else f"booked {task.scheduled_for}",
+            "today" if task.is_due() else "booked",
+        ))
+    subtitle = f"→ {task.first_step}" if task.first_step else (
+        task.content.strip().splitlines()[0][:80] if task.content.strip() else ""
+    )
+    return Row(id=task.id, title=task.title, subtitle=subtitle, badges=badges, marker="·")
 
 
 def _focus_caption(task: Task | None, first_step: str) -> str:

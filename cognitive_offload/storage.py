@@ -115,6 +115,8 @@ class Config:
         self.break_minutes = 5
         self.warmup_steps = list(DEFAULT_WARMUP_STEPS)
         self.show_warmup = True
+        self.theme = "light"
+        self.calm_mode = False
 
     @property
     def state_file(self) -> Path:
@@ -149,6 +151,8 @@ class Config:
             cleaned = [s.strip() for s in steps if isinstance(s, str) and s.strip()]
             self.warmup_steps = cleaned or list(DEFAULT_WARMUP_STEPS)
         self.show_warmup = bool(data.get("show_warmup", True))
+        self.theme = "dark" if data.get("theme") == "dark" else "light"
+        self.calm_mode = bool(data.get("calm_mode", False))
         return self
 
     def save(self) -> None:
@@ -166,6 +170,8 @@ class Config:
                     "break_minutes": self.break_minutes,
                     "warmup_steps": list(self.warmup_steps),
                     "show_warmup": self.show_warmup,
+                    "theme": self.theme,
+                    "calm_mode": self.calm_mode,
                 },
             )
         except OSError as exc:

@@ -36,6 +36,11 @@ not urgent work has no deadline to make you start it, so you can **book a time**
 on it (`today`, `tomorrow`, `fri`, or a date) and it surfaces on the main tab as
 "booked for today".
 
+**Less on screen when you need less.** *Calm mode* (top right) folds away
+search, filters, sort and the task toolbar, leaving a capture box, the list, and
+the button that starts something. Nothing is deleted — untick it and everything
+is back.
+
 **On tone:** the app never counts what you missed. There is no streak to break,
 empty days on the strip are just empty, pausing is not failing, and tasks without
 a first step get no scolding marker. Nothing here is medical advice — these are
@@ -65,8 +70,8 @@ reinstall from python.org).
   line into a task, or dump every line into the task list at once.
 
 **Tasks**
-- Multi-select with Shift/Ctrl; done, priority, tag, move-to-top, delete and
-  send-to-matrix all act on the whole selection.
+- Multi-select with Shift/Ctrl (or the arrow keys); done, priority, tag,
+  move-to-top, delete and send-to-matrix all act on the whole selection.
 - Each task can carry a first step, a "feels like" category, and a booked date.
 - Search across titles, descriptions, first steps and tags; filter by tag or by
   feel; hide completed.
@@ -78,7 +83,21 @@ reinstall from python.org).
 **Focus sessions**
 - `Ctrl+G` picks something to start; `Ctrl+R` starts a session on the selection.
 - Warm-up ladder, then a countdown with a progress bar, then an offered break.
+- "Pop out" opens a small always-on-top window with just the task, the first
+  step and the clock — for when the countdown needs to be visible over whatever
+  you are actually working in. "Done early" banks the minutes you did do.
 - Finished sessions are logged to `sessions.json` and drawn as a 14-day strip.
+
+**Look and feel**
+- The interface is a port of [shadcn/ui](https://ui.shadcn.com)'s design system:
+  its zinc token palette, radius and type scale, and its button variants
+  (default / secondary / outline / ghost / destructive). shadcn itself is React
+  and Tailwind, so none of its code is used — `theme.py` reimplements the tokens
+  for ttk, which is what keeps this a dependency-free Python app.
+- Light and dark themes, toggled in the header and remembered between runs.
+  Dark is not decoration: a bright white slab at 11pm is its own barrier.
+- Tasks are rows, not lines of text — title, the first step underneath, and
+  colour-coded badges for feel, readiness, bookings and tags.
 
 **Matrix**
 - Add, edit, delete and move tasks between any two quadrants (not just into
@@ -123,8 +142,8 @@ cognitive_offload/
     main_tab.py             layout of the capture/tasks/scratchpad tab
     matrix_tab.py           layout of the matrix tab
     dialogs.py              modal dialogs (incl. the start picker + warm-up)
-    widgets.py              the momentum strip
-    theme.py                colours and ttk styles
+    widgets.py              badges, the task row list, momentum strip, focus window
+    theme.py                shadcn design tokens and the ttk styles built from them
 tests/                      unittest suite (no third-party runner needed)
 ```
 
