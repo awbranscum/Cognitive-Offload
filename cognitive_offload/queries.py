@@ -6,7 +6,7 @@ only ever renders whatever ``visible_tasks`` returns.
 
 from __future__ import annotations
 
-from .models import Task
+from .models import KIND_UNSET, Task, today_iso
 
 # Label shown in the combobox -> internal sort key.
 SORT_ORDERS: dict[str, str] = {
@@ -16,6 +16,7 @@ SORT_ORDERS: dict[str, str] = {
     "Completed": "completed",
 }
 DEFAULT_SORT = "priority"
+ALL_KINDS = "(any feel)"
 
 
 def filter_tasks(
@@ -23,6 +24,7 @@ def filter_tasks(
     search: str = "",
     tag: str | None = None,
     show_done: bool = True,
+    kind: str | None = None,
 ) -> list[Task]:
     result = list(tasks)
     search = (search or "").strip()
@@ -31,6 +33,8 @@ def filter_tasks(
     tag = (tag or "").strip().lower()
     if tag:
         result = [t for t in result if tag in t.tags]
+    if kind:
+        result = [t for t in result if t.kind == kind]
     if not show_done:
         result = [t for t in result if not t.done]
     return result
@@ -64,8 +68,9 @@ def visible_tasks(
     tag: str | None = None,
     order: str = DEFAULT_SORT,
     show_done: bool = True,
+    kind: str | None = None,
 ) -> list[Task]:
-    return sort_tasks(filter_tasks(tasks, search, tag, show_done), order)
+    return sort_tasks(filter_tasks(tasks, search, tag, show_done, kind), order)
 
 
 def all_tags(tasks: list[Task]) -> list[str]:
@@ -80,6 +85,63 @@ def counts(tasks: list[Task]) -> tuple[int, int, int]:
     done = sum(1 for t in tasks if t.done)
     flagged = sum(1 for t in tasks if t.priority and not t.done)
     return len(tasks) - done, done, flagged
+
+
+def due_tasks(tasks: list[Task], on: str | None = None) -> list[Task]:
+    """Open tasks with a booked time of today or earlier, soonest first."""
+    on = on or today_iso()
+    due = [t for t in tasks if not t.done and t.is_due(on)]
+    return sorted(due, key=lambda t: t.scheduled_for)
+
+
+def rank_for_starting(tasks: list[Task], kind: str | None = None, on: str | None = None) -> list[Task]:
+    """Order open tasks by how easy they are to *start*, best first.
+
+    Knowing what matters most is not the problem; getting moving is. So this
+    ranks by the things that lower the activation energy rather than by
+    importance:
+
+    * a task that already names its first step is far easier to begin;
+    * a booked time that has arrived is the whole point of booking it;
+    * a flagged task still beats an unflagged one, all else being equal.
+
+    ``kind`` narrows the list to work that feels a particular way. Tasks with
+    no kind set always stay in the running - being unsorted should never make
+    a task invisible.
+    """
+    on = on or today_iso()
+    candidates = [t for t in tasks if not t.done]
+    if kind:
+        candidates = [t for t in candidates if t.kind == kind or t.kind == KIND_UNSET]
+
+    def score(task: Task) -> tuple:
+        return (
+            -(3 if task.is_ready else 0)
+            - (3 if task.is_due(on) else 0)
+            - (2 if task.priority else 0)
+            - (1 if kind and task.kind == kind else 0),
+            task.created_at,  # older first: it has waited long enough
+            task.text.casefold(),
+        )
+
+    return sorted(candidates, key=score)
+
+
+def suggest_tasks(
+    tasks: list[Task],
+    kind: str | None = None,
+    limit: int = 3,
+    offset: int = 0,
+) -> list[Task]:
+    """A short shortlist. Long lists are the thing that causes the freeze."""
+    ranked = rank_for_starting(tasks, kind)
+    if not ranked:
+        return []
+    limit = max(1, limit)
+    start = offset % len(ranked)
+    # Wrap around so "show me others" keeps cycling instead of dead-ending.
+    doubled = ranked + ranked
+    return doubled[start:start + limit][:len(ranked)]
 
 
 def split_lines(raw: str) -> list[str]:

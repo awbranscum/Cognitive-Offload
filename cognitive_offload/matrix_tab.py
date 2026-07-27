@@ -8,6 +8,22 @@ from tkinter import ttk
 from .storage import CATEGORIES, CATEGORY_KEYS
 from .theme import QUADRANT_COLORS, style_listbox
 
+# What each quadrant is actually for. The Schedule quadrant gets the longest
+# note on purpose: important-but-not-urgent work is the stuff that quietly
+# never happens, and booking a time is what turns it into something the brain
+# will actually respond to.
+QUADRANT_ADVICE = {
+    "do_first": "Crises and real deadlines. Do these now — then come back and "
+                "check how many of them started life in Schedule.",
+    "schedule": "The quadrant that decides how your year goes: goals, health, "
+                "relationships, the slow important things. They have no deadline "
+                "to make you start, so give them one — book a time on each.",
+    "delegate": "Loud but not yours. Hand off, batch, or shrink these — they are "
+                "urgency borrowed from someone else's list.",
+    "eliminate": "Not urgent, not important. Deleting these is progress, not "
+                 "failure — a shorter list is easier to face.",
+}
+
 
 def build_matrix_tab(app, root: ttk.Frame) -> None:
     root.columnconfigure(0, weight=1)
@@ -49,19 +65,25 @@ def _build_quadrant(app, key: str) -> None:
     frame = ttk.Frame(app.matrix_notebook, padding=10)
     app.matrix_notebook.add(frame, text=short_label)
     frame.columnconfigure(1, weight=1)
-    frame.rowconfigure(1, weight=1)
+    frame.rowconfigure(2, weight=1)
 
     title_row = ttk.Frame(frame)
-    title_row.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 8))
+    title_row.grid(row=0, column=0, columnspan=3, sticky="ew")
     ttk.Label(title_row, text=long_label, style="Quadrant.TLabel").pack(side="left")
     count_label = ttk.Label(title_row, text="", style="Sub.TLabel")
     count_label.pack(side="left", padx=(10, 0))
     app.matrix_count_labels[key] = count_label
 
+    ttk.Label(
+        frame, text=QUADRANT_ADVICE[key], style="Hint.TLabel", wraplength=760, justify="left"
+    ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(2, 8))
+
     buttons = ttk.Frame(frame)
-    buttons.grid(row=1, column=0, sticky="nw", padx=(0, 10))
+    buttons.grid(row=2, column=0, sticky="nw", padx=(0, 10))
+    book_style = "Accent.TButton" if key == "schedule" else "TButton"
     actions = [
-        ("Add", lambda k=key: app.add_matrix_task(k), "Accent.TButton"),
+        ("Add", lambda k=key: app.add_matrix_task(k), "Accent.TButton" if key != "schedule" else "TButton"),
+        ("Book a time", lambda k=key: app.book_matrix_time(k), book_style),
         ("Edit", lambda k=key: app.edit_matrix_task(k), "TButton"),
         ("Move to…", lambda k=key: app.move_matrix_tasks(k), "TButton"),
         ("→ Tasks", lambda k=key: app.matrix_to_tasks(k), "TButton"),
@@ -73,9 +95,9 @@ def _build_quadrant(app, key: str) -> None:
 
     listbox = tk.Listbox(frame, height=18, selectmode=tk.EXTENDED, exportselection=False)
     style_listbox(listbox, background=QUADRANT_COLORS.get(key))
-    listbox.grid(row=1, column=1, sticky="nsew")
+    listbox.grid(row=2, column=1, sticky="nsew")
     scroll = ttk.Scrollbar(frame, orient="vertical", command=listbox.yview)
-    scroll.grid(row=1, column=2, sticky="ns")
+    scroll.grid(row=2, column=2, sticky="ns")
     listbox.configure(yscrollcommand=scroll.set)
 
     listbox.bind("<Double-Button-1>", lambda _e, k=key: app.edit_matrix_task(k))
@@ -86,6 +108,6 @@ def _build_quadrant(app, key: str) -> None:
         frame,
         text="Double click to edit · Delete removes · multi-select works with Shift/Ctrl",
         style="Hint.TLabel",
-    ).grid(row=2, column=0, columnspan=3, sticky="w", pady=(8, 0))
+    ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
     app.matrix_lists[key] = listbox

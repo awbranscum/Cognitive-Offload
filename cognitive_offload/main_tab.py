@@ -5,8 +5,10 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
-from .queries import SORT_ORDERS
+from .models import KIND_LABELS
+from .queries import ALL_KINDS, SORT_ORDERS
 from .theme import PALETTE, style_listbox, style_text
+from .widgets import MomentumStrip
 
 
 def build_main_tab(app, root: ttk.Frame) -> None:
@@ -69,22 +71,39 @@ def _build_top_row(app, root: ttk.Frame) -> None:
         style="Hint.TLabel",
     ).grid(row=1, column=0, columnspan=3, sticky="w")
 
-    timer = ttk.Labelframe(top, text="Focus timer", style="Card.TLabelframe")
+    timer = ttk.Labelframe(top, text="Focus session", style="Card.TLabelframe")
     timer.grid(row=0, column=1, sticky="nsew")
     for col in range(4):
         timer.columnconfigure(col, weight=1)
 
-    app.timer_label = ttk.Label(timer, text="25:00", style="Timer.TLabel", anchor="center")
-    app.timer_label.grid(row=0, column=0, columnspan=4, pady=(0, 4), sticky="ew")
+    app.focus_task_label = ttk.Label(
+        timer, textvariable=app.focus_task_var, style="Hint.TLabel", anchor="center",
+        wraplength=260, justify="center",
+    )
+    app.focus_task_label.grid(row=0, column=0, columnspan=4, sticky="ew")
 
-    app.work_minutes = tk.IntVar(value=25)
-    ttk.Label(timer, text="Min").grid(row=1, column=0, sticky="e", padx=(0, 4))
+    app.timer_label = ttk.Label(timer, text="15:00", style="Timer.TLabel", anchor="center")
+    app.timer_label.grid(row=1, column=0, columnspan=4, sticky="ew")
+
+    app.timer_progress = ttk.Progressbar(timer, mode="determinate", maximum=1000)
+    app.timer_progress.grid(row=2, column=0, columnspan=4, sticky="ew", pady=(0, 6))
+
+    app.work_minutes = tk.IntVar(value=15)
+    ttk.Label(timer, text="Min").grid(row=3, column=0, sticky="e", padx=(0, 4))
     ttk.Spinbox(timer, from_=1, to=240, width=4, textvariable=app.work_minutes,
-                command=app.on_timer_minutes_changed).grid(row=1, column=1, sticky="w")
+                command=app.on_timer_minutes_changed).grid(row=3, column=1, sticky="w")
     app.timer_button = ttk.Button(timer, text="Start", style="Accent.TButton",
                                   command=app.toggle_timer)
-    app.timer_button.grid(row=1, column=2, padx=4, sticky="ew")
-    ttk.Button(timer, text="Reset", command=app.reset_timer).grid(row=1, column=3, sticky="ew")
+    app.timer_button.grid(row=3, column=2, padx=4, sticky="ew")
+    ttk.Button(timer, text="Reset", command=app.reset_timer).grid(row=3, column=3, sticky="ew")
+
+    momentum = ttk.Frame(timer)
+    momentum.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+    app.momentum_strip = MomentumStrip(momentum, days=14, on_hover=app.on_momentum_hover)
+    app.momentum_strip.pack(side="left")
+    ttk.Label(momentum, textvariable=app.momentum_var, style="Hint.TLabel").pack(
+        side="left", padx=(8, 0)
+    )
 
 
 def _build_body(app, root: ttk.Frame) -> None:
@@ -102,10 +121,25 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
     card = ttk.Labelframe(body, text="Tasks / active stack", style="Card.TLabelframe")
     card.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
     card.columnconfigure(0, weight=1)
-    card.rowconfigure(3, weight=1)
+    card.rowconfigure(4, weight=1)
+
+    # The most important button on the screen: the way in when the list
+    # itself is the thing you cannot face.
+    start_row = ttk.Frame(card)
+    start_row.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+    ttk.Button(
+        start_row, text="Where do I start?", style="Accent.TButton", command=app.start_here
+    ).pack(side="left")
+    ttk.Button(
+        start_row, text="Focus on selected", command=app.focus_on_selected
+    ).pack(side="left", padx=(6, 0))
+    app.due_label = ttk.Label(start_row, textvariable=app.due_var, style="Hint.TLabel",
+                              cursor="hand2")
+    app.due_label.pack(side="left", padx=(12, 0))
+    app.due_label.bind("<Button-1>", lambda _e: app.show_booked())
 
     search_row = ttk.Frame(card)
-    search_row.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+    search_row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 6))
     ttk.Label(search_row, text="Search").pack(side="left", padx=(0, 6))
     app.search_entry = ttk.Entry(search_row, textvariable=app.search_var)
     app.search_entry.pack(side="left", fill="x", expand=True)
@@ -115,7 +149,7 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
                command=app.clear_search).pack(side="left", padx=(6, 0))
 
     filter_row = ttk.Frame(card)
-    filter_row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+    filter_row.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 6))
     ttk.Label(filter_row, text="Tag").pack(side="left", padx=(0, 4))
     app.tag_filter_combo = ttk.Combobox(
         filter_row, textvariable=app.tag_filter_var, width=12, state="readonly"
@@ -124,6 +158,17 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
     app.tag_filter_combo.bind("<<ComboboxSelected>>", lambda _e: app.refresh_tasks())
     ttk.Button(filter_row, text="All tags", style="Toolbar.TButton",
                command=app.clear_tag_filter).pack(side="left", padx=(4, 12))
+
+    ttk.Label(filter_row, text="Feels like").pack(side="left", padx=(0, 4))
+    kind_combo = ttk.Combobox(
+        filter_row,
+        textvariable=app.kind_filter_var,
+        values=[ALL_KINDS] + [label for key, label in KIND_LABELS.items() if key],
+        width=14,
+        state="readonly",
+    )
+    kind_combo.pack(side="left", padx=(0, 12))
+    kind_combo.bind("<<ComboboxSelected>>", lambda _e: app.refresh_tasks())
 
     ttk.Label(filter_row, text="Sort").pack(side="left", padx=(0, 4))
     sort_combo = ttk.Combobox(
@@ -138,7 +183,7 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
     # Two rows of equal-width buttons: a single row clipped its last entries
     # as soon as the window was anything less than very wide.
     toolbar = ttk.Frame(card)
-    toolbar.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+    toolbar.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(0, 6))
     rows = [
         [("Done", app.toggle_selected_done),
          ("Priority", app.toggle_selected_priority),
@@ -159,9 +204,9 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
 
     app.task_list = tk.Listbox(card, height=14, selectmode=tk.EXTENDED, exportselection=False)
     style_listbox(app.task_list)
-    app.task_list.grid(row=3, column=0, sticky="nsew")
+    app.task_list.grid(row=4, column=0, sticky="nsew")
     scroll = ttk.Scrollbar(card, orient="vertical", command=app.task_list.yview)
-    scroll.grid(row=3, column=1, sticky="ns")
+    scroll.grid(row=4, column=1, sticky="ns")
     app.task_list.configure(yscrollcommand=scroll.set)
 
     def toggle_done_key(_event):
@@ -175,7 +220,7 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
     app.task_list.bind("<<ListboxSelect>>", lambda _e: app.on_task_selection_changed())
 
     entry_row = ttk.Frame(card)
-    entry_row.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+    entry_row.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(8, 0))
     entry_row.columnconfigure(0, weight=1)
     app.task_entry = ttk.Entry(entry_row)
     app.task_entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))

@@ -1,6 +1,7 @@
 import unittest
+from datetime import date, timedelta
 
-from cognitive_offload.models import MatrixTask, Note, Task
+from cognitive_offload.models import MatrixTask, Note, Task, parse_date_input
 
 
 class TaskTests(unittest.TestCase):
@@ -69,6 +70,66 @@ class TaskTests(unittest.TestCase):
         self.assertIsNone(task.completed_at)
 
 
+class FirstStepAndFeelTests(unittest.TestCase):
+    def test_a_task_is_only_ready_once_it_names_a_first_step(self):
+        task = Task(text="write the report")
+        self.assertFalse(task.is_ready)
+        task.first_step = "  open last quarter's file  "
+        self.assertTrue(task.is_ready)
+
+    def test_first_step_is_trimmed(self):
+        self.assertEqual(Task(text="x", first_step="  do it  ").first_step, "do it")
+
+    def test_unknown_feels_fall_back_to_unsorted(self):
+        self.assertEqual(Task(text="x", kind="vibes").kind, "")
+        self.assertEqual(Task(text="x", kind="admin").kind, "admin")
+
+    def test_is_due_covers_today_and_anything_earlier(self):
+        task = Task(text="x", scheduled_for="2026-05-05")
+        self.assertTrue(task.is_due(on="2026-05-05"))
+        self.assertTrue(task.is_due(on="2026-06-01"))
+        self.assertFalse(task.is_due(on="2026-05-04"))
+        self.assertFalse(Task(text="x").is_due(on="2026-05-05"))
+
+    def test_new_fields_round_trip(self):
+        task = Task(text="x", first_step="step", kind="admin", scheduled_for="2026-01-01")
+        self.assertEqual(Task.from_dict(task.to_dict()), task)
+
+    def test_records_saved_before_these_fields_existed_still_load(self):
+        task = Task.from_dict({"text": "old", "done": False})
+        self.assertEqual(task.first_step, "")
+        self.assertEqual(task.kind, "")
+        self.assertEqual(task.scheduled_for, "")
+        self.assertFalse(task.is_ready)
+
+    def test_search_covers_the_first_step(self):
+        task = Task(text="opaque", first_step="call the bank")
+        self.assertTrue(task.matches("bank"))
+
+
+class DateInputTests(unittest.TestCase):
+    def test_blank_means_no_date(self):
+        self.assertEqual(parse_date_input(""), "")
+        self.assertEqual(parse_date_input("   "), "")
+
+    def test_today_and_tomorrow(self):
+        self.assertEqual(parse_date_input("today"), date.today().isoformat())
+        self.assertEqual(parse_date_input("TOMORROW"), (date.today() + timedelta(days=1)).isoformat())
+
+    def test_iso_dates_pass_through(self):
+        self.assertEqual(parse_date_input("2026-08-01"), "2026-08-01")
+
+    def test_weekday_names_resolve_to_the_next_such_day(self):
+        for name in ("monday", "fri", "Sunday"):
+            result = parse_date_input(name)
+            self.assertIsNotNone(result)
+            self.assertGreater(result, date.today().isoformat())
+
+    def test_nonsense_is_rejected_rather_than_guessed(self):
+        for value in ("squelch", "32nd of never", "2026-13-45"):
+            self.assertIsNone(parse_date_input(value))
+
+
 class NoteTests(unittest.TestCase):
     def test_render_includes_timestamp(self):
         note = Note(text="idea", created_at="2024-05-05 09:00:00")
@@ -82,6 +143,27 @@ class MatrixTaskTests(unittest.TestCase):
         self.assertEqual(task.text, "Ship it")
         self.assertEqual(task.description, "notes here")
         self.assertFalse(task.done)
+
+    def test_to_task_carries_first_step_feel_and_booking(self):
+        matrix_task = MatrixTask(
+            title="Ship it", content="notes", first_step="open the repo",
+            kind="deadline", scheduled_for="2026-08-08",
+        )
+        task = matrix_task.to_task()
+        self.assertEqual(task.first_step, "open the repo")
+        self.assertEqual(task.kind, "deadline")
+        self.assertEqual(task.scheduled_for, "2026-08-08")
+
+    def test_matrix_task_round_trips_through_json(self):
+        original = MatrixTask(title="t", first_step="s", kind="admin", scheduled_for="2026-01-01")
+        clone = MatrixTask.from_dict(original.to_dict())
+        self.assertEqual(clone.first_step, "s")
+        self.assertEqual(clone.kind, "admin")
+        self.assertEqual(clone.scheduled_for, "2026-01-01")
+
+    def test_matrix_is_due(self):
+        self.assertTrue(MatrixTask(title="t", scheduled_for="2020-01-01").is_due())
+        self.assertFalse(MatrixTask(title="t").is_due())
 
 
 if __name__ == "__main__":

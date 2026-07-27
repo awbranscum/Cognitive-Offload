@@ -101,14 +101,14 @@ class StateStoreTests(TempDirTest):
 class ConfigTests(TempDirTest):
     def test_missing_config_uses_defaults(self):
         config = Config(self.root / "cfg.json").load()
-        self.assertEqual(config.timer_minutes, 25)
+        self.assertEqual(config.timer_minutes, 15)
         self.assertTrue(config.show_done)
 
     def test_corrupt_config_does_not_raise(self):
         path = self.root / "cfg.json"
         path.write_text("<<<garbage>>>", encoding="utf-8")
         config = Config(path).load()
-        self.assertEqual(config.timer_minutes, 25)
+        self.assertEqual(config.timer_minutes, 15)
 
     def test_roundtrip(self):
         path = self.root / "cfg.json"

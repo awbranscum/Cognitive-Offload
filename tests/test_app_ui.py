@@ -231,14 +231,224 @@ class AppSmokeTests(unittest.TestCase):
         self.app.reset_timer()
         self.assertEqual(self.app.timer_label.cget("text"), "02:00")
 
-    def test_editing_a_task_updates_text_tags_and_description(self):
+    def test_editing_a_task_updates_every_field(self):
         self.capture("rough note")
         self.select(0)
         with mock.patch("cognitive_offload.app.TaskEditorDialog") as dialog:
-            dialog.return_value.show.return_value = ("polished", "the details", ["work"])
+            dialog.return_value.show.return_value = {
+                "title": "polished",
+                "content": "the details",
+                "tags": ["work"],
+                "first_step": "open the doc",
+                "kind": "creative",
+                "scheduled_for": "2026-08-01",
+            }
             self.app.edit_selected_details()
         task = self.app.tasks[0]
-        self.assertEqual((task.text, task.description, task.tags), ("polished", "the details", ["work"]))
+        self.assertEqual(task.text, "polished")
+        self.assertEqual(task.description, "the details")
+        self.assertEqual(task.tags, ["work"])
+        self.assertEqual(task.first_step, "open the doc")
+        self.assertEqual(task.kind, "creative")
+        self.assertEqual(task.scheduled_for, "2026-08-01")
+        self.assertTrue(task.is_ready)
+
+    # -- starting / focus sessions -------------------------------------
+    def test_start_here_picks_a_task_and_opens_the_session(self):
+        self.capture("the thing")
+        chosen = self.app.tasks[0]
+        with mock.patch("cognitive_offload.app.StartHereDialog") as picker, \
+             mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            picker.return_value.show.return_value = chosen
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "open the file", "warmup_done": 2,
+            }
+            self.app.start_here()
+
+        self.assertTrue(self.app._timer_running)
+        self.assertEqual(self.app._focus_task_id, chosen.id)
+        # The first step named at the door is kept on the task.
+        self.assertEqual(self.app.tasks[0].first_step, "open the file")
+        self.assertIn("the thing", self.app.focus_task_var.get())
+        self.app.pause_timer()
+
+    def test_start_here_with_nothing_open_says_so_kindly(self):
+        with mock.patch("cognitive_offload.app.StartHereDialog") as picker:
+            self.app.start_here()
+            picker.assert_not_called()
+        self.assertIn("fine place", self.app.status_var.get())
+
+    def test_cancelling_the_focus_dialog_starts_nothing(self):
+        self.capture("nope")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = None
+            self.app.focus_on_selected()
+        self.assertFalse(self.app._timer_running)
+
+    def test_finishing_a_session_logs_it_and_shows_momentum(self):
+        self.capture("deep work")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "open it", "warmup_done": 0,
+            }
+            self.app.focus_on_selected()
+
+        # Jump the clock to the end instead of waiting fifteen minutes.
+        self.app._timer_deadline = self.app._timer_deadline - 10_000
+        with mock.patch("cognitive_offload.app.messagebox.askyesno", return_value=False):
+            self.app._tick_timer()
+
+        self.assertFalse(self.app._timer_running)
+        self.assertEqual(self.app.session_log.count_today(), 1)
+        self.assertEqual(self.app.session_log.sessions[0].task, "deep work")
+        self.assertEqual(self.app.session_log.minutes_today(), 15)
+        self.assertIn("1 session today", self.app.momentum_var.get())
+
+    def test_a_break_is_offered_and_does_not_log_a_second_session(self):
+        self.capture("something")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 1, "first_step": "", "warmup_done": 0,
+            }
+            self.app.focus_on_selected()
+        self.app._timer_deadline -= 10_000
+        with mock.patch("cognitive_offload.app.messagebox.askyesno", return_value=True):
+            self.app._tick_timer()  # finishes focus, starts the break
+
+        self.assertTrue(self.app._timer_running)
+        self.assertEqual(self.app._timer_mode, "break")
+        self.app._timer_deadline -= 10_000
+        with mock.patch("cognitive_offload.app.messagebox.askyesno", return_value=False):
+            self.app._tick_timer()  # break ends, no new session offered
+        self.assertEqual(len(self.app.session_log.sessions), 1)
+
+    def test_sessions_persist_across_restarts(self):
+        self.app.session_log.record(minutes=15, task="earlier work")
+        from cognitive_offload.sessions import SessionLog
+
+        reloaded = SessionLog(self.app.config_store.sessions_file).load()
+        self.assertEqual(len(reloaded.sessions), 1)
+        self.assertEqual(reloaded.sessions[0].task, "earlier work")
+
+    def test_focus_on_multiple_selection_is_refused(self):
+        self.capture("one")
+        self.capture("two")
+        self.select(0, 1)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            self.app.focus_on_selected()
+            starter.assert_not_called()
+        self.assertIn("one at a time", self.app.status_var.get())
+
+    def test_timer_progress_bar_tracks_elapsed_time(self):
+        self.app.start_timer(minutes=10)
+        self.assertEqual(self.app.timer_progress["value"], 0)
+        self.app._timer_deadline -= 300  # five minutes in
+        self.app._tick_timer()
+        self.assertAlmostEqual(self.app.timer_progress["value"], 500, delta=20)
+        self.app.pause_timer()
+
+    # -- feel, first step, booked time ---------------------------------
+    def test_kind_filter_narrows_the_list(self):
+        self.capture("paperwork")
+        self.capture("write something")
+        self.app.tasks[0].kind = "creative"
+        self.app.tasks[1].kind = "admin"
+        self.app.kind_filter_var.set("Admin sprint")
+        self.app.refresh_tasks()
+        self.assertEqual(len(self.visible_texts()), 1)
+        self.assertIn("paperwork", self.visible_texts()[0])
+        self.app.clear_kind_filter()
+        self.assertEqual(len(self.visible_texts()), 2)
+
+    def test_list_marks_a_task_that_has_a_first_step(self):
+        self.capture("vague thing")
+        # No nagging marker on tasks without one - only a positive mark.
+        self.assertNotIn("ready", self.visible_texts()[0])
+        self.app.tasks[0].first_step = "open the folder"
+        self.app.refresh_tasks()
+        self.assertIn("ready", self.visible_texts()[0])
+
+    def test_booked_tasks_surface_in_the_banner(self):
+        from cognitive_offload.models import today_iso
+
+        self.assertEqual(self.app.due_var.get(), "")
+        self.capture("booked thing")
+        self.app.tasks[0].scheduled_for = today_iso()
+        self.app.refresh_tasks()
+        self.assertIn("1 booked", self.app.due_var.get())
+
+    def test_booking_a_matrix_task_persists_and_counts(self):
+        from cognitive_offload.models import today_iso
+
+        self.app.matrix.create("schedule", "annual review prep", "")
+        self.app.refresh_matrix()
+        self.app.matrix_lists["schedule"].selection_set(0)
+        with mock.patch("cognitive_offload.app.simpledialog.askstring", return_value="today"):
+            self.app.book_matrix_time("schedule")
+
+        booked = self.app.matrix.list("schedule")[0]
+        self.assertEqual(booked.scheduled_for, today_iso())
+        self.assertTrue(booked.is_due())
+        self.assertIn("booked for today", self.app.due_var.get())
+
+    def test_matrix_rows_show_the_booking_and_ready_mark(self):
+        task = self.app.matrix.create("schedule", "quarterly review", "notes")
+        task.first_step = "open the calendar"
+        self.app.matrix.set_scheduled(task, "2999-01-01")
+        self.app.refresh_matrix()
+        row = self.app.matrix_lists["schedule"].get(0)
+        self.assertIn("quarterly review", row)
+        self.assertIn("ready", row)
+        self.assertIn("booked 2999-01-01", row)
+        self.assertNotIn("(today)", row)
+
+    def test_booking_rejects_nonsense_dates(self):
+        self.app.matrix.create("schedule", "something", "")
+        self.app.refresh_matrix()
+        self.app.matrix_lists["schedule"].selection_set(0)
+        with mock.patch("cognitive_offload.app.simpledialog.askstring", return_value="squelch"), \
+             mock.patch("cognitive_offload.app.messagebox.showwarning") as warn:
+            self.app.book_matrix_time("schedule")
+            warn.assert_called_once()
+        self.assertEqual(self.app.matrix.list("schedule")[0].scheduled_for, "")
+
+    def test_matrix_round_trip_keeps_first_step_and_booking(self):
+        self.capture("carry me")
+        task = self.app.tasks[0]
+        task.first_step = "open the drawer"
+        task.kind = "admin"
+        task.scheduled_for = "2026-08-02"
+        self.select(0)
+        with mock.patch("cognitive_offload.app.QuadrantDialog") as dialog:
+            dialog.return_value.show.return_value = "schedule"
+            self.app.send_selected_to_matrix()
+
+        stored = self.app.matrix.list("schedule")[0]
+        self.assertEqual(stored.first_step, "open the drawer")
+        self.assertEqual(stored.scheduled_for, "2026-08-02")
+
+        self.app.matrix_lists["schedule"].selection_set(0)
+        self.app.matrix_to_tasks("schedule")
+        back = self.app.tasks[0]
+        self.assertEqual(back.first_step, "open the drawer")
+        self.assertEqual(back.kind, "admin")
+        self.assertEqual(back.scheduled_for, "2026-08-02")
+
+    def test_new_fields_survive_save_and_reload(self):
+        self.capture("full task")
+        self.app.tasks[0].first_step = "click the thing"
+        self.app.tasks[0].kind = "deadline"
+        self.app.tasks[0].scheduled_for = "2026-09-09"
+        self.app.save_state(silent=True)
+        self.app.tasks = []
+        self.app.load_state()
+        task = self.app.tasks[0]
+        self.assertEqual(task.first_step, "click the thing")
+        self.assertEqual(task.kind, "deadline")
+        self.assertEqual(task.scheduled_for, "2026-09-09")
 
     def test_dirty_flag_tracks_edits_and_saves(self):
         self.assertFalse(self.app._dirty)

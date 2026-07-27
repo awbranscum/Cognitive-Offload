@@ -22,6 +22,15 @@ DEFAULT_MATRIX_PATH = Path.home() / "MatrixTasks"
 CONFIG_PATH = Path.home() / ".cognitive_offload_config.json"
 
 STATE_FILENAME = "data.json"
+SESSIONS_FILENAME = "sessions.json"
+
+# The bridge out of high-stimulation activity: a few small, concrete steps
+# between where you are and the task, so starting is not one big leap.
+DEFAULT_WARMUP_STEPS = [
+    "Stand up — stretch, water, a lap of the room",
+    "Clear the desk and close the tabs that are shouting",
+    "Open the file and read one line of it",
+]
 
 # key -> (folder name, short label, long label)
 CATEGORIES: dict[str, tuple[str, str, str]] = {
@@ -97,14 +106,23 @@ class Config:
         self.path = Path(path)
         self.db_path = DEFAULT_DB_PATH
         self.matrix_db_path = DEFAULT_MATRIX_PATH
-        self.timer_minutes = 25
+        self.timer_minutes = 15
         self.show_done = True
         self.sort_order = "priority"
         self.autosave = True
+        # Short by design: a 15-minute block is small enough to agree to.
+        self.focus_minutes = 15
+        self.break_minutes = 5
+        self.warmup_steps = list(DEFAULT_WARMUP_STEPS)
+        self.show_warmup = True
 
     @property
     def state_file(self) -> Path:
         return self.db_path / STATE_FILENAME
+
+    @property
+    def sessions_file(self) -> Path:
+        return self.db_path / SESSIONS_FILENAME
 
     def load(self) -> "Config":
         """Load config, falling back to defaults for anything unusable."""
@@ -119,11 +137,18 @@ class Config:
             return self
         self.db_path = _path_or(data.get("db_path"), DEFAULT_DB_PATH)
         self.matrix_db_path = _path_or(data.get("matrix_db_path"), DEFAULT_MATRIX_PATH)
-        self.timer_minutes = _int_or(data.get("timer_minutes"), 25, 1, 240)
+        self.timer_minutes = _int_or(data.get("timer_minutes"), 15, 1, 240)
         self.show_done = bool(data.get("show_done", True))
         order = data.get("sort_order")
         self.sort_order = order if order in {"priority", "created", "alpha", "completed"} else "priority"
         self.autosave = bool(data.get("autosave", True))
+        self.focus_minutes = _int_or(data.get("focus_minutes"), 15, 1, 120)
+        self.break_minutes = _int_or(data.get("break_minutes"), 5, 1, 60)
+        steps = data.get("warmup_steps")
+        if isinstance(steps, list):
+            cleaned = [s.strip() for s in steps if isinstance(s, str) and s.strip()]
+            self.warmup_steps = cleaned or list(DEFAULT_WARMUP_STEPS)
+        self.show_warmup = bool(data.get("show_warmup", True))
         return self
 
     def save(self) -> None:
@@ -137,6 +162,10 @@ class Config:
                     "show_done": self.show_done,
                     "sort_order": self.sort_order,
                     "autosave": self.autosave,
+                    "focus_minutes": self.focus_minutes,
+                    "break_minutes": self.break_minutes,
+                    "warmup_steps": list(self.warmup_steps),
+                    "show_warmup": self.show_warmup,
                 },
             )
         except OSError as exc:
@@ -173,7 +202,7 @@ class StateStore:
         try:
             data = read_json(self.path)
         except FileNotFoundError:
-            return {"tasks": [], "scratchpad": "", "timer_minutes": 25}
+            return {"tasks": [], "scratchpad": "", "timer_minutes": 15}
         except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise StorageError(f"Could not read {self.path}: {exc}") from exc
         if not isinstance(data, dict):
@@ -200,7 +229,8 @@ class StateStore:
         return {
             "tasks": tasks,
             "scratchpad": scratchpad,
-            "timer_minutes": _int_or(data.get("timer_minutes"), 25, 1, 240),
+            # Short by default: 15 minutes is the length you can agree to.
+            "timer_minutes": _int_or(data.get("timer_minutes"), 15, 1, 240),
         }
 
     @staticmethod
@@ -323,6 +353,15 @@ class MatrixStore:
             self._unlink(old_path)
         return task
 
+    def set_scheduled(self, task: MatrixTask, when: str) -> MatrixTask:
+        """Book (or clear, with ``""``) the time this task will happen."""
+        task.scheduled_for = when or ""
+        task.updated_at = now_stamp()
+        if task.path is None:
+            task.path = self._new_path(task.category, task)
+        self._write(task)
+        return task
+
     def move(self, task: MatrixTask, category: str) -> MatrixTask:
         if category == task.category:
             return task
@@ -340,7 +379,13 @@ class MatrixStore:
             self._unlink(Path(task.path))
 
     def add_from_task(self, category: str, task: Task) -> MatrixTask:
-        return self.create(category, task.text, task.description)
+        """Move a main-list task into a quadrant without dropping any fields."""
+        created = self.create(category, task.text, task.description)
+        created.first_step = task.first_step
+        created.kind = task.kind
+        created.scheduled_for = task.scheduled_for
+        self._write(created)
+        return created
 
     def _write(self, task: MatrixTask) -> None:
         try:
