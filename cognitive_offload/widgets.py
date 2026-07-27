@@ -25,6 +25,16 @@ _TEXT_WIDTHS: dict[tuple, int] = {}
 _FONTS: dict[tuple, object] = {}
 
 
+def _mix(base: str, other: str, amount: float) -> str:
+    """Blend two hex colours, for surfaces the token set does not cover."""
+    def parts(value):
+        value = value.lstrip("#")
+        return [int(value[i:i + 2], 16) for i in (0, 2, 4)]
+
+    a, b = parts(base), parts(other)
+    return "#" + "".join(f"{round(x + (y - x) * amount):02x}" for x, y in zip(a, b))
+
+
 @dataclass
 class Badge:
     text: str
@@ -78,16 +88,20 @@ class BadgeStrip(tk.Canvas):
         self._draw()
 
     def _text_width(self, text: str) -> int:
-        key = (self._font, text)
+        # Keyed by interpreter as well as font: a Font object belongs to the Tk
+        # instance that made it, and the app can be constructed more than once
+        # in a process.
+        interp = self.tk.interpaddr()
+        key = (interp, self._font, text)
         cached = _TEXT_WIDTHS.get(key)
         if cached is not None:
             return cached
         from tkinter import font as tkfont
 
         try:
-            measurer = _FONTS.get(self._font)
+            measurer = _FONTS.get((interp, self._font))
             if measurer is None:
-                measurer = _FONTS[self._font] = tkfont.Font(root=self, font=self._font)
+                measurer = _FONTS[(interp, self._font)] = tkfont.Font(root=self, font=self._font)
             width = measurer.measure(text)
         except tk.TclError:
             return 7 * len(text)  # no Tk available; good enough to lay out
@@ -176,8 +190,10 @@ class RowList(ttk.Frame):
 
     def restyle(self) -> None:
         t = tokens()
-        self.canvas.configure(background=self._bg(), highlightbackground=t.border,
-                              highlightcolor=t.border)
+        # Tk reserves the highlight border whether or not the widget has focus,
+        # so a thickness of 2 shows keyboard focus without shifting the layout.
+        self.canvas.configure(background=self._bg(), highlightthickness=2,
+                              highlightbackground=t.border, highlightcolor=t.ring)
         self.inner.configure(background=self._bg())
         self._empty_label.configure(background=self._bg(), foreground=t.muted_foreground)
         self.render()
@@ -186,10 +202,15 @@ class RowList(ttk.Frame):
     def set_rows(self, rows: list[Row], keep_selection: bool = True) -> None:
         selected_ids = {self._rows[i].id for i in self._selected if i < len(self._rows)} \
             if keep_selection else set()
+        shrank = len(rows) < len(self._rows)
         self._rows = list(rows)
         self._selected = {i for i, row in enumerate(self._rows) if row.id in selected_ids}
         self._anchor = min(self._selected) if self._selected else None
         self.render()
+        if shrank:
+            # Otherwise the view stays parked past the end of the new list and
+            # a search that matches shows an empty panel.
+            self.canvas.yview_moveto(0)
 
     def render(self) -> None:
         """Refill the pooled row widgets rather than rebuilding them.
@@ -316,10 +337,20 @@ class RowList(ttk.Frame):
             return cell["frame"], cell["cells"]
         return None, []
 
-    def _paint_selection(self) -> None:
+    def _selected_bg(self) -> str:
+        """Selection colour with enough contrast against *this* surface.
+
+        The quadrant lists sit on their own tints, where the shared selected
+        token is nearly invisible.
+        """
         t = tokens()
+        if self._surface is None:
+            return t.selected
+        return _mix(self._surface, t.foreground, 0.16 if t.name == "light" else 0.24)
+
+    def _paint_selection(self) -> None:
         for index in range(len(self._rows)):
-            self._paint_row(index, t.selected if index in self._selected else self._bg())
+            self._paint_row(index, self._selected_bg() if index in self._selected else self._bg())
 
     def _paint_row(self, index: int, colour: str) -> None:
         frame, widgets = self._row_widgets(index)
@@ -332,9 +363,11 @@ class RowList(ttk.Frame):
                 pass
 
     def _hover(self, index: int, entering: bool) -> None:
-        if index in self._selected:
+        if index in self._selected or index >= len(self._rows):
             return
-        self._paint_row(index, tokens().hover if entering else self._bg())
+        hover = tokens().hover if self._surface is None else _mix(
+            self._surface, tokens().foreground, 0.06)
+        self._paint_row(index, hover if entering else self._bg())
 
     def _click(self, index: int, _event=None, toggle: bool = False, extend: bool = False):
         self.canvas.focus_set()
@@ -502,6 +535,11 @@ class MomentumStrip(tk.Canvas):
             self._on_hover(text)
 
 
+# Neutral by design: never "distraction", never an instruction to focus.
+PARK_HINT = "Something else on your mind? Park it here."
+PARK_DONE = "Parked in the scratchpad. Back to it."
+
+
 class FocusWindow(tk.Toplevel):
     """A small always-on-top window holding only the timer and the first step.
 
@@ -510,11 +548,12 @@ class FocusWindow(tk.Toplevel):
     are actually working in.
     """
 
-    def __init__(self, master, on_pause=None, on_done=None, on_close=None):
+    def __init__(self, master, on_pause=None, on_done=None, on_close=None, on_park=None):
         super().__init__(master)
         self._on_pause = on_pause
         self._on_done = on_done
         self._on_close = on_close
+        self._on_park = on_park
         self.title("Focus")
         self.resizable(False, False)
         try:
@@ -553,6 +592,22 @@ class FocusWindow(tk.Toplevel):
         ttk.Button(row, text="Done early", style="SmGhost.TButton",
                    command=self._done).grid(row=0, column=1, sticky="ew")
 
+        # An intrusive thought mid-block should cost two seconds, not a trip
+        # back to the main window. Parking never touches the timer.
+        park = ttk.Frame(body, style="Card.TFrame")
+        park.pack(fill="x", pady=(12, 0))
+        park.columnconfigure(0, weight=1)
+        self.park_entry = ttk.Entry(park)
+        self.park_entry.grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        self.park_entry.bind("<Return>", lambda _e: self._park() or "break")
+        self.park_entry.bind("<Escape>", lambda _e: self._clear_park() or "break")
+        ttk.Button(park, text="Park", style="SmGhost.TButton",
+                   command=self._park).grid(row=0, column=1)
+        self.park_var = tk.StringVar(value=PARK_HINT)
+        ttk.Label(body, textvariable=self.park_var, style="CardMuted.TLabel",
+                  anchor="center", wraplength=280, justify="center").pack(fill="x", pady=(4, 0))
+
+        self.pause_button.focus_set()
         self.update_idletasks()
         self.geometry(f"320x{max(210, self.winfo_reqheight())}")
 
@@ -574,6 +629,19 @@ class FocusWindow(tk.Toplevel):
     def _pause(self):
         if self._on_pause:
             self._on_pause()
+
+    def _park(self):
+        text = self.park_entry.get().strip()
+        if not text:
+            return  # an empty Enter is a no-op: no dialog, no beep
+        self.park_entry.delete(0, tk.END)
+        if self._on_park:
+            self._on_park(text)
+        self.park_var.set(PARK_DONE)
+        self.after(4000, lambda: self.park_var.set(PARK_HINT))
+
+    def _clear_park(self):
+        self.park_entry.delete(0, tk.END)
 
     def _done(self):
         if self._on_done:

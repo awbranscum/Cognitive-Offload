@@ -257,8 +257,17 @@ class MatrixTask:
     # happen; without it the Schedule quadrant is where things go to be
     # forgotten.
     scheduled_for: str = ""
+    tags: list[str] = field(default_factory=list)
+    priority: int = 0
     # Absolute path of the backing file; assigned by the store, never stored.
     path: object = None
+
+    def __post_init__(self) -> None:
+        # Same coercion as Task: an unknown kind would otherwise render as a
+        # badge with no colour and no meaning.
+        self.kind = self.kind if self.kind in TASK_KINDS else KIND_UNSET
+        self.tags = _as_tags(self.tags)
+        self.priority = 1 if self.priority else 0
 
     def to_dict(self) -> dict:
         return {
@@ -271,6 +280,8 @@ class MatrixTask:
             "first_step": self.first_step,
             "kind": self.kind,
             "scheduled_for": self.scheduled_for,
+            "tags": list(self.tags),
+            "priority": self.priority,
         }
 
     @classmethod
@@ -285,6 +296,8 @@ class MatrixTask:
             first_step=_as_str(data.get("first_step")),
             kind=_as_str(data.get("kind")),
             scheduled_for=_as_str(data.get("scheduled_for")),
+            tags=_as_tags(data.get("tags")),
+            priority=1 if data.get("priority") else 0,
         )
 
     @property
@@ -305,4 +318,6 @@ class MatrixTask:
             first_step=self.first_step,
             kind=self.kind,
             scheduled_for=self.scheduled_for,
+            tags=list(self.tags),
+            priority=self.priority,
         )

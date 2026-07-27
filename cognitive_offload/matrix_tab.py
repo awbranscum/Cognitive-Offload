@@ -43,7 +43,7 @@ def build_matrix_tab(app, root: ttk.Frame) -> None:
     right.grid(row=0, column=1, sticky="e")
     ttk.Button(right, text="Back to tasks", style="SmOutline.TButton",
                command=lambda: app.notebook.select(0)).pack(side="right")
-    ttk.Button(right, text="Refresh", style="SmGhost.TButton",
+    ttk.Button(right, text="Refresh", style="SmPageGhost.TButton",
                command=app.refresh_matrix).pack(side="right", padx=(0, 6))
 
     path_row = ttk.Frame(header)
@@ -51,7 +51,7 @@ def build_matrix_tab(app, root: ttk.Frame) -> None:
     app.matrix_path_label = ttk.Label(path_row, textvariable=app.matrix_path_var,
                                       style="Link.TLabel")
     app.matrix_path_label.pack(side="left")
-    ttk.Button(path_row, text="Change folder", style="SmGhost.TButton",
+    ttk.Button(path_row, text="Change folder", style="SmPageGhost.TButton",
                command=app.change_matrix_db_folder).pack(side="left", padx=(8, 0))
 
     app.matrix_notebook = ttk.Notebook(root)

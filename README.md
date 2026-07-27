@@ -43,6 +43,12 @@ no "0 done today". When a session ends, it asks whether the task is finished, so
 closing it out happens at the moment you are already thinking about it instead
 of being one more thing to remember.
 
+**Park it.** The pop-out has a one-line box: a thought that arrives mid-block
+("email Dana about the invoice") goes to the scratchpad in two seconds without
+pausing the timer, opening the main window, or making you decide anything. It
+lands in the scratchpad rather than the task list on purpose — the list is a
+commitment, and deciding is what you are trying not to do right then.
+
 **Where the block lands on the clock.** The timer shows "ends 15:42" under the
 countdown as well as the time remaining — a duration is exactly the
 representation that time blindness struggles with, and a clock time is
@@ -110,6 +116,9 @@ reinstall from python.org).
   for ttk, which is what keeps this a dependency-free Python app.
 - Light and dark themes, toggled in the header and remembered between runs.
   Dark is not decoration: a bright white slab at 11pm is its own barrier.
+- Colour choices are checked, not eyeballed: body text meets WCAG 4.5:1 and
+  focus rings meet 3:1 in both themes, the keyboard focus ring is visible on
+  the task list, and there are no unstyled Tk dialogs or dropdowns left.
 - Tasks are rows, not lines of text — title, the first step underneath, and
   colour-coded badges for feel, readiness, bookings and tags. The row widgets
   are pooled and refilled rather than rebuilt, so a 300-task list re-renders in
@@ -125,6 +134,11 @@ reinstall from python.org).
 
 **Saving**
 - Auto-saves every 30s when something changed, and on quit.
+- `Ctrl+Z` reaches across the task list and the matrix: undoing a "to matrix"
+  move deletes the file it created, and undoing the reverse writes it back, so
+  a task is never left in both places or neither.
+- The `.bak` is written once per run, so it still holds the session as you
+  opened it rather than being overwritten by an autosave 30 seconds later.
 - Writes are atomic (temp file + rename) and the previous version is kept as
   `data.json.bak`, so a crash mid-save cannot cost you the file.
 - `Export…` writes a copy anywhere; `Open…` loads a session from elsewhere.

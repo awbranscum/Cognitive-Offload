@@ -196,9 +196,11 @@ class StateStore:
 
     def __init__(self, path: Path):
         self.path = Path(path)
+        self._backed_up = False
 
     def set_path(self, path: Path) -> None:
         self.path = Path(path)
+        self._backed_up = False
 
     def exists(self) -> bool:
         return self.path.exists()
@@ -258,11 +260,17 @@ class StateStore:
             raise StorageError(f"Could not save to {self.path}: {exc}") from exc
 
     def _backup(self) -> None:
-        """Keep one generation of the previous save as ``data.json.bak``."""
-        if not self.path.exists():
+        """Keep the session as it was when the app started, as ``.bak``.
+
+        Autosave fires every 30 seconds, so a backup that is refreshed on
+        every write is gone long before anyone notices they need it. Writing
+        it once per run means the fallback is the state you last opened.
+        """
+        if self._backed_up or not self.path.exists():
             return
         try:
             shutil.copy2(self.path, self.path.with_suffix(self.path.suffix + ".bak"))
+            self._backed_up = True
         except OSError:
             pass  # A missing backup should never block the real save.
 
@@ -386,12 +394,22 @@ class MatrixStore:
 
     def add_from_task(self, category: str, task: Task) -> MatrixTask:
         """Move a main-list task into a quadrant without dropping any fields."""
-        created = self.create(category, task.text, task.description)
-        created.first_step = task.first_step
-        created.kind = task.kind
-        created.scheduled_for = task.scheduled_for
+        created = MatrixTask(
+            title=task.text, content=task.description, category=category,
+            first_step=task.first_step, kind=task.kind,
+            scheduled_for=task.scheduled_for, tags=list(task.tags),
+            priority=task.priority,
+        )
+        created.path = self._new_path(category, created)
         self._write(created)
         return created
+
+    def restore(self, task: MatrixTask) -> MatrixTask:
+        """Write a task back after it was moved out — the undo half of delete."""
+        if task.path is None:
+            task.path = self._new_path(task.category, task)
+        self._write(task)
+        return task
 
     def _write(self, task: MatrixTask) -> None:
         try:

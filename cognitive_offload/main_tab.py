@@ -64,7 +64,7 @@ def _build_header(app, root: ttk.Frame) -> None:
     app.theme_button.pack(side="right")
     ttk.Checkbutton(right, text="Calm mode", variable=app.calm_var,
                     command=app.apply_calm_mode).pack(side="right", padx=(0, 12))
-    ttk.Button(right, text="Shortcuts", style="SmGhost.TButton",
+    ttk.Button(right, text="Shortcuts", style="SmPageGhost.TButton",
                command=app.show_shortcuts).pack(side="right", padx=(0, 6))
 
     path_row = ttk.Frame(header)
@@ -73,7 +73,7 @@ def _build_header(app, root: ttk.Frame) -> None:
                                cursor="hand2")
     app.path_label.pack(side="left")
     app.path_label.bind("<Button-1>", lambda _e: app.copy_session_path())
-    ttk.Button(path_row, text="Change folder", style="SmGhost.TButton",
+    ttk.Button(path_row, text="Change folder", style="SmPageGhost.TButton",
                command=app.change_db_folder).pack(side="left", padx=(8, 0))
     app.header_extras = path_row
 
@@ -290,7 +290,7 @@ def _build_footer(app, root: ttk.Frame) -> None:
 
     for label, command in (("Save", app.save_state), ("Open", app.load_state_dialog),
                            ("Export", app.export_state), ("Undo", app.undo)):
-        ttk.Button(footer, text=label, style="SmGhost.TButton", command=command).pack(
+        ttk.Button(footer, text=label, style="SmPageGhost.TButton", command=command).pack(
             side="left", padx=(0, 4))
 
     ttk.Label(footer, textvariable=app.status_var, style="Muted.TLabel").pack(side="right")

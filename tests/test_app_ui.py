@@ -4,6 +4,7 @@ Skipped automatically when tkinter or a display is unavailable, so the suite
 still runs on a headless box without X.
 """
 
+import contextlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -56,6 +57,14 @@ class AppSmokeTests(unittest.TestCase):
 
     def visible_texts(self):
         return [self.app.task_list.get(i) for i in range(self.app.task_list.size())]
+
+    def answer_prompt(self, value):
+        """Answer the themed one-line prompt without opening a real window."""
+        patcher = mock.patch("cognitive_offload.app.PromptDialog")
+        dialog = patcher.start()
+        dialog.return_value.show.return_value = value
+        self.addCleanup(patcher.stop)
+        return contextlib.nullcontext()
 
     def answer_session_end(self, choice):
         """Answer the end-of-session dialog without opening a real window."""
@@ -157,7 +166,7 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(len(self.visible_texts()), 2)
 
         self.select(0)
-        with mock.patch("cognitive_offload.app.simpledialog.askstring", return_value="errand"):
+        with self.answer_prompt("errand"):
             self.app.tag_selected()
         self.app.tag_filter_var.set("errand")
         self.app.refresh_tasks()
@@ -405,7 +414,7 @@ class AppSmokeTests(unittest.TestCase):
         self.app.matrix.create("schedule", "annual review prep", "")
         self.app.refresh_matrix()
         self.app.matrix_lists["schedule"].selection_set(0)
-        with mock.patch("cognitive_offload.app.simpledialog.askstring", return_value="today"):
+        with self.answer_prompt("today"):
             self.app.book_matrix_time("schedule")
 
         booked = self.app.matrix.list("schedule")[0]
@@ -428,7 +437,7 @@ class AppSmokeTests(unittest.TestCase):
         self.app.matrix.create("schedule", "something", "")
         self.app.refresh_matrix()
         self.app.matrix_lists["schedule"].selection_set(0)
-        with mock.patch("cognitive_offload.app.simpledialog.askstring", return_value="squelch"), \
+        with self.answer_prompt("squelch"), \
              mock.patch("cognitive_offload.app.messagebox.showwarning") as warn:
             self.app.book_matrix_time("schedule")
             warn.assert_called_once()
@@ -746,6 +755,235 @@ class AppSmokeTests(unittest.TestCase):
         self.assertRegex(self.app.finish_var.get(), r"^ends \d{2}:\d{2}$")
         self.app.pause_timer()
         self.assertEqual(self.app.finish_var.get(), "")
+
+    # -- round-two regressions -----------------------------------------
+    def test_a_loaded_session_does_not_start_part_finished(self):
+        """A stale total made a fresh clock look two-thirds run, then logged it."""
+        self.capture("something")
+        self.app.work_minutes.set(5)
+        self.app.save_state(silent=True)
+        self.app.load_state()
+        self.assertEqual(self.app._timer_total, 5 * 60)
+        self.assertEqual(self.app._timer_remaining, 5 * 60)
+        self.assertEqual(self.app.timer_progress["value"], 0)
+        self.app.finish_session_early()
+        self.assertEqual(self.app.session_log.count_today(), 0)
+
+    def test_opening_another_file_keeps_working_in_it(self):
+        other = Path(self._tmp.name) / "other.json"
+        from cognitive_offload.storage import StateStore
+        from cognitive_offload.models import Task
+        StateStore(other).save([Task(text="from the other file")], "", 15)
+        with mock.patch("cognitive_offload.app.filedialog.askopenfilename",
+                        return_value=str(other)):
+            self.app.load_state_dialog()
+        self.assertEqual([t.text for t in self.app.tasks], ["from the other file"])
+        self.assertEqual(self.app.state_store.path, other)
+        self.capture("added after opening")
+        self.app.save_state(silent=True)
+        self.assertIn("added after opening", other.read_text(encoding="utf-8"))
+
+    def test_changing_folders_asks_before_dropping_unsaved_work(self):
+        self.capture("precious")
+        from cognitive_offload.storage import StorageError
+        target = Path(self._tmp.name) / "elsewhere"
+        target.mkdir()
+        with mock.patch.object(self.app.state_store, "save", side_effect=StorageError("disk full")), \
+             mock.patch("cognitive_offload.app.filedialog.askdirectory", return_value=str(target)), \
+             mock.patch("cognitive_offload.app.messagebox.askyesno", return_value=False) as ask:
+            self.app.change_db_folder()
+            ask.assert_called_once()
+        self.assertEqual([t.text for t in self.app.tasks], ["precious"])
+        self.assertNotEqual(self.app.config_store.db_path, target)
+
+    def test_undo_after_sending_to_the_matrix_removes_the_file_too(self):
+        self.capture("goes to the matrix")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.QuadrantDialog") as dialog:
+            dialog.return_value.show.return_value = "schedule"
+            self.app.send_selected_to_matrix()
+        self.assertEqual(len(self.app.matrix.list("schedule")), 1)
+        self.app.undo()
+        self.assertEqual([t.text for t in self.app.tasks], ["goes to the matrix"])
+        self.assertEqual(self.app.matrix.list("schedule"), [])  # not in two places
+
+    def test_undo_after_pulling_from_the_matrix_puts_the_file_back(self):
+        self.app.matrix.create("schedule", "comes back", "notes")
+        self.app.refresh_matrix()
+        self.app.matrix_lists["schedule"].selection_set(0)
+        self.app.matrix_to_tasks("schedule")
+        self.assertEqual(self.app.matrix.list("schedule"), [])
+        self.app.undo()
+        self.assertEqual(self.app.tasks, [])
+        restored = self.app.matrix.list("schedule")
+        self.assertEqual([t.title for t in restored], ["comes back"])
+
+    def test_sending_to_the_matrix_keeps_tags_and_priority(self):
+        self.capture("carry everything")
+        task = self.app.tasks[0]
+        task.tags = ["work"]
+        task.priority = 1
+        self.select(0)
+        with mock.patch("cognitive_offload.app.QuadrantDialog") as dialog:
+            dialog.return_value.show.return_value = "delegate"
+            self.app.send_selected_to_matrix()
+        stored = self.app.matrix.list("delegate")[0]
+        self.assertEqual(stored.tags, ["work"])
+        self.assertEqual(stored.priority, 1)
+        self.assertEqual(stored.to_task().tags, ["work"])
+        self.assertEqual(stored.to_task().priority, 1)
+
+    def test_clearing_the_scratchpad_is_undoable(self):
+        self.app.note_text.insert("1.0", "notes I would hate to lose")
+        with mock.patch("cognitive_offload.app.messagebox.askyesno", return_value=True):
+            self.app.clear_notes()
+        self.assertEqual(self.app.scratchpad_text(), "")
+        self.app.undo()
+        self.assertIn("hate to lose", self.app.scratchpad_text())
+
+    def test_matrix_selection_survives_a_refresh(self):
+        self.app.matrix.create("schedule", "stays selected", "")
+        self.app.refresh_matrix()
+        self.app.matrix_lists["schedule"].selection_set(0)
+        self.app.refresh_matrix()
+        self.assertEqual(self.app.matrix_lists["schedule"].curselection(), (0,))
+
+    def test_starting_a_session_during_a_break_is_offered(self):
+        self.capture("a task")
+        self.select(0)
+        self.app.start_timer(minutes=5, mode="break")
+        with mock.patch("cognitive_offload.app.messagebox.askyesno", return_value=False) as ask, \
+             mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            self.app.focus_on_selected()
+            ask.assert_called_once()
+            self.assertIn("break", ask.call_args[0][1].lower())
+            starter.assert_not_called()
+        self.app.pause_timer()
+
+    def test_cancelling_the_new_session_leaves_the_running_one_alone(self):
+        self.capture("in progress")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "", "warmup_done": 0}
+            self.app.focus_on_selected()
+        running_id = self.app._focus_task_id
+
+        with mock.patch("cognitive_offload.app.messagebox.askyesno", return_value=True), \
+             mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = None  # cancelled at the ladder
+            self.app.focus_on_selected()
+        self.assertTrue(self.app._timer_running)
+        self.assertEqual(self.app._focus_task_id, running_id)
+        self.assertEqual(self.app.session_log.count_today(), 0)
+        self.app.pause_timer()
+
+    def test_the_already_running_prompt_reports_time_spent(self):
+        self.capture("a task")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 20, "first_step": "", "warmup_done": 0}
+            self.app.focus_on_selected()
+        self.app._timer_deadline -= 300  # five minutes in
+        self.app._tick_timer()
+        with mock.patch("cognitive_offload.app.messagebox.askyesno", return_value=False) as ask:
+            self.app.focus_on_selected()
+            self.assertIn("5 minutes into", ask.call_args[0][1])
+        self.app.pause_timer()
+
+    def test_pausing_in_the_last_second_still_banks_the_session(self):
+        self.capture("nearly done")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "", "warmup_done": 0}
+            self.app.focus_on_selected()
+        self.app._timer_deadline -= (15 * 60 - 1)  # one second left
+        self.app.pause_timer()
+        with self.answer_session_end("carry_on"):
+            self.app.finish_session_early()
+        self.assertEqual(self.app.session_log.count_today(), 1)
+
+    def test_parking_a_thought_does_not_touch_the_session(self):
+        self.capture("the work")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "", "warmup_done": 0}
+            self.app.focus_on_selected()
+        self.app.open_focus_window()
+        window = self.app._focus_window
+        window.park_entry.insert(0, "email Dana about the invoice")
+        window._park()
+
+        self.assertIn("email Dana", self.app.scratchpad_text())
+        self.assertEqual(window.park_entry.get(), "")
+        self.assertEqual([t.text for t in self.app.tasks], ["the work"])  # not a task
+        self.assertTrue(self.app._timer_running)                          # not paused
+        self.assertEqual(self.app.session_log.count_today(), 0)
+        window._park()  # empty park is a no-op
+        self.app.pause_timer()
+
+    def test_search_scroll_resets_when_the_list_shrinks(self):
+        for index in range(60):
+            self.capture(f"task {index:02d}")
+        self.app.task_list.canvas.yview_moveto(1.0)
+        self.app.search_var.set("task 03")
+        self.app.refresh_tasks()
+        self.assertEqual(self.app.task_list.canvas.yview()[0], 0.0)
+
+    # -- coverage the audit found missing -------------------------------
+    def test_switching_theme_actually_recolours_widgets(self):
+        self.capture("a task")
+        before = self.app.task_list.canvas.cget("background")
+        self.app.toggle_theme()
+        after = self.app.task_list.canvas.cget("background")
+        self.assertNotEqual(before, after)
+        from cognitive_offload import theme
+        self.assertEqual(after, theme.DARK.card)
+
+    def test_rows_are_really_drawn_not_just_recorded(self):
+        self.capture("visible task")
+        self.app.tasks[0].first_step = "open it"
+        self.app.refresh_tasks()
+        cell = self.app.task_list._pool[0]
+        self.assertEqual(cell["title"].cget("text"), "visible task")
+        self.assertIn("open it", cell["subtitle"].cget("text"))
+        self.assertTrue(cell["visible"])
+
+    def test_the_empty_state_is_rendered_not_just_configured(self):
+        self.assertEqual(self.app.task_list.size(), 0)
+        self.assertTrue(self.app.task_list._empty_label.winfo_manager())
+        self.capture("now there is one")
+        self.assertFalse(self.app.task_list._empty_label.winfo_manager())
+
+    def test_momentum_strip_draws_a_cell_per_day_and_never_red(self):
+        self.app.session_log.record(minutes=15)
+        self.app.refresh_momentum()
+        strip = self.app.momentum_strip
+        items = strip.find_all()
+        self.assertEqual(len(items), 14)
+        colours = {strip.itemcget(i, "fill").lower() for i in items}
+        for colour in colours:
+            red, green, blue = (int(colour[i:i + 2], 16) for i in (1, 3, 5))
+            self.assertFalse(red > green + 40 and red > blue + 40, f"{colour} reads as red")
+
+    def test_calm_mode_is_restored_from_config_at_startup(self):
+        from cognitive_offload.app import CognitiveOffloadApp
+        self.app.calm_var.set(True)
+        self.app.apply_calm_mode()
+        self.app._save_config()
+
+        from cognitive_offload.storage import Config
+        # A second app in the same process is how "next launch" is observable
+        # without tearing down the interpreter under the test runner.
+        restored = CognitiveOffloadApp(config=Config(self.app.config_store.path).load())
+        restored.withdraw()
+        self.addCleanup(restored.destroy)
+        self.assertTrue(restored.calm_var.get())
+        self.assertEqual(restored.filter_row.winfo_manager(), "")
+        self.assertEqual(restored.header_extras.winfo_manager(), "")
 
     def test_dirty_flag_tracks_edits_and_saves(self):
         self.assertFalse(self.app._dirty)

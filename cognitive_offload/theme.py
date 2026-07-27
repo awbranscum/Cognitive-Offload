@@ -58,7 +58,7 @@ LIGHT = Tokens(
     card="#ffffff",
     card_foreground="#09090b",
     muted="#f4f4f5",
-    muted_foreground="#71717a",
+    muted_foreground="#63636b",  # 5.4:1 on the page, 6.0:1 on a card
     border="#d9d9de",
     input="#d4d4d8",
     primary="#18181b",
@@ -69,11 +69,11 @@ LIGHT = Tokens(
     accent_foreground="#18181b",
     destructive="#dc2626",
     destructive_foreground="#fafafa",
-    ring="#a1a1aa",
+    ring="#18181b",  # shadcn zinc's own ring; 17.7:1 on card, a real ring
     success="#15803d",
     warning="#b45309",
-    selected="#eef2f7",
-    hover="#f8f8f9",
+    selected="#dbe6f5",  # visible against the card and every quadrant tint
+    hover="#f1f1f3",
     quadrants={
         "do_first": "#fef2f2",
         "schedule": "#eff6ff",
@@ -89,7 +89,7 @@ LIGHT = Tokens(
         "booked": ("#fef3c7", "#92400e"),
         "today": ("#fde68a", "#78350f"),
         "tag": ("#f4f4f5", "#71717a"),
-        "done": ("#f4f4f5", "#a1a1aa"),
+        "done": ("#f4f4f5", "#64646c"),  # 5.3:1; was 2.3:1 and unreadable
     },
 )
 
@@ -111,11 +111,11 @@ DARK = Tokens(
     accent_foreground="#fafafa",
     destructive="#f87171",
     destructive_foreground="#1c1917",
-    ring="#52525b",
+    ring="#d4d4d8",  # 12.4:1 on the dark card
     success="#4ade80",
     warning="#fbbf24",
-    selected="#26262b",
-    hover="#1c1c20",
+    selected="#2c3542",
+    hover="#1f1f24",
     quadrants={
         "do_first": "#241618",
         "schedule": "#121c2b",
@@ -131,7 +131,7 @@ DARK = Tokens(
         "booked": ("#3a2f12", "#fcd34d"),
         "today": ("#4a3a12", "#fde68a"),
         "tag": ("#27272a", "#a1a1aa"),
-        "done": ("#27272a", "#71717a"),
+        "done": ("#27272a", "#9a9aa2"),  # 5.3:1; was 3.1:1
     },
 )
 
@@ -225,11 +225,13 @@ def apply_theme(root: tk.Misc, name: str = "light") -> Tokens:
     _button_variants(style, t)
 
     style.configure("TEntry", fieldbackground=t.card, foreground=t.foreground,
-                    bordercolor=t.input, insertcolor=t.foreground, padding=6, relief="flat")
+                    bordercolor=t.input, insertcolor=t.foreground, padding=6, relief="flat",
+                    selectbackground=t.selected, selectforeground=t.foreground)
     style.map("TEntry", bordercolor=[("focus", t.ring)])
     style.configure("TCombobox", fieldbackground=t.card, background=t.card,
                     foreground=t.foreground, bordercolor=t.input, arrowcolor=t.muted_foreground,
-                    padding=4, relief="flat")
+                    padding=4, relief="flat",
+                    selectbackground=t.selected, selectforeground=t.foreground)
     style.map("TCombobox",
               fieldbackground=[("readonly", t.card)],
               background=[("readonly", t.card)],
@@ -239,12 +241,29 @@ def apply_theme(root: tk.Misc, name: str = "light") -> Tokens:
 
     for suffix, bg in (("TCheckbutton", t.background), ("Card.TCheckbutton", t.card)):
         style.configure(suffix, background=bg, foreground=t.foreground,
-                        indicatorcolor=t.card, indicatorbackground=t.card, font=font(SIZE_SM))
+                        indicatorcolor=t.card, indicatorbackground=t.card,
+                        indicatorforeground=t.primary_foreground,
+                        upperbordercolor=t.input, lowerbordercolor=t.input,
+                        font=font(SIZE_SM))
+        style.map(
+            suffix,
+            background=[("active", bg)],
+            # Tick and indicator must move together, or the mark is drawn in
+            # the foreground colour on top of a same-coloured box.
+            indicatorcolor=[("selected", t.primary), ("disabled", t.muted)],
+            indicatorforeground=[("selected", t.primary_foreground)],
+            upperbordercolor=[("selected", t.primary)],
+            lowerbordercolor=[("selected", t.primary)],
+        )
+    # Dialog bodies sit on the page background, not on a card.
+    for suffix, bg in (("TRadiobutton", t.background), ("Card.TRadiobutton", t.card)):
+        style.configure(suffix, background=bg, foreground=t.foreground, font=font(),
+                        indicatorcolor=t.card, indicatorbackground=t.card,
+                        upperbordercolor=t.input, lowerbordercolor=t.input)
         style.map(suffix, background=[("active", bg)],
-                  indicatorcolor=[("selected", t.primary)])
-    style.configure("TRadiobutton", background=t.card, foreground=t.foreground, font=font())
-    style.map("TRadiobutton", background=[("active", t.card)],
-              indicatorcolor=[("selected", t.primary)])
+                  indicatorcolor=[("selected", t.primary)],
+                  upperbordercolor=[("selected", t.primary)],
+                  lowerbordercolor=[("selected", t.primary)])
 
     # Tabs, shadcn style: a muted pill container, the active tab a raised card.
     style.configure("TNotebook", background=t.background, borderwidth=0, tabmargins=(0, 4, 0, 0))
@@ -258,10 +277,22 @@ def apply_theme(root: tk.Misc, name: str = "light") -> Tokens:
     style.configure("TProgressbar", background=t.primary, troughcolor=t.muted,
                     bordercolor=t.muted, lightcolor=t.primary, darkcolor=t.primary,
                     thickness=6)
-    style.configure("Vertical.TScrollbar", background=t.border, troughcolor=t.background,
-                    bordercolor=t.background, arrowcolor=t.muted_foreground, relief="flat")
+    style.configure("Vertical.TScrollbar", background=t.border, troughcolor=t.card,
+                    bordercolor=t.card, arrowcolor=t.muted_foreground, relief="flat")
     style.map("Vertical.TScrollbar", background=[("active", t.muted_foreground)])
     style.configure("TSeparator", background=t.border)
+
+    # The combobox popdown is a plain Tk listbox living in its own toplevel,
+    # so ttk styles never reach it - without this it stays white-on-white in
+    # dark mode.
+    root.option_add("*TCombobox*Listbox.background", t.card)
+    root.option_add("*TCombobox*Listbox.foreground", t.foreground)
+    root.option_add("*TCombobox*Listbox.selectBackground", t.selected)
+    root.option_add("*TCombobox*Listbox.selectForeground", t.foreground)
+    root.option_add("*TCombobox*Listbox.font", font())
+    root.option_add("*TCombobox*Listbox.borderWidth", 0)
+    root.option_add("*TCombobox*Listbox.highlightThickness", 1)
+    root.option_add("*TCombobox*Listbox.highlightBackground", t.border)
 
     return t
 
@@ -298,6 +329,9 @@ def _button_variants(style: ttk.Style, t: Tokens) -> None:
             t.accent, t.accent_foreground, t.border)
     variant("Outline.TButton", t.card, t.foreground, t.accent, t.accent_foreground, t.border, 1)
     variant("Ghost.TButton", t.card, t.muted_foreground, t.accent, t.foreground, t.card)
+    # Same variant, for the ones that sit on the page rather than on a card.
+    variant("PageGhost.TButton", t.background, t.muted_foreground,
+            t.accent, t.foreground, t.background)
     variant("Destructive.TButton", t.card, t.destructive,
             t.destructive, t.destructive_foreground, t.border, 1)
 

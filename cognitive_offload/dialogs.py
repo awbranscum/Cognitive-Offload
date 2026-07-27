@@ -369,7 +369,8 @@ class QuadrantDialog(ModalDialog):
         self.choice = tk.StringVar(value=initial if initial in CATEGORIES else "do_first")
         for key in CATEGORY_KEYS:
             ttk.Radiobutton(
-                self.body, text=CATEGORIES[key][2], variable=self.choice, value=key
+                self.body, text=CATEGORIES[key][2], variable=self.choice, value=key,
+                style="TRadiobutton",
             ).pack(anchor="w", pady=3)
 
         self.button_row("Move")
@@ -377,6 +378,31 @@ class QuadrantDialog(ModalDialog):
 
     def collect(self):
         return self.choice.get()
+
+
+class PromptDialog(ModalDialog):
+    """A themed one-line prompt, replacing ``simpledialog.askstring``."""
+
+    def __init__(self, parent: tk.Misc, title: str, prompt: str, initial: str = "",
+                 hint: str = "", ok_text: str = "OK"):
+        super().__init__(parent, title)
+        self.resizable(False, False)
+        ttk.Label(self.body, text=prompt, wraplength=360, justify="left").pack(anchor="w")
+        self.entry = ttk.Entry(self.body, width=42)
+        self.entry.pack(fill="x", pady=(8, 0))
+        self.entry.insert(0, initial)
+        self.entry.select_range(0, "end")
+        if hint:
+            ttk.Label(self.body, text=hint, style="Muted.TLabel",
+                      wraplength=360, justify="left").pack(anchor="w", pady=(4, 0))
+        self.button_row(ok_text)
+        self.entry.focus_set()
+        self.bind("<Return>", self.ok)
+
+    def collect(self):
+        # "" is a valid answer (it clears a booking); None means cancelled,
+        # and cancel() sets that without going through collect().
+        return self.entry.get().strip()
 
 
 class SessionEndDialog(ModalDialog):
@@ -396,13 +422,19 @@ class SessionEndDialog(ModalDialog):
         ttk.Label(self.body, text=task_text, style="Muted.TLabel",
                   wraplength=380, justify="left").pack(anchor="w", pady=(6, 14))
 
+        first = None
         for label, value, style in (
             ("It's finished — mark it done", "done", "Default.TButton"),
             (f"Not yet — take {break_minutes} minutes", "break", "Outline.TButton"),
             ("Not yet — keep going", "carry_on", "Ghost.TButton"),
         ):
-            ttk.Button(self.body, text=label, style=style,
-                       command=lambda v=value: self._choose(v)).pack(fill="x", pady=2)
+            button = ttk.Button(self.body, text=label, style=style,
+                                command=lambda v=value: self._choose(v))
+            button.pack(fill="x", pady=2)
+            first = first or button
+        if first is not None:
+            first.focus_set()
+            self.bind("<Return>", lambda _e: self._choose("done"))
 
     def _choose(self, value: str) -> None:
         self.result = value

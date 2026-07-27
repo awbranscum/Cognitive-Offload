@@ -7,10 +7,11 @@ import math
 import time
 import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, messagebox, simpledialog, ttk
+from tkinter import filedialog, messagebox, ttk
 
 from . import APP_TITLE, __version__
 from .dialogs import (
+    PromptDialog,
     QuadrantDialog,
     SessionEndDialog,
     ShortcutsDialog,
@@ -86,6 +87,7 @@ class CognitiveOffloadApp(tk.Tk):
         self._timer_remaining = self._timer_total
         self._timer_deadline = 0.0
         self._timer_mode = "focus"  # or "break"
+        self._session_banked = False  # set once a block has been logged
         self._focus_task_id: str | None = None
         self._session_count = 0
         self._focus_window: FocusWindow | None = None
@@ -109,9 +111,11 @@ class CognitiveOffloadApp(tk.Tk):
 
         self.theme_name = self.config_store.theme
         apply_theme(self, self.theme_name)
+        self._ui_ready = False
         self._build_ui()
         self._bind_shortcuts()
         self.apply_calm_mode()
+        self._ui_ready = True
 
         self._ensure_folders()
         self.load_state(initial=True)
@@ -332,15 +336,30 @@ class CognitiveOffloadApp(tk.Tk):
     # undo
     # ------------------------------------------------------------------
     def push_undo(self, label: str) -> None:
-        self._undo_stack.append((label, [t.copy() for t in self.tasks]))
+        self._undo_stack.append([label, [t.copy() for t in self.tasks], None])
         del self._undo_stack[:-UNDO_LIMIT]
+
+    def attach_undo(self, restore) -> None:
+        """Give the pending undo entry a side effect to run as well.
+
+        Moving a task between the list and the matrix touches two stores;
+        restoring only the task list would leave the task in both places, or
+        in neither.
+        """
+        if self._undo_stack:
+            self._undo_stack[-1][2] = restore
 
     def undo(self) -> None:
         if not self._undo_stack:
             self.set_status("Nothing to undo.")
             return
-        label, snapshot = self._undo_stack.pop()
+        label, snapshot, restore = self._undo_stack.pop()
         self.tasks = snapshot
+        if restore is not None:
+            try:
+                restore()
+            except StorageError as exc:
+                messagebox.showerror("Undo failed", str(exc))
         self.refresh_tasks(keep_selection=False)
         self.mark_dirty()
         self.set_status(f"Undid: {label}.")
@@ -408,8 +427,10 @@ class CognitiveOffloadApp(tk.Tk):
         tasks = self._require_selection("tag it")
         if not tasks:
             return
-        tag = simpledialog.askstring("Add tag", "Tag name:", parent=self)
-        if not tag or not tag.strip():
+        with self._ask_over_focus():
+            tag = PromptDialog(self, "Add tag", "Tag name", hint="Lower-cased automatically.",
+                               ok_text="Add").show()
+        if not tag:
             return
         self.push_undo("add tag")
         changed = sum(1 for task in tasks if task.add_tag(tag))
@@ -546,6 +567,9 @@ class CognitiveOffloadApp(tk.Tk):
             return
         if not messagebox.askyesno("Clear scratchpad", "Clear everything in the scratchpad?"):
             return
+        previous = self.scratchpad_text()
+        self.push_undo("clear scratchpad")
+        self.attach_undo(lambda text=previous: self.set_scratchpad(text))
         self.set_scratchpad("")
         self.mark_dirty()
         self.set_status("Scratchpad cleared.")
@@ -554,14 +578,15 @@ class CognitiveOffloadApp(tk.Tk):
     # matrix
     # ------------------------------------------------------------------
     def refresh_matrix(self) -> None:
+        unreadable = []
         for index, key in enumerate(CATEGORY_KEYS):
             try:
                 tasks = self.matrix.list(key)
-            except (OSError, StorageError):
+            except (OSError, StorageError) as exc:
                 tasks = []
+                unreadable.append(f"{category_label(key)}: {exc}")
             self._matrix_cache[key] = tasks
-            self.matrix_lists[key].set_rows([_matrix_row(t) for t in tasks],
-                                            keep_selection=False)
+            self.matrix_lists[key].set_rows([_matrix_row(t) for t in tasks])
             self.matrix_count_labels[key].config(
                 text=f"{len(tasks)} task{'s' if len(tasks) != 1 else ''}"
             )
@@ -569,6 +594,9 @@ class CognitiveOffloadApp(tk.Tk):
             self.matrix_notebook.tab(index, text=f"{category_label(key)}{suffix}")
         self.matrix_path_var.set(display_path(self.matrix.root))
         self.refresh_due()
+        if unreadable:
+            # An empty quadrant and an unreadable one look identical; say which.
+            self.set_status("Could not read " + "; ".join(unreadable))
 
     def _selected_matrix_tasks(self, category: str) -> list:
         cached = self._matrix_cache.get(category, [])
@@ -661,6 +689,7 @@ class CognitiveOffloadApp(tk.Tk):
             return
         self.push_undo("import from matrix")
         moved = 0
+        restored: list = []
         for task in tasks:
             self.tasks.insert(0, task.to_task())
             try:
@@ -668,7 +697,9 @@ class CognitiveOffloadApp(tk.Tk):
             except StorageError as exc:
                 messagebox.showerror("Move failed", str(exc))
                 break
+            restored.append(task)
             moved += 1
+        self.attach_undo(lambda items=restored: self._restore_matrix_tasks(items))
         self.refresh_matrix()
         self.refresh_tasks(keep_selection=False)
         self.mark_dirty()
@@ -702,18 +733,27 @@ class CognitiveOffloadApp(tk.Tk):
             return
         self.push_undo("send to matrix")
         moved = 0
+        created: list = []
+        failed = False
         for task in tasks:
             try:
-                self.matrix.add_from_task(destination, task)
+                created.append(self.matrix.add_from_task(destination, task))
             except StorageError as exc:
                 messagebox.showerror("Move failed", str(exc))
+                failed = True
                 break
             self.tasks.remove(task)
             moved += 1
+        self.attach_undo(lambda items=created: self._remove_matrix_tasks(items))
         self.refresh_tasks(keep_selection=False)
         self.refresh_matrix()
         self.mark_dirty()
-        self.set_status(f"Moved {moved} task(s) to {category_label(destination)}.")
+        # Say what actually happened, not what was asked for.
+        self.set_status(
+            f"Moved {moved} of {len(tasks)} task(s) to {category_label(destination)}."
+            if failed else
+            f"Moved {moved} task(s) to {category_label(destination)}."
+        )
         self.notebook.select(1)
 
     # ------------------------------------------------------------------
@@ -770,14 +810,16 @@ class CognitiveOffloadApp(tk.Tk):
             self.search_var.set("")
             self.tag_filter_var.set(ALL_TAGS)
             self.kind_filter_var.set(ALL_KINDS)
+            self.show_done_var.set(True)
         for widget in (self.filter_row, self.task_toolbar, self.header_extras, self.search_row):
             if calm:
                 widget.grid_remove()
             else:
                 widget.grid()
         self.refresh_tasks()
-        self.set_status("Calm mode on — the extras are hidden, not gone." if calm
-                        else "Calm mode off.")
+        if self._ui_ready:
+            self.set_status("Calm mode on — the extras are hidden, not gone." if calm
+                            else "Calm mode off.")
 
     # ------------------------------------------------------------------
     # starting: the part that actually hurts
@@ -803,30 +845,40 @@ class CognitiveOffloadApp(tk.Tk):
 
     def begin_focus(self, task: Task | None) -> None:
         """Warm-up ladder, then run the session."""
-        if self._timer_running and self._timer_mode == "focus":
+        if self._timer_running:
             # Losing track that a block is already running is the exact failure
             # mode this app exists for, so say so instead of silently
             # mis-crediting the log.
-            current = self._focus_task()
-            name = f'"{current.text}"' if current else "the current block"
-            if not messagebox.askyesno(
-                "A session is already running",
-                f"You are {self._timer_remaining // 60} minutes into {name}.\n\n"
-                "Drop it and start a new one?",
-            ):
-                return
-            self._stop_ticking()
-            self._timer_remaining = self._timer_total
-        result = StartFocusDialog(
-            self,
-            task_text=task.text if task else "",
-            first_step=task.first_step if task else "",
-            minutes=self.config_store.focus_minutes,
-            warmup_steps=self.config_store.warmup_steps,
-            show_warmup=self.config_store.show_warmup,
-        ).show()
+            if self._timer_mode == "break":
+                question = "A break is running.\n\nEnd it and start a session now?"
+            else:
+                current = self._focus_task()
+                name = f'"{current.text}"' if current else "the current block"
+                elapsed = max(0, self._timer_total - self._timer_remaining) // 60
+                question = (
+                    f"You are {elapsed} minute{'s' if elapsed != 1 else ''} into {name}.\n\n"
+                    "Drop it and start a new one?"
+                )
+            with self._ask_over_focus():
+                if not messagebox.askyesno("Something is already running", question):
+                    return
+
+        with self._ask_over_focus():
+            result = StartFocusDialog(
+                self,
+                task_text=task.text if task else "",
+                first_step=task.first_step if task else "",
+                minutes=self.config_store.focus_minutes,
+                warmup_steps=self.config_store.warmup_steps,
+                show_warmup=self.config_store.show_warmup,
+            ).show()
         if not result:
-            return
+            return  # nothing torn down: the running block is still running
+
+        if self._timer_running:
+            # Only now is the replacement certain. Bank what was actually done
+            # rather than dropping those minutes on the floor.
+            self.finish_session_early()
 
         if task is not None and result["first_step"] and result["first_step"] != task.first_step:
             # Naming the first move is worth keeping even if the session dies.
@@ -874,6 +926,7 @@ class CognitiveOffloadApp(tk.Tk):
             on_pause=self.toggle_timer,
             on_done=self.finish_session_early,
             on_close=self._forget_focus_window,
+            on_park=self.park_thought,
         )
         self._sync_focus_window()
 
@@ -901,6 +954,16 @@ class CognitiveOffloadApp(tk.Tk):
                 except tk.TclError:
                     pass
 
+    def park_thought(self, text: str) -> None:
+        """Catch a mid-session thought without ending the session.
+
+        It goes to the scratchpad rather than the task list on purpose: the
+        list is a commitment, and deciding is what you are trying not to do
+        right now.
+        """
+        self.append_scratchpad(text, stamped=True)
+        self.set_status("Parked in the scratchpad.")
+
     def _forget_focus_window(self) -> None:
         self._focus_window = None
 
@@ -924,15 +987,17 @@ class CognitiveOffloadApp(tk.Tk):
 
     def finish_session_early(self) -> None:
         """Stop now and keep the minutes you actually did."""
-        if not self._timer_running and (
-            self._timer_remaining <= 0 or self._timer_remaining >= self._timer_total
+        if self._session_banked or (
+            not self._timer_running and self._timer_remaining >= self._timer_total
         ):
-            # Nothing left to bank: the block either already logged itself on
-            # expiry, or never started. Logging here would invent minutes.
+            # Nothing left to bank: the block either already logged itself, or
+            # never started. Logging here would invent minutes.
             return
         elapsed = max(1, round((self._timer_total - self._timer_remaining) / 60))
         self._stop_ticking()
         mode, self._timer_mode = self._timer_mode, "focus"
+        if mode == "break":
+            self._timer_total = self._minutes() * 60
         self._timer_remaining = self._timer_total
         self.timer_button.config(text="Start")
         self._update_timer_label()
@@ -940,6 +1005,16 @@ class CognitiveOffloadApp(tk.Tk):
             self.set_status("Break ended.")
             return
         self._finish_session(elapsed)
+
+    def _restore_matrix_tasks(self, tasks: list) -> None:
+        for task in tasks:
+            self.matrix.restore(task)
+        self.refresh_matrix()
+
+    def _remove_matrix_tasks(self, tasks: list) -> None:
+        for task in tasks:
+            self.matrix.delete(task)
+        self.refresh_matrix()
 
     def refresh_momentum(self) -> None:
         self.momentum_strip.render(self.session_log.counts_by_day(14))
@@ -959,6 +1034,7 @@ class CognitiveOffloadApp(tk.Tk):
         """Log a completed focus block and offer the break."""
         task = self._focus_task()
         self.session_log.record(minutes=minutes, task=task.text if task else "")
+        self._session_banked = True
         self._session_count += 1
         self.refresh_momentum()
 
@@ -983,6 +1059,8 @@ class CognitiveOffloadApp(tk.Tk):
             self.mark_dirty()
             self.set_status(f"{minutes} min, and it's finished. Nice.")
             self._focus_task_id = None
+            self.focus_task_var.set(f"{minutes} min logged, and that one is done.")
+            self._sync_focus_window()
         if choice in ("break", "done_break"):
             self.start_timer(minutes=self.config_store.break_minutes, mode="break")
         elif choice != "done":
@@ -1049,13 +1127,13 @@ class CognitiveOffloadApp(tk.Tk):
         if not tasks:
             self.set_status("Select a task to book a time for.")
             return
-        answer = simpledialog.askstring(
-            "Book a time",
-            "When will you actually do this?\n"
-            "today / tomorrow / a weekday / 2026-08-01  (blank clears it)",
-            parent=self,
-            initialvalue=tasks[0].scheduled_for,
-        )
+        with self._ask_over_focus():
+            answer = PromptDialog(
+                self, "Book a time", "When will you actually do this?",
+                initial=tasks[0].scheduled_for,
+                hint="today / tomorrow / a weekday / 2026-08-01 — blank clears it",
+                ok_text="Book",
+            ).show()
         if answer is None:
             return
         when = parse_date_input(answer)
@@ -1092,7 +1170,8 @@ class CognitiveOffloadApp(tk.Tk):
             self._timer_mode = mode
             self._timer_total = max(1, minutes) * 60
             self._timer_remaining = self._timer_total
-        elif self._timer_remaining <= 0:
+            self._session_banked = False
+        elif self._timer_remaining <= 0 or self._timer_remaining > self._timer_total:
             self._timer_total = self._minutes() * 60
             self._timer_remaining = self._timer_total
         # Track a wall-clock deadline so the countdown cannot drift.
@@ -1164,6 +1243,7 @@ class CognitiveOffloadApp(tk.Tk):
         if remaining <= 0:
             mode = self._timer_mode
             minutes = max(1, round(self._timer_total / 60))
+            self._session_banked = True
             self._stop_ticking()
             self._timer_remaining = 0
             self._timer_mode = "focus"
@@ -1220,7 +1300,16 @@ class CognitiveOffloadApp(tk.Tk):
         self.tasks = data["tasks"]
         self.set_scratchpad(data["scratchpad"])
         self.work_minutes.set(data["timer_minutes"])
-        self._timer_remaining = data["timer_minutes"] * 60
+        self._stop_ticking()
+        self._timer_mode = "focus"
+        self._session_banked = False
+        # Both halves, or a stale total turns a 5-minute clock into a
+        # two-thirds-full progress bar and a 15-minute log entry.
+        self._timer_total = data["timer_minutes"] * 60
+        self._timer_remaining = self._timer_total
+        if self._focus_task_id and not any(t.id == self._focus_task_id for t in data["tasks"]):
+            self._focus_task_id = None
+            self.focus_task_var.set("Nothing picked yet")
         self._undo_stack.clear()
         self._dirty = False
         self.refresh_all()
@@ -1256,8 +1345,12 @@ class CognitiveOffloadApp(tk.Tk):
         except StorageError as exc:
             messagebox.showerror("Load failed", str(exc))
             return
+        # Keep working in the file that was opened, rather than silently
+        # writing it back over the previous session.
+        self.state_store.set_path(Path(path))
+        self._autosave_blocked = False
         self._apply_state(data)
-        self.set_status(f"Loaded {Path(path).name}")
+        self.set_status(f"Working in {Path(path).name}")
 
     def export_state(self) -> None:
         path = filedialog.asksaveasfilename(
@@ -1278,8 +1371,13 @@ class CognitiveOffloadApp(tk.Tk):
         new_path = filedialog.askdirectory(initialdir=str(self.config_store.db_path))
         if not new_path:
             return
-        if self._dirty:
-            self.save_state(silent=True)
+        if self._dirty and not self.save_state(silent=True):
+            if not messagebox.askyesno(
+                "Change folder",
+                f"Could not save to {self.state_store.path}.\n\n"
+                "Switch folders anyway and lose the unsaved changes?",
+            ):
+                return
         self.config_store.db_path = Path(new_path)
         self.state_store.set_path(self.config_store.state_file)
         self.session_log.set_path(self.config_store.sessions_file)
