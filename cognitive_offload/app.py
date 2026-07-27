@@ -27,8 +27,8 @@ from .queries import (
     DEFAULT_SORT,
     SORT_ORDERS,
     all_tags,
+    completed_titles_today,
     counts,
-    done_today,
     due_tasks,
     split_lines,
     visible_tasks,
@@ -91,6 +91,10 @@ class CognitiveOffloadApp(tk.Tk):
         self._focus_task_id: str | None = None
         self._session_count = 0
         self._focus_window: FocusWindow | None = None
+        # Tasks finished and then cleared away; keeps "N done today" honest
+        # after a tidy-up instead of resetting the day to zero.
+        self.completed_log: list[dict] = []
+        self._day = None
 
         # Tk variables have to exist before the tabs that bind to them.
         self.search_var = tk.StringVar()
@@ -255,7 +259,7 @@ class CognitiveOffloadApp(tk.Tk):
         if hidden > 0:
             summary += f" · {hidden} hidden"
         self.counts_var.set(summary)
-        finished = len(done_today(self.tasks))
+        finished = len(completed_titles_today(self.tasks, self.completed_log))
         # Only ever shown when there is something to show: "0 done today" is
         # the kind of scoreboard this app is meant not to keep.
         self.today_var.set(f"{finished} done today →" if finished else "")
@@ -503,6 +507,11 @@ class CognitiveOffloadApp(tk.Tk):
         if not messagebox.askyesno("Clear completed", f"Remove {len(done)} completed task(s)?"):
             return
         self.push_undo("clear completed")
+        previous_log = list(self.completed_log)
+        self.completed_log.extend(
+            {"text": t.text, "completed_at": t.completed_at or now_stamp()} for t in done
+        )
+        self.attach_undo(lambda entries=previous_log: setattr(self, "completed_log", entries))
         self.tasks = [t for t in self.tasks if not t.done]
         self.refresh_tasks(keep_selection=False)
         self.mark_dirty()
@@ -655,13 +664,15 @@ class CognitiveOffloadApp(tk.Tk):
         label = tasks[0].title if len(tasks) == 1 else f"{len(tasks)} tasks"
         if not messagebox.askyesno("Delete", f"Delete {label}?"):
             return
+        done = 0
         try:
             for task in tasks:
                 self.matrix.delete(task)
+                done += 1
         except StorageError as exc:
             messagebox.showerror("Delete failed", str(exc))
         self.refresh_matrix()
-        self.set_status(f"Deleted {len(tasks)} matrix task(s).")
+        self.set_status(_batch_status("Deleted", done, len(tasks), "matrix task"))
 
     def move_matrix_tasks(self, category: str) -> None:
         tasks = self._selected_matrix_tasks(category)
@@ -673,13 +684,18 @@ class CognitiveOffloadApp(tk.Tk):
         ).show()
         if not destination or destination == category:
             return
+        done = 0
         try:
             for task in tasks:
                 self.matrix.move(task, destination)
+                done += 1
         except StorageError as exc:
             messagebox.showerror("Move failed", str(exc))
         self.refresh_matrix()
-        self.set_status(f"Moved {len(tasks)} task(s) to {category_label(destination)}.")
+        self.set_status(
+            _batch_status("Moved", done, len(tasks), "task")
+            + f" to {category_label(destination)}."
+        )
 
     def matrix_to_tasks(self, category: str) -> None:
         """Move the selected matrix tasks back onto the main stack."""
@@ -887,6 +903,9 @@ class CognitiveOffloadApp(tk.Tk):
             self.refresh_tasks()
             self.mark_dirty()
 
+        if result.get("warmup_done"):
+            steps = result["warmup_done"]
+            self.set_status(f"{steps} warm-up step{'s' if steps != 1 else ''} done. Starting.")
         self._focus_task_id = task.id if task else None
         self.focus_task_var.set(_focus_caption(task, result["first_step"]))
         self.config_store.focus_minutes = result["minutes"]
@@ -1061,7 +1080,7 @@ class CognitiveOffloadApp(tk.Tk):
             self._focus_task_id = None
             self.focus_task_var.set(f"{minutes} min logged, and that one is done.")
             self._sync_focus_window()
-        if choice in ("break", "done_break"):
+        if choice == "break":
             self.start_timer(minutes=self.config_store.break_minutes, mode="break")
         elif choice != "done":
             self.focus_task_var.set(
@@ -1093,10 +1112,10 @@ class CognitiveOffloadApp(tk.Tk):
 
     def show_today(self) -> None:
         """What you actually finished today, plus the minutes you focused."""
-        finished = done_today(self.tasks)
+        finished = completed_titles_today(self.tasks, self.completed_log)
         if not finished:
             return
-        lines = [f"·  {t.text}" for t in finished]
+        lines = [f"·  {title}" for title in finished]
         minutes = self.session_log.minutes_today()
         sessions = self.session_log.count_today()
         footer = ""
@@ -1143,15 +1162,17 @@ class CognitiveOffloadApp(tk.Tk):
                 "Try 'today', 'tomorrow', a weekday, or a date like 2026-08-01.",
             )
             return
+        done = 0
         try:
             for task in tasks:
                 self.matrix.set_scheduled(task, when)
+                done += 1
         except StorageError as exc:
             messagebox.showerror("Save failed", str(exc))
         self.refresh_matrix()
         self.set_status(
-            f"Booked {len(tasks)} task(s) for {when}." if when
-            else f"Cleared the booking on {len(tasks)} task(s)."
+            (_batch_status("Booked", done, len(tasks), "task") + f" for {when}.") if when
+            else (_batch_status("Cleared the booking on", done, len(tasks), "task") + ".")
         )
 
     # ------------------------------------------------------------------
@@ -1298,6 +1319,7 @@ class CognitiveOffloadApp(tk.Tk):
 
     def _apply_state(self, data: dict) -> None:
         self.tasks = data["tasks"]
+        self.completed_log = list(data.get("completed_log") or [])
         self.set_scratchpad(data["scratchpad"])
         self.work_minutes.set(data["timer_minutes"])
         self._stop_ticking()
@@ -1317,7 +1339,8 @@ class CognitiveOffloadApp(tk.Tk):
 
     def save_state(self, silent: bool = False) -> bool:
         try:
-            self.state_store.save(self.tasks, self.scratchpad_text(), self._minutes())
+            self.state_store.save(self.tasks, self.scratchpad_text(), self._minutes(),
+                                  self.completed_log)
         except StorageError as exc:
             if not silent:
                 messagebox.showerror("Save failed", str(exc))
@@ -1361,7 +1384,8 @@ class CognitiveOffloadApp(tk.Tk):
         if not path:
             return
         try:
-            StateStore(Path(path)).save(self.tasks, self.scratchpad_text(), self._minutes())
+            StateStore(Path(path)).save(self.tasks, self.scratchpad_text(), self._minutes(),
+                                        self.completed_log)
         except StorageError as exc:
             messagebox.showerror("Export failed", str(exc))
             return
@@ -1400,7 +1424,7 @@ class CognitiveOffloadApp(tk.Tk):
         self.set_status(f"Matrix folder: {self.matrix.root}")
 
     def _save_config(self) -> None:
-        self.config_store.timer_minutes = self._minutes()
+        self.config_store.focus_minutes = self._minutes()
         self.config_store.show_done = bool(self.show_done_var.get())
         self.config_store.sort_order = SORT_ORDERS.get(self.sort_var.get(), DEFAULT_SORT)
         self.config_store.break_minutes = self.config_store.break_minutes or DEFAULT_BREAK_MINUTES
@@ -1417,7 +1441,18 @@ class CognitiveOffloadApp(tk.Tk):
     def _schedule_autosave(self) -> None:
         self._autosave_job = self.after(AUTOSAVE_SECONDS * 1000, self._autosave)
 
+    def _roll_over_the_day(self) -> None:
+        from .models import today_iso
+
+        today = today_iso()
+        if self._day is None:
+            self._day = today
+        elif today != self._day:
+            self._day = today
+            self.refresh_tasks()  # yesterday's "done today" is not today's
+
     def _autosave(self) -> None:
+        self._roll_over_the_day()
         if self.config_store.autosave and self._dirty and not self._autosave_blocked:
             if self.save_state(silent=True):
                 self.set_status("Auto-saved.")
@@ -1437,6 +1472,14 @@ class CognitiveOffloadApp(tk.Tk):
             except tk.TclError:
                 pass
         self.destroy()
+
+
+def _batch_status(verb: str, done: int, total: int, noun: str) -> str:
+    """Report what actually happened, not what was asked for."""
+    plural = "" if done == 1 else "s"
+    if done == total:
+        return f"{verb} {done} {noun}{plural}"
+    return f"{verb} {done} of {total} {noun}s — the rest failed"
 
 
 def _task_row(task: Task) -> Row:

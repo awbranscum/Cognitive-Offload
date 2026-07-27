@@ -39,7 +39,9 @@ on it (`today`, `tomorrow`, `fri`, or a date) and it surfaces on the main tab as
 **What you actually finished.** The app used to count only what was left. It
 now shows "N done today" beside the task counts — click it for the list, plus
 the minutes you focused. It appears only when there is something in it; there is
-no "0 done today". When a session ends, it asks whether the task is finished, so
+no "0 done today". Clearing completed tasks does not reset it: what you finished
+is kept in a small ledger in the session file, so tidying up never erases the
+evidence of the day. When a session ends, it asks whether the task is finished, so
 closing it out happens at the moment you are already thinking about it instead
 of being one more thing to remember.
 
@@ -154,6 +156,10 @@ Press `F1` in the app for the full keyboard-shortcut list.
 | Previous session backup | `~/.cognitive_offload/data.json.bak` |
 | Matrix quadrants | `~/MatrixTasks/{DoFirst,Schedule,Delegate,Eliminate}/*.task` |
 | Preferences | `~/.cognitive_offload_config.json` |
+
+A session file that is valid JSON but not a Cognitive Offload session is
+refused rather than loaded as empty, and an unreadable `sessions.json` is moved
+to `sessions.json.corrupt` instead of being silently overwritten.
 
 Both folders can be moved from inside the app ("Change folder"). Sessions saved
 by earlier versions — including the old timestamped notes list and plain-text

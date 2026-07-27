@@ -13,7 +13,7 @@ from tkinter import messagebox, ttk
 from .models import KIND_UNSET, TASK_KINDS, Task, parse_date_input
 from .queries import suggest_tasks
 from .storage import CATEGORIES, CATEGORY_KEYS
-from .theme import SIZE_SM, font, style_text, tokens
+from .theme import SIZE_BASE, SIZE_LG, SIZE_SM, font, style_text, tokens
 
 
 class ModalDialog(tk.Toplevel):
@@ -199,7 +199,7 @@ class StartHereDialog(ModalDialog):
         self._suggestions: list[Task] = []
 
         ttk.Label(
-            self.body, text="What can you face right now?", font=("Helvetica", 12, "bold")
+            self.body, text="What can you face right now?", font=font(SIZE_LG, "bold")
         ).pack(anchor="w")
         ttk.Label(
             self.body,
@@ -299,7 +299,7 @@ class StartFocusDialog(ModalDialog):
         ttk.Label(
             self.body,
             text=task_text or "Free focus (no task selected)",
-            font=("Helvetica", 12, "bold"),
+            font=font(SIZE_LG, "bold"),
             wraplength=470,
             justify="left",
         ).pack(anchor="w", pady=(0, 12))
@@ -316,7 +316,7 @@ class StartFocusDialog(ModalDialog):
 
         self.warmup_vars: list[tk.BooleanVar] = []
         if show_warmup and warmup_steps:
-            ttk.Label(self.body, text="Warm-up ladder", font=("Helvetica", 10, "bold")).pack(
+            ttk.Label(self.body, text="Warm-up ladder", font=font(SIZE_BASE, "bold")).pack(
                 anchor="w"
             )
             ttk.Label(
@@ -364,7 +364,7 @@ class QuadrantDialog(ModalDialog):
                  window_title: str = "Move to matrix"):
         super().__init__(parent, window_title, size=(360, 240))
         heading = "Move task to:" if count == 1 else f"Move {count} tasks to:"
-        ttk.Label(self.body, text=heading, font=("Helvetica", 10, "bold")).pack(anchor="w")
+        ttk.Label(self.body, text=heading, font=font(SIZE_BASE, "bold")).pack(anchor="w")
 
         self.choice = tk.StringVar(value=initial if initial in CATEGORIES else "do_first")
         for key in CATEGORY_KEYS:
@@ -417,7 +417,7 @@ class SessionEndDialog(ModalDialog):
     def __init__(self, parent: tk.Misc, message: str, task_text: str, break_minutes: int = 5):
         super().__init__(parent, "Session finished")
         self.resizable(False, False)
-        ttk.Label(self.body, text=message, font=font(SIZE_SM + 3, "bold"),
+        ttk.Label(self.body, text=message, font=font(SIZE_LG, "bold"),
                   wraplength=380, justify="left").pack(anchor="w")
         ttk.Label(self.body, text=task_text, style="Muted.TLabel",
                   wraplength=380, justify="left").pack(anchor="w", pady=(6, 14))
@@ -487,7 +487,7 @@ class ShortcutsDialog(ModalDialog):
         super().__init__(parent, "Keyboard shortcuts")
         self.resizable(False, False)
         for section, rows in self.SHORTCUTS:
-            ttk.Label(self.body, text=section, font=("Helvetica", 11, "bold")).pack(
+            ttk.Label(self.body, text=section, font=font(SIZE_BASE + 1, "bold")).pack(
                 anchor="w", pady=(8, 4)
             )
             grid = ttk.Frame(self.body)

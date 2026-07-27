@@ -985,6 +985,61 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(restored.filter_row.winfo_manager(), "")
         self.assertEqual(restored.header_extras.winfo_manager(), "")
 
+    # -- the day's record ----------------------------------------------
+    def test_clearing_completed_keeps_the_days_record(self):
+        self.capture("finished thing")
+        self.select(0)
+        self.app.toggle_selected_done()
+        self.assertIn("1 done today", self.app.today_var.get())
+
+        with mock.patch("cognitive_offload.app.messagebox.askyesno", return_value=True):
+            self.app.clear_completed()
+        self.assertEqual(self.app.tasks, [])
+        # The task is gone from the list, but the day is not reset to zero.
+        self.assertIn("1 done today", self.app.today_var.get())
+
+    def test_the_days_record_survives_a_save_and_reload(self):
+        self.capture("finished thing")
+        self.select(0)
+        self.app.toggle_selected_done()
+        with mock.patch("cognitive_offload.app.messagebox.askyesno", return_value=True):
+            self.app.clear_completed()
+        self.app.save_state(silent=True)
+        self.app.completed_log = []
+        self.app.load_state()
+        self.assertIn("1 done today", self.app.today_var.get())
+
+    def test_undoing_clear_completed_restores_the_record_too(self):
+        self.capture("finished thing")
+        self.select(0)
+        self.app.toggle_selected_done()
+        with mock.patch("cognitive_offload.app.messagebox.askyesno", return_value=True):
+            self.app.clear_completed()
+        self.app.undo()
+        self.assertEqual([t.text for t in self.app.tasks], ["finished thing"])
+        self.assertEqual(self.app.completed_log, [])
+        self.assertIn("1 done today", self.app.today_var.get())  # counted once, not twice
+
+    def test_a_batch_that_fails_halfway_says_so(self):
+        from cognitive_offload.storage import StorageError
+
+        for title in ("one", "two"):
+            self.app.matrix.create("schedule", title, "")
+        self.app.refresh_matrix()
+        self.app.matrix_lists["schedule"].selection_set(0, 1)
+        calls = {"n": 0}
+
+        def flaky(_task):
+            calls["n"] += 1
+            if calls["n"] > 1:
+                raise StorageError("locked")
+
+        with mock.patch.object(self.app.matrix, "delete", side_effect=flaky), \
+             mock.patch("cognitive_offload.app.messagebox.askyesno", return_value=True), \
+             mock.patch("cognitive_offload.app.messagebox.showerror"):
+            self.app.delete_matrix_tasks("schedule")
+        self.assertIn("1 of 2", self.app.status_var.get())
+
     def test_dirty_flag_tracks_edits_and_saves(self):
         self.assertFalse(self.app._dirty)
         self.capture("something")

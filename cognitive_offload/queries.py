@@ -98,6 +98,20 @@ def done_today(tasks: list[Task], on: str | None = None) -> list[Task]:
     return sorted(finished, key=lambda t: t.completed_at or "")
 
 
+def completed_titles_today(tasks: list[Task], log: list | None = None,
+                           on: str | None = None) -> list[str]:
+    """Everything finished today: still on the list, or cleared away since.
+
+    Tidying up should not delete the answer to "what did I get done today".
+    """
+    on = on or today_iso()
+    titles = [t.text for t in done_today(tasks, on)]
+    for entry in log or []:
+        if str(entry.get("completed_at", ""))[:10] == on and entry.get("text") not in titles:
+            titles.append(entry["text"])
+    return titles
+
+
 def due_tasks(tasks: list[Task], on: str | None = None) -> list[Task]:
     """Open tasks with a booked time of today or earlier, soonest first."""
     on = on or today_iso()

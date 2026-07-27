@@ -101,21 +101,21 @@ class StateStoreTests(TempDirTest):
 class ConfigTests(TempDirTest):
     def test_missing_config_uses_defaults(self):
         config = Config(self.root / "cfg.json").load()
-        self.assertEqual(config.timer_minutes, 15)
+        self.assertEqual(config.focus_minutes, 15)
         self.assertTrue(config.show_done)
 
     def test_corrupt_config_does_not_raise(self):
         path = self.root / "cfg.json"
         path.write_text("<<<garbage>>>", encoding="utf-8")
         config = Config(path).load()
-        self.assertEqual(config.timer_minutes, 15)
+        self.assertEqual(config.focus_minutes, 15)
 
     def test_roundtrip(self):
         path = self.root / "cfg.json"
         config = Config(path)
         config.db_path = self.root / "db"
         config.matrix_db_path = self.root / "matrix"
-        config.timer_minutes = 50
+        config.focus_minutes = 50
         config.sort_order = "created"
         config.show_done = False
         config.save()
@@ -123,15 +123,15 @@ class ConfigTests(TempDirTest):
         reloaded = Config(path).load()
         self.assertEqual(reloaded.db_path, self.root / "db")
         self.assertEqual(reloaded.matrix_db_path, self.root / "matrix")
-        self.assertEqual(reloaded.timer_minutes, 50)
+        self.assertEqual(reloaded.focus_minutes, 50)
         self.assertEqual(reloaded.sort_order, "created")
         self.assertFalse(reloaded.show_done)
 
     def test_out_of_range_values_are_clamped(self):
         path = self.root / "cfg.json"
-        path.write_text(json.dumps({"timer_minutes": 9999, "sort_order": "bogus"}), encoding="utf-8")
+        path.write_text(json.dumps({"focus_minutes": 9999, "sort_order": "bogus"}), encoding="utf-8")
         config = Config(path).load()
-        self.assertEqual(config.timer_minutes, 240)
+        self.assertEqual(config.focus_minutes, 120)
         self.assertEqual(config.sort_order, "priority")
 
     def test_appearance_settings_round_trip(self):
@@ -160,6 +160,67 @@ class ConfigTests(TempDirTest):
         config = Config(self.root / "cfg.json")
         config.db_path = self.root / "elsewhere"
         self.assertEqual(config.state_file, self.root / "elsewhere" / "data.json")
+
+
+class CompletedLogTests(TempDirTest):
+    """The record of what got done, kept so a tidy-up cannot erase the day."""
+
+    def test_round_trips_with_the_session(self):
+        store = StateStore(self.root / "data.json")
+        log = [{"text": "finished thing", "completed_at": "2026-07-27 10:00:00"}]
+        store.save([Task(text="still open")], "", 15, log)
+        loaded = store.load()
+        self.assertEqual(loaded["completed_log"], log)
+
+    def test_absent_in_older_files(self):
+        path = self.root / "data.json"
+        path.write_text(json.dumps({"tasks": [], "scratchpad": ""}), encoding="utf-8")
+        self.assertEqual(StateStore(path).load()["completed_log"], [])
+
+    def test_junk_entries_are_dropped(self):
+        path = self.root / "data.json"
+        path.write_text(json.dumps({
+            "tasks": [],
+            "completed_log": ["nope", {"no_text": 1}, {"text": "kept"}],
+        }), encoding="utf-8")
+        self.assertEqual(StateStore(path).load()["completed_log"],
+                         [{"text": "kept", "completed_at": ""}])
+
+    def test_it_is_capped(self):
+        from cognitive_offload.storage import COMPLETED_LOG_LIMIT
+
+        store = StateStore(self.root / "data.json")
+        log = [{"text": f"t{i}", "completed_at": "2026-07-27 10:00:00"}
+               for i in range(COMPLETED_LOG_LIMIT + 40)]
+        store.save([], "", 15, log)
+        self.assertEqual(len(store.load()["completed_log"]), COMPLETED_LOG_LIMIT)
+
+
+class NotASessionFileTests(TempDirTest):
+    def test_valid_json_that_is_not_a_session_is_refused(self):
+        """Loading it as empty and autosaving over it is how data vanishes."""
+        path = self.root / "data.json"
+        path.write_text(json.dumps({"unrelated": "document"}), encoding="utf-8")
+        with self.assertRaises(StorageError):
+            StateStore(path).load()
+
+    def test_a_session_with_only_a_scratchpad_still_loads(self):
+        path = self.root / "data.json"
+        path.write_text(json.dumps({"scratchpad": "just notes"}), encoding="utf-8")
+        self.assertEqual(StateStore(path).load()["scratchpad"], "just notes")
+
+
+class BackupPolicyTests(TempDirTest):
+    def test_the_backup_holds_the_session_as_it_was_opened(self):
+        store = StateStore(self.root / "data.json")
+        store.save([Task(text="as opened")], "", 15)
+        store._backed_up = False  # simulate the next run opening this file
+        store.save([Task(text="first edit")], "", 15)
+        store.save([Task(text="second edit")], "", 15)
+        store.save([Task(text="third edit")], "", 15)
+        backup = (self.root / "data.json.bak").read_text(encoding="utf-8")
+        self.assertIn("as opened", backup)
+        self.assertNotIn("second edit", backup)
 
 
 class SlugTests(unittest.TestCase):
@@ -219,6 +280,28 @@ class MatrixStoreTests(TempDirTest):
         self.store.update(task, "Title", "edited")
         self.assertTrue(path.exists())
         self.assertEqual(self.store.list("do_first")[0].content, "edited")
+
+    def test_a_failed_move_does_not_leave_the_task_in_two_quadrants(self):
+        from unittest import mock
+
+        task = self.store.create("schedule", "half moved", "body")
+        old_path = Path(task.path)
+        with mock.patch.object(MatrixStore, "_unlink", side_effect=StorageError("locked")):
+            with self.assertRaises(StorageError):
+                self.store.move(task, "do_first")
+        self.assertEqual([t.title for t in self.store.list("schedule")], ["half moved"])
+        self.assertEqual(self.store.list("do_first"), [])
+        self.assertEqual(Path(task.path), old_path)
+        self.assertEqual(task.category, "schedule")
+
+    def test_restore_writes_a_deleted_task_back(self):
+        task = self.store.create("delegate", "comes back", "body")
+        self.store.delete(task)
+        self.assertEqual(self.store.list("delegate"), [])
+        self.store.restore(task)
+        restored = self.store.list("delegate")
+        self.assertEqual([t.title for t in restored], ["comes back"])
+        self.assertEqual(restored[0].content, "body")
 
     def test_move_between_quadrants(self):
         task = self.store.create("eliminate", "Reconsider", "body")

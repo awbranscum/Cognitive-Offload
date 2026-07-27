@@ -23,6 +23,7 @@ CONFIG_PATH = Path.home() / ".cognitive_offload_config.json"
 
 STATE_FILENAME = "data.json"
 SESSIONS_FILENAME = "sessions.json"
+COMPLETED_LOG_LIMIT = 200
 
 # The bridge out of high-stimulation activity: a few small, concrete steps
 # between where you are and the task, so starting is not one big leap.
@@ -106,7 +107,6 @@ class Config:
         self.path = Path(path)
         self.db_path = DEFAULT_DB_PATH
         self.matrix_db_path = DEFAULT_MATRIX_PATH
-        self.timer_minutes = 15
         self.show_done = True
         self.sort_order = "priority"
         self.autosave = True
@@ -139,7 +139,6 @@ class Config:
             return self
         self.db_path = _path_or(data.get("db_path"), DEFAULT_DB_PATH)
         self.matrix_db_path = _path_or(data.get("matrix_db_path"), DEFAULT_MATRIX_PATH)
-        self.timer_minutes = _int_or(data.get("timer_minutes"), 15, 1, 240)
         self.show_done = bool(data.get("show_done", True))
         order = data.get("sort_order")
         self.sort_order = order if order in {"priority", "created", "alpha", "completed"} else "priority"
@@ -162,7 +161,6 @@ class Config:
                 {
                     "db_path": str(self.db_path),
                     "matrix_db_path": str(self.matrix_db_path),
-                    "timer_minutes": self.timer_minutes,
                     "show_done": self.show_done,
                     "sort_order": self.sort_order,
                     "autosave": self.autosave,
@@ -210,11 +208,18 @@ class StateStore:
         try:
             data = read_json(self.path)
         except FileNotFoundError:
-            return {"tasks": [], "scratchpad": "", "timer_minutes": 15}
+            return {"tasks": [], "scratchpad": "", "timer_minutes": 15, "completed_log": []}
         except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise StorageError(f"Could not read {self.path}: {exc}") from exc
         if not isinstance(data, dict):
             raise StorageError(f"{self.path} does not contain a saved session")
+        if "tasks" not in data and "notes" not in data and "scratchpad" not in data:
+            # Valid JSON, but nothing this app wrote. Loading it as an empty
+            # session and then autosaving over the file is how data vanishes.
+            raise StorageError(
+                f"{self.path} is JSON, but not a Cognitive Offload session "
+                f"(no tasks, notes or scratchpad in it)"
+            )
         return self.deserialize(data)
 
     @staticmethod
@@ -234,25 +239,39 @@ class StateStore:
             notes = [Note.from_dict(n) for n in data.get("notes") or [] if isinstance(n, dict)]
             scratchpad = "\n".join(n.render() for n in notes)
 
+        finished = []
+        for record in data.get("completed_log") or []:
+            if isinstance(record, dict) and isinstance(record.get("text"), str):
+                finished.append({
+                    "text": record["text"],
+                    "completed_at": record.get("completed_at") or "",
+                })
+
         return {
             "tasks": tasks,
             "scratchpad": scratchpad,
             # Short by default: 15 minutes is the length you can agree to.
             "timer_minutes": _int_or(data.get("timer_minutes"), 15, 1, 240),
+            "completed_log": finished[-COMPLETED_LOG_LIMIT:],
         }
 
     @staticmethod
-    def serialize(tasks: list[Task], scratchpad: str, timer_minutes: int) -> dict:
+    def serialize(tasks: list[Task], scratchpad: str, timer_minutes: int,
+                  completed_log: list | None = None) -> dict:
         return {
             "version": STATE_VERSION,
             "tasks": [t.to_dict() for t in tasks],
             "scratchpad": scratchpad,
             "timer_minutes": int(timer_minutes),
+            # What was finished and then cleared away. Kept so "N done today"
+            # survives a tidy-up; capped because it is a footnote, not a store.
+            "completed_log": list(completed_log or [])[-COMPLETED_LOG_LIMIT:],
             "saved_at": now_stamp(),
         }
 
-    def save(self, tasks: list[Task], scratchpad: str, timer_minutes: int) -> None:
-        payload = self.serialize(tasks, scratchpad, timer_minutes)
+    def save(self, tasks: list[Task], scratchpad: str, timer_minutes: int,
+             completed_log: list | None = None) -> None:
+        payload = self.serialize(tasks, scratchpad, timer_minutes, completed_log)
         try:
             self._backup()
             write_json(self.path, payload)
@@ -380,13 +399,29 @@ class MatrixStore:
         if category == task.category:
             return task
         old_path = Path(task.path) if task.path else None
+        previous_category = task.category
         task.category = category
         task.updated_at = now_stamp()
         task.path = self._new_path(category, task)
         self._write(task)
         if old_path is not None:
-            self._unlink(old_path)
+            try:
+                self._unlink(old_path)
+            except StorageError:
+                # Roll the copy back rather than leave the task in two
+                # quadrants, where the next refresh shows it twice.
+                self._unlink_quietly(Path(task.path))
+                task.category = previous_category
+                task.path = old_path
+                raise
         return task
+
+    @staticmethod
+    def _unlink_quietly(path: Path) -> None:
+        try:
+            path.unlink()
+        except OSError:
+            pass
 
     def delete(self, task: MatrixTask) -> None:
         if task.path:

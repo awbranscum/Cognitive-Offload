@@ -76,14 +76,26 @@ class SessionLog:
             self.sessions = []
             return self
         except (OSError, json.JSONDecodeError, UnicodeDecodeError):
-            # A damaged log is not worth interrupting anyone over.
+            # A damaged log is not worth interrupting anyone over, but it
+            # should not be silently overwritten by tonight's first session
+            # either - park it next door first.
             self.sessions = []
+            self._quarantine()
             return self
         records = data.get("sessions") if isinstance(data, dict) else data
         self.sessions = [
             FocusSession.from_dict(r) for r in (records or []) if isinstance(r, dict)
         ]
         return self
+
+    def _quarantine(self) -> None:
+        """Move an unreadable log aside so the next save cannot destroy it."""
+        spoiled = self.path.with_suffix(self.path.suffix + ".corrupt")
+        try:
+            if self.path.exists() and not spoiled.exists():
+                self.path.replace(spoiled)
+        except OSError:
+            pass
 
     def save(self) -> None:
         from .storage import write_json  # imported here to avoid a cycle
