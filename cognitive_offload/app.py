@@ -1061,15 +1061,26 @@ class CognitiveOffloadApp(tk.Tk):
         self.set_status(message)
         self.bell()
 
+        next_step = ""
         with self._ask_over_focus():
             if task is not None:
-                choice = SessionEndDialog(self, message, task.text,
-                                          self.config_store.break_minutes).show()
+                answer = SessionEndDialog(self, message, task.text,
+                                          self.config_store.break_minutes,
+                                          first_step=task.first_step).show() or {}
+                choice = answer.get("choice", "carry_on")
+                next_step = answer.get("next_step", "")
             else:
                 choice = "break" if messagebox.askyesno(
                     "Session finished",
                     f"{message}\n\nTake a {self.config_store.break_minutes}-minute break now?",
                 ) else "carry_on"
+
+        if task is not None and choice != "done" and next_step:
+            # Tomorrow's start is already written, while it is still obvious.
+            self.push_undo("hand off")
+            task.first_step = next_step
+            self.refresh_tasks()
+            self.mark_dirty()
 
         if choice == "done" and task is not None:
             self.push_undo("finish task")

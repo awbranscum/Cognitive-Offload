@@ -115,7 +115,25 @@ class DialogCollectTests(unittest.TestCase):
 
         dialog = SessionEndDialog(self.root, "15 minutes", "a task")
         dialog.cancel()
-        self.assertEqual(dialog.result, "carry_on")
+        self.assertEqual(dialog.result["choice"], "carry_on")
+
+    def test_closing_it_still_keeps_a_typed_hand_off(self):
+        from cognitive_offload.dialogs import SessionEndDialog
+
+        dialog = SessionEndDialog(self.root, "15 minutes", "a task")
+        dialog.next_entry.insert(0, "  pick up at the summary  ")
+        dialog.cancel()
+        self.assertEqual(dialog.result["next_step"], "pick up at the summary")
+
+    def test_each_button_reports_its_choice_and_the_hand_off(self):
+        from cognitive_offload.dialogs import SessionEndDialog
+
+        for choice in ("done", "break", "carry_on"):
+            dialog = SessionEndDialog(self.root, "15 minutes", "a task",
+                                      first_step="the old step")
+            dialog.next_entry.insert(0, "the new step")
+            dialog._choose(choice)
+            self.assertEqual(dialog.result, {"choice": choice, "next_step": "the new step"})
 
 
 if __name__ == "__main__":

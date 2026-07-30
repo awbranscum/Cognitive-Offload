@@ -414,13 +414,27 @@ class SessionEndDialog(ModalDialog):
     this app exists to take over.
     """
 
-    def __init__(self, parent: tk.Misc, message: str, task_text: str, break_minutes: int = 5):
+    def __init__(self, parent: tk.Misc, message: str, task_text: str, break_minutes: int = 5,
+                 first_step: str = ""):
         super().__init__(parent, "Session finished")
         self.resizable(False, False)
         ttk.Label(self.body, text=message, font=font(SIZE_LG, "bold"),
                   wraplength=380, justify="left").pack(anchor="w")
         ttk.Label(self.body, text=task_text, style="Muted.TLabel",
-                  wraplength=380, justify="left").pack(anchor="w", pady=(6, 14))
+                  wraplength=380, justify="left").pack(anchor="w", pady=(6, 12))
+
+        # The hand-off. Right now you know what comes next; tomorrow you will
+        # be looking at a first step you already did. Optional, and skipping
+        # it costs nothing.
+        ttk.Label(self.body, text="Where does it pick up next time?").pack(anchor="w")
+        self.next_entry = ttk.Entry(self.body, width=44)
+        self.next_entry.pack(fill="x", pady=(4, 2))
+        if first_step:
+            ttk.Label(self.body, text=f"was: {first_step}", style="Muted.TLabel",
+                      wraplength=380, justify="left").pack(anchor="w")
+        ttk.Label(self.body, text="Leave it blank if you would rather not decide now.",
+                  style="Muted.TLabel", wraplength=380, justify="left").pack(
+            anchor="w", pady=(0, 14))
 
         first = None
         for label, value, style in (
@@ -437,12 +451,18 @@ class SessionEndDialog(ModalDialog):
             self.bind("<Return>", lambda _e: self._choose("done"))
 
     def _choose(self, value: str) -> None:
-        self.result = value
+        self.result = {"choice": value, "next_step": self.next_entry.get().strip()}
         self.destroy()
 
     def cancel(self, _event=None):
-        # Closing the window is "no answer", which means carry on.
-        self.result = "carry_on"
+        # Closing the window is "no answer", which means carry on. Anything
+        # already typed into the hand-off is still worth keeping.
+        step = ""
+        try:
+            step = self.next_entry.get().strip()
+        except tk.TclError:
+            pass
+        self.result = {"choice": "carry_on", "next_step": step}
         self.destroy()
 
 

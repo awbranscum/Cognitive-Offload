@@ -66,15 +66,15 @@ class AppSmokeTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
         return contextlib.nullcontext()
 
-    def answer_session_end(self, choice):
+    def answer_session_end(self, choice, next_step=""):
         """Answer the end-of-session dialog without opening a real window."""
         patcher = mock.patch("cognitive_offload.app.SessionEndDialog")
         dialog = patcher.start()
-        dialog.return_value.show.return_value = choice
+        dialog.return_value.show.return_value = {"choice": choice, "next_step": next_step}
         self.addCleanup(patcher.stop)
         return mock.patch("cognitive_offload.app.messagebox.askyesno", return_value=False)
 
-    def run_session(self, minutes=15, first_step="", choice="carry_on"):
+    def run_session(self, minutes=15, first_step="", choice="carry_on", next_step=""):
         """Start a focus session on the selection and run it to expiry."""
         with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
             starter.return_value.show.return_value = {
@@ -82,7 +82,7 @@ class AppSmokeTests(unittest.TestCase):
             }
             self.app.focus_on_selected()
         self.app._timer_deadline -= 10_000
-        with self.answer_session_end(choice):
+        with self.answer_session_end(choice, next_step):
             self.app._tick_timer()
 
     # -- tests ---------------------------------------------------------
@@ -1039,6 +1039,43 @@ class AppSmokeTests(unittest.TestCase):
              mock.patch("cognitive_offload.app.messagebox.showerror"):
             self.app.delete_matrix_tasks("schedule")
         self.assertIn("1 of 2", self.app.status_var.get())
+
+    # -- the hand-off --------------------------------------------------
+    def test_the_hand_off_replaces_the_spent_first_step(self):
+        """The first step you just used up is useless to tomorrow's you."""
+        self.capture("the long job")
+        self.app.tasks[0].first_step = "open last quarter's doc"
+        self.app.refresh_tasks()
+        self.select(0)
+        self.run_session(choice="carry_on", next_step="draft the risks section")
+        self.assertEqual(self.app.tasks[0].first_step, "draft the risks section")
+        self.assertTrue(self.app.tasks[0].is_ready)
+
+    def test_a_blank_hand_off_leaves_the_task_alone(self):
+        self.capture("the long job")
+        self.app.tasks[0].first_step = "open the doc"
+        self.app.refresh_tasks()
+        self.select(0)
+        self.run_session(choice="carry_on", next_step="")
+        self.assertEqual(self.app.tasks[0].first_step, "open the doc")
+
+    def test_the_hand_off_is_ignored_when_the_task_is_finished(self):
+        self.capture("the long job")
+        self.app.tasks[0].first_step = "open the doc"
+        self.app.refresh_tasks()
+        self.select(0)
+        self.run_session(choice="done", next_step="typed then changed my mind")
+        self.assertTrue(self.app.tasks[0].done)
+        self.assertEqual(self.app.tasks[0].first_step, "open the doc")
+
+    def test_the_hand_off_is_undoable(self):
+        self.capture("the long job")
+        self.app.tasks[0].first_step = "open the doc"
+        self.app.refresh_tasks()
+        self.select(0)
+        self.run_session(choice="carry_on", next_step="the next move")
+        self.app.undo()
+        self.assertEqual(self.app.tasks[0].first_step, "open the doc")
 
     def test_dirty_flag_tracks_edits_and_saves(self):
         self.assertFalse(self.app._dirty)
