@@ -161,7 +161,7 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
     outer.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
     inner = outer.inner
     inner.columnconfigure(0, weight=1)
-    inner.rowconfigure(4, weight=1)
+    inner.rowconfigure(5, weight=1)
 
     heading = ttk.Frame(inner, style="Card.TFrame")
     heading.grid(row=0, column=0, sticky="ew")
@@ -173,9 +173,30 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
     app.today_label.pack(side="right", padx=(0, 12))
     app.today_label.bind("<Button-1>", lambda _e: app.show_today())
 
-    # The way in when the list itself is the thing you cannot face.
+    # Named without being asked: opening the app and being told what to start
+    # is one decision instead of two.
+    app.next_frame = ttk.Frame(inner, style="Card.TFrame")
+    app.next_frame.grid(row=1, column=0, sticky="ew", pady=(10, 8))
+    app.next_frame.columnconfigure(0, weight=1)
+
+    next_text = ttk.Frame(app.next_frame, style="Card.TFrame")
+    next_text.grid(row=0, column=0, sticky="ew")
+    ttk.Label(next_text, text="NEXT UP", style="CardMuted.TLabel").pack(anchor="w")
+    ttk.Label(next_text, textvariable=app.next_title_var, style="H2.TLabel",
+              wraplength=380, justify="left").pack(anchor="w")
+    ttk.Label(next_text, textvariable=app.next_step_var, style="CardMuted.TLabel",
+              wraplength=380, justify="left").pack(anchor="w")
+
+    next_buttons = ttk.Frame(app.next_frame, style="Card.TFrame")
+    next_buttons.grid(row=0, column=1, sticky="e", padx=(10, 0))
+    ttk.Button(next_buttons, text="Start this", style="Default.TButton",
+               command=app.start_next).pack(anchor="e")
+    ttk.Button(next_buttons, text="Not that one", style="SmGhost.TButton",
+               command=app.skip_next).pack(anchor="e", pady=(4, 0))
+
+    # The way in when even that is too much of a decision.
     start_row = ttk.Frame(inner, style="Card.TFrame")
-    start_row.grid(row=1, column=0, sticky="ew", pady=(10, 10))
+    start_row.grid(row=2, column=0, sticky="ew", pady=(0, 10))
     ttk.Button(start_row, text="Where do I start?", style="Default.TButton",
                command=app.start_here).pack(side="left")
     ttk.Button(start_row, text="Focus on selected", style="Outline.TButton",
@@ -190,7 +211,7 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
     app.due_label.bind("<Button-1>", lambda _e: app.show_booked())
 
     search_row = ttk.Frame(inner, style="Card.TFrame")
-    search_row.grid(row=2, column=0, sticky="ew", pady=(0, 6))
+    search_row.grid(row=3, column=0, sticky="ew", pady=(0, 6))
     search_row.columnconfigure(0, weight=1)
     app.search_entry = ttk.Entry(search_row, textvariable=app.search_var)
     app.search_entry.grid(row=0, column=0, sticky="ew")
@@ -201,7 +222,7 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
     app.search_row = search_row
 
     filters = ttk.Frame(inner, style="Card.TFrame")
-    filters.grid(row=3, column=0, sticky="ew", pady=(0, 8))
+    filters.grid(row=4, column=0, sticky="ew", pady=(0, 8))
     kind_combo = ttk.Combobox(
         filters, textvariable=app.kind_filter_var,
         values=[ALL_KINDS] + [label for key, label in KIND_LABELS.items() if key],
@@ -232,10 +253,10 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
         on_select=app.on_task_selection_changed,
         empty_text="Nothing here. Capture a thought above — or take the win and stop.",
     )
-    app.task_list.grid(row=4, column=0, sticky="nsew")
+    app.task_list.grid(row=5, column=0, sticky="nsew")
 
     toolbar = ttk.Frame(inner, style="Card.TFrame")
-    toolbar.grid(row=5, column=0, sticky="ew", pady=(8, 0))
+    toolbar.grid(row=6, column=0, sticky="ew", pady=(8, 0))
     for column in range(4):
         toolbar.columnconfigure(column, weight=1, uniform="tools")
     rows = [

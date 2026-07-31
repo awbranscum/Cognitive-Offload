@@ -1077,6 +1077,75 @@ class AppSmokeTests(unittest.TestCase):
         self.app.undo()
         self.assertEqual(self.app.tasks[0].first_step, "open the doc")
 
+    # -- next up --------------------------------------------------------
+    def test_the_app_names_the_next_thing_without_being_asked(self):
+        self.capture("vague thing")
+        self.capture("ready thing")
+        self.app.tasks[0].first_step = "open the folder"
+        self.app.refresh_tasks()
+        # The one that says how to start outranks the one that does not.
+        self.assertEqual(self.app.next_title_var.get(), "ready thing")
+        self.assertIn("open the folder", self.app.next_step_var.get())
+
+    def test_a_task_with_no_first_step_says_so_rather_than_nothing(self):
+        self.capture("vague thing")
+        self.assertEqual(self.app.next_title_var.get(), "vague thing")
+        self.assertIn("no first step", self.app.next_step_var.get())
+
+    def test_next_up_is_hidden_when_there_is_nothing_open(self):
+        self.assertEqual(self.app.next_title_var.get(), "")
+        self.assertEqual(self.app.next_frame.winfo_manager(), "")
+        self.capture("something")
+        self.assertEqual(self.app.next_frame.winfo_manager(), "grid")
+
+    def test_start_this_goes_straight_to_the_session(self):
+        self.capture("the thing")
+        with mock.patch("cognitive_offload.app.StartHereDialog") as picker, \
+             mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "open it", "warmup_done": 0}
+            self.app.start_next()
+            picker.assert_not_called()  # no picker: that is the whole point
+        self.assertTrue(self.app._timer_running)
+        self.assertEqual(self.app._focus_task_id, self.app.tasks[0].id)
+        self.app.pause_timer()
+
+    def test_not_that_one_walks_to_another_suggestion(self):
+        for text in ("first", "second", "third"):
+            self.capture(text)
+        seen = {self.app.next_title_var.get()}
+        self.app.skip_next()
+        seen.add(self.app.next_title_var.get())
+        self.app.skip_next()
+        seen.add(self.app.next_title_var.get())
+        self.assertEqual(len(seen), 3)
+        self.app.skip_next()  # wraps rather than dead-ending
+        self.assertIn(self.app.next_title_var.get(), seen)
+
+    def test_not_that_one_with_a_single_task_says_so(self):
+        self.capture("the only one")
+        self.app.skip_next()
+        self.assertEqual(self.app.next_title_var.get(), "the only one")
+        self.assertIn("only thing open", self.app.status_var.get())
+
+    def test_finishing_the_suggestion_moves_next_up_along(self):
+        self.capture("first")
+        self.capture("second")
+        first_suggestion = self.app.next_title_var.get()
+        for index, task in enumerate(self.app._visible):
+            if task.text == first_suggestion:
+                self.select(index)
+                break
+        self.app.toggle_selected_done()
+        self.assertNotEqual(self.app.next_title_var.get(), first_suggestion)
+
+    def test_next_up_survives_calm_mode(self):
+        self.capture("still visible")
+        self.app.calm_var.set(True)
+        self.app.apply_calm_mode()
+        self.assertEqual(self.app.next_frame.winfo_manager(), "grid")
+        self.assertEqual(self.app.next_title_var.get(), "still visible")
+
     def test_dirty_flag_tracks_edits_and_saves(self):
         self.assertFalse(self.app._dirty)
         self.capture("something")

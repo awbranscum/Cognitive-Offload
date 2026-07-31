@@ -20,6 +20,10 @@ able to begin. The app is built around four things that help with that:
 - **A first step on every task.** "Write the report" is hard to start; "open last
   quarter's file" is not. Tasks that name their first move are marked `▸ ready`
   and are ranked first when the app suggests something.
+- **The app names the next thing.** Opening it shows a "NEXT UP" line — the
+  task, its first step, and a Start button. No picker, no dialog, no second
+  decision. "Not that one" walks to the next suggestion. It stays visible in
+  Calm mode, because it is the thing Calm mode is for.
 - **Where do I start?** (`Ctrl+G`) asks what you can *face* right now — an urgent
   sprint, a deadline sprint, admin, or something creative — and offers three
   tasks, not forty. "Show me others" reshuffles. Picking badly beats not picking.

@@ -31,6 +31,7 @@ from .queries import (
     counts,
     due_tasks,
     split_lines,
+    suggest_tasks,
     visible_tasks,
 )
 from .sessions import DEFAULT_BREAK_MINUTES, SessionLog
@@ -95,6 +96,10 @@ class CognitiveOffloadApp(tk.Tk):
         # after a tidy-up instead of resetting the day to zero.
         self.completed_log: list[dict] = []
         self._day = None
+        # Which suggestion the "Next up" strip is showing; "Not that one"
+        # walks it forward.
+        self._next_offset = 0
+        self._next_task_id: str | None = None
 
         # Tk variables have to exist before the tabs that bind to them.
         self.search_var = tk.StringVar()
@@ -109,6 +114,8 @@ class CognitiveOffloadApp(tk.Tk):
         self.due_var = tk.StringVar(value="")
         self.today_var = tk.StringVar(value="")
         self.finish_var = tk.StringVar(value="")
+        self.next_title_var = tk.StringVar(value="")
+        self.next_step_var = tk.StringVar(value="")
         self.path_var = tk.StringVar(value="")
         self.matrix_path_var = tk.StringVar(value="")
         self.calm_var = tk.BooleanVar(value=self.config_store.calm_mode)
@@ -259,11 +266,59 @@ class CognitiveOffloadApp(tk.Tk):
         if hidden > 0:
             summary += f" · {hidden} hidden"
         self.counts_var.set(summary)
+        self.refresh_next_up()
         finished = len(completed_titles_today(self.tasks, self.completed_log))
         # Only ever shown when there is something to show: "0 done today" is
         # the kind of scoreboard this app is meant not to keep.
         self.today_var.set(f"{finished} done today →" if finished else "")
         self.refresh_due()
+
+    def refresh_next_up(self) -> None:
+        """Name the next thing without being asked.
+
+        Opening the app and being told what to start is the difference between
+        one decision and two. "Where do I start?" is still there for when the
+        answer needs to match how you feel; this is the default.
+        """
+        suggestions = suggest_tasks(self.tasks, limit=1, offset=self._next_offset)
+        if not suggestions:
+            self._next_task_id = None
+            self.next_title_var.set("")
+            self.next_step_var.set("")
+            if getattr(self, "next_frame", None) is not None:
+                self.next_frame.grid_remove()
+            return
+
+        task = suggestions[0]
+        self._next_task_id = task.id
+        self.next_title_var.set(task.text)
+        self.next_step_var.set(
+            f"→ {task.first_step}" if task.first_step else "no first step yet — you'll be asked"
+        )
+        if getattr(self, "next_frame", None) is not None:
+            self.next_frame.grid()
+
+    def next_task(self) -> Task | None:
+        return next((t for t in self.tasks if t.id == self._next_task_id), None)
+
+    def start_next(self) -> None:
+        """One click from opening the app to being underway."""
+        task = self.next_task()
+        if task is None:
+            self.set_status("Nothing open. That is a fine place to be.")
+            return
+        self._next_offset = 0
+        self._select_task(task)
+        self.begin_focus(task)
+
+    def skip_next(self) -> None:
+        """Not that one. Walk to the next suggestion, wrapping around."""
+        open_count = sum(1 for t in self.tasks if not t.done)
+        if open_count <= 1:
+            self.set_status("That is the only thing open.")
+            return
+        self._next_offset = (self._next_offset + 1) % open_count
+        self.refresh_next_up()
 
     def _refresh_tag_choices(self) -> None:
         tags = all_tags(self.tasks)
