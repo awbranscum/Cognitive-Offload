@@ -619,6 +619,57 @@ class AppSmokeTests(unittest.TestCase):
         self.app.finish_session_early()
         self.assertEqual(self.app.session_log.count_today(), before)
 
+    def test_done_early_still_works_on_a_block_started_with_plain_start(self):
+        """A finished block's banked flag must not outlive it.
+
+        Finish a session, answer "keep going", then press the plain Start
+        button: that is a new block, and "Done early" has to bank it.
+        """
+        self.capture("deep work")
+        self.select(0)
+        self.run_session(minutes=15)
+        self.assertEqual(self.app.session_log.count_today(), 1)
+
+        self.app.work_minutes.set(20)
+        self.app.start_timer()  # the plain Start/Resume path, no minutes
+        self.assertFalse(self.app._session_banked)
+        self.app._timer_deadline -= 300  # five minutes in
+        self.app._tick_timer()
+        with self.answer_session_end("carry_on"):
+            self.app.finish_session_early()
+        self.assertEqual(self.app.session_log.count_today(), 2)
+        self.assertEqual(self.app.session_log.sessions[-1].minutes, 5)
+
+    def test_midnight_rollover_refreshes_the_momentum_summary_too(self):
+        """Yesterday's sessions must not be reported as today's."""
+        self.app._day = "2000-01-01"
+        self.app.momentum_var.set("stale: 3 sessions today")
+        self.app._roll_over_the_day()
+        self.assertEqual(self.app.momentum_var.get(), self.app.session_log.summary())
+
+    def test_reset_clears_the_banked_flag_with_the_rest_of_the_timer(self):
+        self.capture("deep work")
+        self.select(0)
+        self.run_session(minutes=15)
+        self.app.reset_timer()
+        self.assertFalse(self.app._session_banked)
+
+    def test_nudging_the_minutes_spinbox_keeps_a_paused_block(self):
+        """An accidental arrow-click during a pause must not wipe the block."""
+        self.app.start_timer(minutes=15)
+        self.app._timer_deadline -= 600  # ten minutes in
+        self.app._tick_timer()
+        self.app.pause_timer()
+        remaining = self.app._timer_remaining
+        self.app.work_minutes.set(16)
+        self.app.on_timer_minutes_changed()  # the spinbox arrows call this
+        self.assertEqual(self.app._timer_total, 15 * 60)
+        self.assertEqual(self.app._timer_remaining, remaining)
+        # ...while an idle timer still follows the spinbox as before.
+        self.app.reset_timer()
+        self.app.on_timer_minutes_changed()
+        self.assertEqual(self.app._timer_total, 16 * 60)
+
     def test_pausing_updates_the_pop_out_button(self):
         self.app.start_timer(minutes=10)
         self.app.open_focus_window()

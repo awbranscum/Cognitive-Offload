@@ -135,6 +135,58 @@ class DialogCollectTests(unittest.TestCase):
             dialog._choose(choice)
             self.assertEqual(dialog.result, {"choice": choice, "next_step": "the new step"})
 
+    def _focus(self, dialog, widget):
+        """Push X focus onto ``widget`` and wait for it to actually arrive."""
+        import time
+
+        dialog.deiconify()
+        for _ in range(100):
+            dialog.update()
+            if dialog.focus_get() is widget:
+                return True
+            widget.focus_force()
+            time.sleep(0.01)
+        return False
+
+    def test_enter_in_the_hand_off_field_never_marks_the_task_done(self):
+        # Typing a next step and hitting Enter is the most ingrained habit on
+        # a text field; it must mean "keep the step, carry on" — not "finished".
+        from cognitive_offload.dialogs import SessionEndDialog
+
+        dialog = SessionEndDialog(self.root, "15 minutes", "a task")
+        if not self._focus(dialog, dialog.next_entry):
+            self.skipTest("could not obtain X focus")
+        dialog.next_entry.insert(0, "reread the last paragraph")
+        dialog.next_entry.event_generate("<Return>")
+        self.root.update()
+        self.assertEqual(dialog.result,
+                         {"choice": "carry_on", "next_step": "reread the last paragraph"})
+
+    def test_enter_is_bound_to_the_entry_not_the_whole_dialog(self):
+        # The old dialog-wide <Return> → "done" binding is the bug: it fired
+        # from anywhere, including the hand-off field. Only Escape may live
+        # on the toplevel; Enter belongs to the entry, and it keeps the step.
+        from cognitive_offload.dialogs import SessionEndDialog
+
+        dialog = SessionEndDialog(self.root, "15 minutes", "a task")
+        self.assertNotIn("<Key-Return>", dialog.bind())
+        self.assertIn("<Key-Return>", dialog.next_entry.bind())
+        dialog.next_entry.insert(0, "reread the last paragraph")
+        dialog._keep_step()
+        self.assertEqual(dialog.result,
+                         {"choice": "carry_on", "next_step": "reread the last paragraph"})
+
+    def test_enter_elsewhere_in_the_dialog_chooses_nothing(self):
+        from cognitive_offload.dialogs import SessionEndDialog
+
+        dialog = SessionEndDialog(self.root, "15 minutes", "a task")
+        if not self._focus(dialog, dialog):
+            self.skipTest("could not obtain X focus")
+        dialog.event_generate("<Return>")
+        self.root.update()
+        self.assertIsNone(dialog.result)
+        dialog.destroy()
+
 
 if __name__ == "__main__":
     unittest.main()

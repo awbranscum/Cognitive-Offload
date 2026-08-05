@@ -1261,6 +1261,10 @@ class CognitiveOffloadApp(tk.Tk):
         elif self._timer_remaining <= 0 or self._timer_remaining > self._timer_total:
             self._timer_total = self._minutes() * 60
             self._timer_remaining = self._timer_total
+            # A fresh block, even though no minutes were passed: the banked
+            # flag belongs to the previous block, and leaving it set would
+            # make "Done early" refuse to log this one.
+            self._session_banked = False
         # Track a wall-clock deadline so the countdown cannot drift.
         self._timer_deadline = time.monotonic() + self._timer_remaining
         self._timer_running = True
@@ -1295,12 +1299,17 @@ class CognitiveOffloadApp(tk.Tk):
         self._timer_mode = "focus"
         self._timer_total = self._minutes() * 60
         self._timer_remaining = self._timer_total
+        self._session_banked = False
         self.timer_button.config(text="Start")
         self._update_timer_label()
         self.set_status("Timer reset.")
 
     def on_timer_minutes_changed(self) -> None:
-        if not self._timer_running:
+        # A paused block also has _timer_running False, but it still holds
+        # elapsed minutes worth banking — nudging the spinbox must not wipe
+        # them. Only a timer that is genuinely idle follows the spinbox.
+        mid_block = 0 < self._timer_remaining < self._timer_total
+        if not self._timer_running and not mid_block:
             self._timer_total = self._minutes() * 60
             self._timer_remaining = self._timer_total
             self._update_timer_label()
@@ -1516,6 +1525,7 @@ class CognitiveOffloadApp(tk.Tk):
         elif today != self._day:
             self._day = today
             self.refresh_tasks()  # yesterday's "done today" is not today's
+            self.refresh_momentum()  # ...and neither is its session summary
 
     def _autosave(self) -> None:
         self._roll_over_the_day()

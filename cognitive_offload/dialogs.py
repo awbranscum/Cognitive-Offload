@@ -436,7 +436,6 @@ class SessionEndDialog(ModalDialog):
                   style="Muted.TLabel", wraplength=380, justify="left").pack(
             anchor="w", pady=(0, 14))
 
-        first = None
         for label, value, style in (
             ("It's finished — mark it done", "done", "Default.TButton"),
             (f"Not yet — take {break_minutes} minutes", "break", "Outline.TButton"),
@@ -445,10 +444,22 @@ class SessionEndDialog(ModalDialog):
             button = ttk.Button(self.body, text=label, style=style,
                                 command=lambda v=value: self._choose(v))
             button.pack(fill="x", pady=2)
-            first = first or button
-        if first is not None:
-            first.focus_set()
-            self.bind("<Return>", lambda _e: self._choose("done"))
+        # Focus starts in the hand-off field, and Enter there means "keep the
+        # step, carry on" — never "done". Typing a next step and hitting Enter
+        # is the most ingrained habit on a text field, and having it declare
+        # the task finished (discarding the step from NEXT UP's ranking) is
+        # the opposite of what the user just said. Marking done takes a
+        # deliberate Tab+Space or a click.
+        self.next_entry.focus_set()
+        # The dialog is built before it is mapped, and a focus_set that early
+        # is dropped if the parent isn't viewable yet; re-assert it when the
+        # window actually appears.
+        self.bind("<Map>", lambda _e: self.next_entry.focus_set(), add=True)
+        self.next_entry.bind("<Return>", self._keep_step)
+
+    def _keep_step(self, _event=None):
+        """Enter in the hand-off field: keep the step, carry on — never "done"."""
+        self._choose("carry_on")
 
     def _choose(self, value: str) -> None:
         self.result = {"choice": value, "next_step": self.next_entry.get().strip()}

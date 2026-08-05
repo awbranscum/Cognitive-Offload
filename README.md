@@ -52,7 +52,9 @@ of being one more thing to remember.
 **The hand-off.** When a session ends and the task is not finished, its first
 step is spent — you already opened the doc. The end-of-session prompt asks where
 it picks up next time and shows the old step underneath, so tomorrow's start is
-written while it is still obvious. Blank is a fine answer.
+written while it is still obvious. Blank is a fine answer. Pressing Enter there
+keeps the step and carries on — marking the task done is a deliberate click,
+never a keyboard accident.
 
 **Park it.** The pop-out has a one-line box: a thought that arrives mid-block
 ("email Dana about the invoice") goes to the scratchpad in two seconds without
