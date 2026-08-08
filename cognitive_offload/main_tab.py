@@ -263,7 +263,7 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
         [("Priority", app.toggle_selected_priority, "SmOutline.TButton"),
          ("Tag", app.tag_selected, "SmOutline.TButton"),
          ("Edit", app.edit_selected_details, "SmOutline.TButton"),
-         ("Move to top", app.promote_selected, "SmGhost.TButton")],
+         ("Pin to top", app.promote_selected, "SmGhost.TButton")],
         [("To matrix", app.send_selected_to_matrix, "SmGhost.TButton"),
          ("Delete", app.delete_selected, "SmDestructive.TButton"),
          ("Clear completed", app.clear_completed, "SmGhost.TButton")],

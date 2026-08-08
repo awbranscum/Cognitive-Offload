@@ -38,6 +38,20 @@ class SortTests(unittest.TestCase):
         newer = make("newer", created="2024-06-01 00:00:00")
         self.assertEqual([t.text for t in sort_tasks([older, newer], "priority")], ["newer", "older"])
 
+    def test_priority_sort_puts_pinned_above_flagged(self):
+        flagged = make("flagged", priority=1, created="2024-06-01 00:00:00")
+        pinned = make("pinned", created="2024-01-01 00:00:00")
+        pinned.pinned = True
+        order = [t.text for t in sort_tasks([flagged, pinned], "priority")]
+        self.assertEqual(order, ["pinned", "flagged"])
+
+    def test_a_pinned_done_task_stays_below_open_work(self):
+        done_pinned = make("done", done=True)
+        done_pinned.pinned = True
+        open_plain = make("open")
+        order = [t.text for t in sort_tasks([done_pinned, open_plain], "priority")]
+        self.assertEqual(order, ["open", "done"])
+
     def test_created_sort_is_newest_first(self):
         a = make("a", created="2024-01-01 00:00:00")
         b = make("b", created="2025-01-01 00:00:00")

@@ -54,7 +54,8 @@ def sort_tasks(tasks: list[Task], order: str = DEFAULT_SORT) -> list[Task]:
     if order == "completed":
         # Most recently completed first, then everything still open.
         return sorted(items, key=lambda t: (not t.done, _descending(t.completed_at or "")))
-    return sorted(items, key=lambda t: (t.done, -t.priority, _descending(t.created_at)))
+    return sorted(items, key=lambda t: (
+        t.done, -int(t.pinned), -t.priority, _descending(t.created_at)))
 
 
 def _descending(value: str) -> tuple[int, ...]:

@@ -309,6 +309,34 @@ class RecoveryTests(TempDirTest):
         self.assertTrue(store.backup_path.exists())
 
 
+class MatrixUpdateRollbackTests(TempDirTest):
+    def test_a_failed_rename_never_leaves_two_files(self):
+        from unittest import mock
+
+        store = MatrixStore(self.root)
+        store.ensure()
+        task = store.create("do_first", "old name", "content")
+        with mock.patch.object(MatrixStore, "_unlink",
+                               side_effect=StorageError("locked")):
+            with self.assertRaises(StorageError):
+                store.update(task, "new name", "content")
+        files = list((self.root / "DoFirst").glob("*.task"))
+        self.assertEqual(len(files), 1)
+        self.assertIn("old name", files[0].name)
+        # The in-memory task matches the file that survived.
+        self.assertEqual(task.title, "old name")
+        self.assertEqual(Path(task.path), files[0])
+
+    def test_an_unrenamed_update_is_untouched_by_the_rollback(self):
+        store = MatrixStore(self.root)
+        store.ensure()
+        task = store.create("do_first", "same name", "old content")
+        store.update(task, "same name", "new content")
+        files = list((self.root / "DoFirst").glob("*.task"))
+        self.assertEqual(len(files), 1)
+        self.assertIn("new content", files[0].read_text(encoding="utf-8"))
+
+
 class SlugTests(unittest.TestCase):
     def test_removes_path_separators(self):
         self.assertNotIn("/", slugify("a/b"))

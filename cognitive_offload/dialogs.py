@@ -499,7 +499,7 @@ class ShortcutsDialog(ModalDialog):
             ("Delete", "Delete selected"),
             ("Ctrl+P", "Toggle high priority"),
             ("Ctrl+T", "Add a tag"),
-            ("Ctrl+Up", "Move to top"),
+            ("Ctrl+Up", "Pin to the top (again to unpin)"),
             ("Ctrl+M", "Send selection to the matrix"),
             ("Ctrl+Z", "Undo the last change"),
             ("Ctrl+F", "Search"),

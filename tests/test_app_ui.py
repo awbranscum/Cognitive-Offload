@@ -670,6 +670,58 @@ class AppSmokeTests(unittest.TestCase):
         self.app.on_timer_minutes_changed()
         self.assertEqual(self.app._timer_total, 16 * 60)
 
+    # -- pinning -------------------------------------------------------
+    def test_pinning_actually_reorders_the_visible_list(self):
+        """The old 'move to top' reordered a list the sort immediately re-sorted."""
+        self.capture("old and buried")
+        self.capture("flagged and loud")
+        self.capture("newest")
+        flagged = next(i for i, t in enumerate(self.app._visible)
+                       if t.text == "flagged and loud")
+        self.select(flagged)
+        self.app.toggle_selected_priority()
+        buried = next(i for i, t in enumerate(self.app._visible)
+                      if t.text == "old and buried")
+        self.select(buried)
+        self.app.promote_selected()
+        self.assertEqual(self.app._visible[0].text, "old and buried")
+        self.assertIn("Pinned 1 task(s) to the top.", self.app.status_var.get())
+        self.assertIn("pinned", self.visible_texts()[0])
+
+    def test_pinning_again_unpins(self):
+        self.capture("a")
+        self.capture("b")
+        target = next(i for i, t in enumerate(self.app._visible) if t.text == "a")
+        self.select(target)
+        self.app.promote_selected()
+        self.assertTrue(next(t for t in self.app.tasks if t.text == "a").pinned)
+        self.select(0)  # the pinned task is now first
+        self.app.promote_selected()
+        self.assertFalse(next(t for t in self.app.tasks if t.text == "a").pinned)
+        self.assertIn("Unpinned", self.app.status_var.get())
+
+    def test_pinning_under_another_sort_does_not_claim_a_reorder(self):
+        self.capture("a")
+        self.app.sort_var.set("Created")
+        self.select(0)
+        self.app.promote_selected()
+        self.assertIn("under Priority sort", self.app.status_var.get())
+
+    def test_a_pin_survives_save_and_load(self):
+        self.capture("keep me on top")
+        self.select(0)
+        self.app.promote_selected()
+        self.assertTrue(self.app.save_state(silent=True))
+        self.app.load_state()
+        self.assertTrue(self.app.tasks[0].pinned)
+
+    def test_undo_reverses_a_pin(self):
+        self.capture("a")
+        self.select(0)
+        self.app.promote_selected()
+        self.app.undo()
+        self.assertFalse(self.app.tasks[0].pinned)
+
     def test_replacing_a_running_session_banks_silently_and_starts_the_new_one(self):
         """No end-of-session ceremony for the old block mid-start.
 
@@ -705,6 +757,8 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(self.app._timer_mode, "focus")
         self.assertFalse(self.app._session_banked)
         self.assertEqual(self.app._focus_task_id, new.id)
+        # The bank notice must survive start_timer's own status message.
+        self.assertIn('5 min banked on "old thing"', self.app.status_var.get())
         self.app.pause_timer()
 
     def test_pausing_updates_the_pop_out_button(self):
@@ -1107,6 +1161,34 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual([t.text for t in self.app.tasks], ["finished thing"])
         self.assertEqual(self.app.completed_log, [])
         self.assertIn("1 done today", self.app.today_var.get())  # counted once, not twice
+
+    def test_a_failed_matrix_import_never_leaves_a_task_in_both_stores(self):
+        """Insert-after-delete: an I/O error must not create a duplicate."""
+        from cognitive_offload.storage import StorageError
+
+        for title in ("first", "second"):
+            self.app.matrix.create("schedule", title, "")
+        self.app.refresh_matrix()
+        self.app.matrix_lists["schedule"].selection_set(0, 1)
+        calls = {"n": 0}
+        real_delete = type(self.app.matrix).delete
+
+        def flaky(task):
+            calls["n"] += 1
+            if calls["n"] > 1:
+                raise StorageError("locked")
+            real_delete(self.app.matrix, task)
+
+        with mock.patch.object(self.app.matrix, "delete", side_effect=flaky), \
+                mock.patch("cognitive_offload.app.messagebox.showerror"):
+            self.app.matrix_to_tasks("schedule")
+        moved = [t.text for t in self.app.tasks]
+        self.app.refresh_matrix()
+        left_behind = [t.title for t in self.app._matrix_cache["schedule"]]
+        # Exactly one moved, exactly one stayed — and neither is in both.
+        self.assertEqual(len(moved), 1)
+        self.assertEqual(len(left_behind), 1)
+        self.assertNotIn(left_behind[0], moved)
 
     def test_a_batch_that_fails_halfway_says_so(self):
         from cognitive_offload.storage import StorageError

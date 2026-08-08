@@ -427,6 +427,7 @@ class MatrixStore:
     def update(self, task: MatrixTask, title: str, content: str) -> MatrixTask:
         title = title.strip()
         renamed = title != task.title
+        previous = (task.title, task.content, task.updated_at, task.path)
         task.title = title
         task.content = content
         task.updated_at = now_stamp()
@@ -435,7 +436,14 @@ class MatrixStore:
             task.path = self._new_path(task.category, task)
         self._write(task)
         if renamed and old_path is not None and old_path != Path(task.path):
-            self._unlink(old_path)
+            try:
+                self._unlink(old_path)
+            except StorageError:
+                # Same guarantee move() gives: never leave the task as two
+                # files. Take back the copy and restore the old identity.
+                self._unlink_quietly(Path(task.path))
+                task.title, task.content, task.updated_at, task.path = previous
+                raise
         return task
 
     def set_scheduled(self, task: MatrixTask, when: str) -> MatrixTask:

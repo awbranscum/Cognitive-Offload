@@ -529,16 +529,34 @@ class CognitiveOffloadApp(tk.Tk):
         self.set_status("Task updated.")
 
     def promote_selected(self) -> None:
-        tasks = self._require_selection("move it to the top")
+        """Pin the selection above everything open (or unpin it again).
+
+        The old version reordered ``self.tasks`` and reported success, but
+        every sort order immediately re-sorted the list by task fields, so
+        nothing visibly moved — a control that claims success and does
+        nothing teaches the user to distrust the app. A pin is a real field:
+        it survives re-sorts, saves, and restarts.
+        """
+        tasks = self._require_selection("pin it")
         if not tasks:
             return
-        self.push_undo("move to top")
-        for task in reversed(tasks):
-            self.tasks.remove(task)
-            self.tasks.insert(0, task)
+        self.push_undo("pin")
+        pin = not all(t.pinned for t in tasks)
+        for task in tasks:
+            task.pinned = pin
         self.refresh_tasks()
         self.mark_dirty()
-        self.set_status(f"Moved {len(tasks)} task(s) to the top.")
+        count = len(tasks)
+        if not pin:
+            self.set_status(f"Unpinned {count} task(s).")
+        elif SORT_ORDERS.get(self.sort_var.get(), DEFAULT_SORT) == "priority":
+            self.set_status(f"Pinned {count} task(s) to the top.")
+        else:
+            # Under other sort orders the pin holds but doesn't reorder;
+            # saying otherwise would be the same lie in a new costume.
+            self.set_status(
+                f"Pinned {count} task(s) — shows at the top under Priority sort."
+            )
 
     def delete_selected(self) -> None:
         tasks = self._require_selection("delete it")
@@ -763,12 +781,15 @@ class CognitiveOffloadApp(tk.Tk):
         moved = 0
         restored: list = []
         for task in tasks:
-            self.tasks.insert(0, task.to_task())
+            # Delete first: if the file cannot be removed, the task must not
+            # appear on the main list too — a duplicate in both stores is the
+            # README's "never in both places" promise broken by an I/O error.
             try:
                 self.matrix.delete(task)
             except StorageError as exc:
                 messagebox.showerror("Move failed", str(exc))
                 break
+            self.tasks.insert(0, task.to_task())
             restored.append(task)
             moved += 1
         self.attach_undo(lambda items=restored: self._restore_matrix_tasks(items))
@@ -947,13 +968,16 @@ class CognitiveOffloadApp(tk.Tk):
         if not result:
             return  # nothing torn down: the running block is still running
 
+        banked = None
+        replaced = None
         if self._timer_running:
             # Only now is the replacement certain. Bank what was actually done
             # rather than dropping those minutes on the floor — silently: the
             # old block's end dialog in the middle of starting a new one is a
             # decision at the wrong moment, and its break option used to
             # swallow the session being started.
-            self.finish_session_early(interactive=False)
+            replaced = self._focus_task()
+            banked = self.finish_session_early(interactive=False)
 
         if task is not None and result["first_step"] and result["first_step"] != task.first_step:
             # Naming the first move is worth keeping even if the session dies.
@@ -970,6 +994,13 @@ class CognitiveOffloadApp(tk.Tk):
         self.config_store.focus_minutes = result["minutes"]
         self.work_minutes.set(result["minutes"])
         self.start_timer(minutes=result["minutes"], mode="focus")
+        if banked:
+            # start_timer just overwrote the bank notice; the evidence of the
+            # minutes already done should not vanish the moment they land.
+            name = f' on "{replaced.text}"' if replaced else ""
+            self.set_status(
+                f"{banked} min banked{name}. Only the first step matters."
+            )
 
     def _select_task(self, task: Task) -> None:
         """Make a task the current listbox selection, clearing filters if needed."""
@@ -1063,7 +1094,7 @@ class CognitiveOffloadApp(tk.Tk):
         except tk.TclError:
             self._focus_window = None
 
-    def finish_session_early(self, interactive: bool = True) -> None:
+    def finish_session_early(self, interactive: bool = True) -> int | None:
         """Stop now and keep the minutes you actually did.
 
         ``interactive=False`` banks the minutes with a status line and no
@@ -1071,13 +1102,16 @@ class CognitiveOffloadApp(tk.Tk):
         new one, where opening the old block's full end ceremony mid-start
         is a decision forced at exactly the wrong moment (and choosing
         "take a break" there used to swallow the new session entirely).
+
+        Returns the banked focus minutes, or None when nothing was logged
+        (never started, already banked, or the block was a break).
         """
         if self._session_banked or (
             not self._timer_running and self._timer_remaining >= self._timer_total
         ):
             # Nothing left to bank: the block either already logged itself, or
             # never started. Logging here would invent minutes.
-            return
+            return None
         elapsed = max(1, round((self._timer_total - self._timer_remaining) / 60))
         self._stop_ticking()
         mode, self._timer_mode = self._timer_mode, "focus"
@@ -1088,11 +1122,12 @@ class CognitiveOffloadApp(tk.Tk):
         self._update_timer_label()
         if mode == "break":
             self.set_status("Break ended.")
-            return
+            return None
         if interactive:
             self._finish_session(elapsed)
         else:
             self._bank_session(elapsed)
+        return elapsed
 
     def _restore_matrix_tasks(self, tasks: list) -> None:
         for task in tasks:
@@ -1653,6 +1688,8 @@ def _task_row(task: Task) -> Row:
     if task.done:
         badges.append(Badge("done", "done"))
     else:
+        if task.pinned:
+            badges.append(Badge("pinned", "pinned"))
         if task.kind:
             badges.append(Badge(kind_label(task.kind).split(" ")[0].lower(), task.kind))
         if task.is_ready:

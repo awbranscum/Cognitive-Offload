@@ -119,6 +119,10 @@ class Task:
     # matches the state you are actually in.
     kind: str = KIND_UNSET
     scheduled_for: str = ""  # YYYY-MM-DD, or "" for unscheduled
+    # Pinned tasks sort above everything open in the default order. This is
+    # what "move to top" always promised: an anchor for the thing you are
+    # afraid of losing track of, one that survives every re-sort.
+    pinned: bool = False
 
     def __post_init__(self) -> None:
         self.text = _as_str(self.text).strip()
@@ -126,6 +130,7 @@ class Task:
         self.tags = _as_tags(self.tags)
         self.priority = 1 if self.priority else 0
         self.done = _as_bool(self.done)
+        self.pinned = _as_bool(self.pinned)
         self.first_step = _as_str(self.first_step).strip()
         self.kind = self.kind if self.kind in TASK_KINDS else KIND_UNSET
         self.scheduled_for = _as_str(self.scheduled_for).strip()
@@ -194,6 +199,7 @@ class Task:
             "first_step": self.first_step,
             "kind": self.kind,
             "scheduled_for": self.scheduled_for,
+            "pinned": self.pinned,
         }
 
     @classmethod
@@ -214,6 +220,7 @@ class Task:
             first_step=_as_str(data.get("first_step")),
             kind=_as_str(data.get("kind")),
             scheduled_for=_as_str(data.get("scheduled_for")),
+            pinned=_as_bool(data.get("pinned")),
         )
 
     def copy(self) -> "Task":

@@ -102,15 +102,18 @@ reinstall from python.org).
 
 **Tasks**
 - Multi-select with Shift/Ctrl (or the arrow keys); done, priority, tag,
-  move-to-top, delete and send-to-matrix all act on the whole selection.
+  pin, delete and send-to-matrix all act on the whole selection.
+- Pin a task (`Ctrl+Up`, again to unpin) and it stays above everything open
+  under the default sort — an anchor for the thing you are afraid of losing
+  track of, one that survives every re-sort, save and restart.
 - Each task can carry a first step, a "feels like" category, and a booked date.
 - Search across titles, descriptions, first steps and tags; filter by tag or by
   feel; hide completed.
 - Anything captured today is nudged up the "Where do I start?" ranking — it is
   what is on your mind, and the age tiebreak would otherwise bury it.
 - Sort by priority, creation date, alphabetically, or by completion time.
-  Priority sorting keeps open work at the top: unfinished first, flagged first,
-  then newest.
+  Priority sorting keeps open work at the top: unfinished first, pinned first,
+  then flagged, then newest.
 - `Ctrl+Z` undoes the last change — deletes, edits, bulk moves and all.
 
 **Focus sessions**

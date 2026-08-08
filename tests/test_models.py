@@ -65,6 +65,15 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(task.priority, 1)
         self.assertTrue(task.done)
 
+    def test_pinned_round_trips_and_tolerates_junk(self):
+        task = Task(text="anchor", pinned=True)
+        clone = Task.from_dict(task.to_dict())
+        self.assertTrue(clone.pinned)
+        self.assertTrue(clone.copy().pinned)
+        self.assertFalse(Task.from_dict({"text": "old file"}).pinned)
+        self.assertTrue(Task.from_dict({"text": "x", "pinned": "yes"}).pinned)
+        self.assertFalse(Task.from_dict({"text": "x", "pinned": 0}).pinned)
+
     def test_done_without_timestamp_is_consistent(self):
         task = Task(text="x", done=False, completed_at="2024-01-01 00:00:00")
         self.assertIsNone(task.completed_at)
