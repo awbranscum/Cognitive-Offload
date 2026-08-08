@@ -837,7 +837,11 @@ class CognitiveOffloadApp(tk.Tk):
                 break
             self.tasks.remove(task)
             moved += 1
-        self.attach_undo(lambda items=created: self._remove_matrix_tasks(items))
+        # Capture ids, not objects: the file may be renamed or moved to
+        # another quadrant before the undo fires, and a captured object's
+        # path would then be stale — the delete would silently miss.
+        self.attach_undo(
+            lambda ids=[t.id for t in created]: self._remove_matrix_tasks_by_id(ids))
         self.refresh_tasks(keep_selection=False)
         self.refresh_matrix()
         self.mark_dirty()
@@ -1139,6 +1143,15 @@ class CognitiveOffloadApp(tk.Tk):
             self.matrix.delete(task)
         self.refresh_matrix()
 
+    def _remove_matrix_tasks_by_id(self, ids: list) -> None:
+        """Delete matrix tasks by id, resolved fresh from disk."""
+        wanted = set(ids)
+        for category in CATEGORY_KEYS:
+            for task in self.matrix.list(category):
+                if task.id in wanted:
+                    self.matrix.delete(task)
+        self.refresh_matrix()
+
     def refresh_momentum(self) -> None:
         self.momentum_strip.render(self.session_log.counts_by_day(14))
         self.momentum_var.set(self.session_log.summary())
@@ -1394,6 +1407,14 @@ class CognitiveOffloadApp(tk.Tk):
         self._timer_remaining = max(0, int(math.ceil(remaining)))
         self._update_timer_label()
         if remaining <= 0:
+            if self.grab_current() is not None:
+                # A modal dialog is open. Finishing now would put the
+                # end-of-session dialog on top of it and Tk would hand the
+                # grab back to nobody when it closed, leaving the "modal"
+                # editor open over a mutable main window. Hold at 00:00 and
+                # finish the moment the dialog closes.
+                self._timer_job = self.after(500, self._tick_timer)
+                return
             mode = self._timer_mode
             minutes = max(1, round(self._timer_total / 60))
             self._session_banked = True

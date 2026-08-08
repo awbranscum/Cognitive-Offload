@@ -74,8 +74,12 @@ def atomic_write_text(path: Path, text: str) -> None:
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    # errors="replace": a lone surrogate (astral emoji mangled by some Tk
+    # builds, or a \ud83d escape hand-edited into a file) costs one U+FFFD
+    # instead of an unsaveable session and a permanently dead autosave.
     handle = tempfile.NamedTemporaryFile(
-        "w", encoding="utf-8", dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp",
+        "w", encoding="utf-8", errors="replace",
+        dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp",
         delete=False,
     )
     try:
@@ -327,7 +331,10 @@ class StateStore:
         try:
             self._backup()
             write_json(self.path, payload)
-        except OSError as exc:
+        except (OSError, ValueError, TypeError) as exc:
+            # ValueError/TypeError: a serialization failure must surface as
+            # the same dialog-and-quit path as a disk error, not escape and
+            # leave the window unclosable with autosave silently dead.
             raise StorageError(f"Could not save to {self.path}: {exc}") from exc
 
     def _backup(self) -> None:
@@ -493,7 +500,7 @@ class MatrixStore:
             title=task.text, content=task.description, category=category,
             first_step=task.first_step, kind=task.kind,
             scheduled_for=task.scheduled_for, tags=list(task.tags),
-            priority=task.priority,
+            priority=task.priority, pinned=task.pinned,
         )
         created.path = self._new_path(category, created)
         self._write(created)

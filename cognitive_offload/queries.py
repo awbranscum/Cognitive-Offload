@@ -145,6 +145,11 @@ def rank_for_starting(tasks: list[Task], kind: str | None = None, on: str | None
             -(3 if task.is_ready else 0)
             - (3 if task.is_due(on) else 0)
             - (2 if task.priority else 0)
+            # A pinned task the app never suggests becomes a guilt fixture:
+            # always at the top of the list, never the thing you are invited
+            # to start. Same weight as the flag, still below a written first
+            # step or an arrived booking.
+            - (2 if task.pinned else 0)
             - (1 if kind and task.kind == kind else 0)
             # Captured today: it is the thing currently on your mind, and the
             # age tiebreak below would otherwise bury it under everything old.

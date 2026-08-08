@@ -266,6 +266,7 @@ class MatrixTask:
     scheduled_for: str = ""
     tags: list[str] = field(default_factory=list)
     priority: int = 0
+    pinned: bool = False
     # Absolute path of the backing file; assigned by the store, never stored.
     path: object = None
 
@@ -275,6 +276,7 @@ class MatrixTask:
         self.kind = self.kind if self.kind in TASK_KINDS else KIND_UNSET
         self.tags = _as_tags(self.tags)
         self.priority = 1 if self.priority else 0
+        self.pinned = _as_bool(self.pinned)
 
     def to_dict(self) -> dict:
         return {
@@ -289,6 +291,7 @@ class MatrixTask:
             "scheduled_for": self.scheduled_for,
             "tags": list(self.tags),
             "priority": self.priority,
+            "pinned": self.pinned,
         }
 
     @classmethod
@@ -305,6 +308,7 @@ class MatrixTask:
             scheduled_for=_as_str(data.get("scheduled_for")),
             tags=_as_tags(data.get("tags")),
             priority=1 if data.get("priority") else 0,
+            pinned=_as_bool(data.get("pinned")),
         )
 
     @property
@@ -327,4 +331,5 @@ class MatrixTask:
             scheduled_for=self.scheduled_for,
             tags=list(self.tags),
             priority=self.priority,
+            pinned=self.pinned,
         )

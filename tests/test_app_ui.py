@@ -670,6 +670,45 @@ class AppSmokeTests(unittest.TestCase):
         self.app.on_timer_minutes_changed()
         self.assertEqual(self.app._timer_total, 16 * 60)
 
+    def test_the_timer_waits_for_an_open_modal_before_finishing(self):
+        """Completion must not steal the grab from an open dialog."""
+        self.capture("focused work")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "", "warmup_done": 0,
+            }
+            self.app.focus_on_selected()
+        holder = tk.Toplevel(self.app)
+        holder.update()
+        try:
+            holder.grab_set()
+        except tk.TclError:
+            holder.destroy()
+            self.skipTest("cannot hold a grab on this display")
+        if self.app.grab_current() is None:
+            holder.destroy()
+            self.skipTest("grab not effective on this display")
+        self.app._timer_deadline -= 10_000
+        with self.answer_session_end("carry_on"):
+            self.app._tick_timer()
+            # Deferred: still "running", nothing logged, dialog undisturbed.
+            self.assertTrue(self.app._timer_running)
+            self.assertEqual(self.app.session_log.count_today(), 0)
+            holder.grab_release()
+            holder.destroy()
+            self.app._tick_timer()
+        self.assertEqual(self.app.session_log.count_today(), 1)
+        self.assertFalse(self.app._timer_running)
+
+    def test_a_lone_surrogate_cannot_kill_the_save(self):
+        """Some Tk builds hand back unpaired surrogates for astral emoji."""
+        self.capture("emoji task")
+        self.app.tasks[0].text = "broken \ud83d emoji"
+        self.assertTrue(self.app.save_state(silent=True))
+        self.app.load_state()
+        self.assertIn("broken", self.app.tasks[0].text)
+
     # -- pinning -------------------------------------------------------
     def test_pinning_actually_reorders_the_visible_list(self):
         """The old 'move to top' reordered a list the sort immediately re-sorted."""
@@ -949,6 +988,23 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual([t.text for t in self.app.tasks], ["goes to the matrix"])
         self.assertEqual(self.app.matrix.list("schedule"), [])  # not in two places
 
+    def test_undo_still_finds_a_matrix_file_renamed_after_the_send(self):
+        """The undo entry must survive the file being renamed or moved."""
+        self.capture("original name")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.QuadrantDialog") as dialog:
+            dialog.return_value.show.return_value = "schedule"
+            self.app.send_selected_to_matrix()
+        created = self.app.matrix.list("schedule")[0]
+        self.app.matrix.update(created, "renamed since", "")   # new slug, new file
+        moved = self.app.matrix.move(created, "do_first")      # and a new folder
+        self.assertTrue(Path(moved.path).exists())
+        self.app.undo()
+        self.assertEqual([t.text for t in self.app.tasks], ["original name"])
+        self.assertEqual(self.app.matrix.list("do_first"), [])   # file really gone
+        self.assertEqual(self.app.matrix.list("schedule"), [])
+        self.assertFalse(Path(moved.path).exists())
+
     def test_undo_after_pulling_from_the_matrix_puts_the_file_back(self):
         self.app.matrix.create("schedule", "comes back", "notes")
         self.app.refresh_matrix()
@@ -959,6 +1015,18 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(self.app.tasks, [])
         restored = self.app.matrix.list("schedule")
         self.assertEqual([t.title for t in restored], ["comes back"])
+
+    def test_a_pin_survives_the_matrix_round_trip(self):
+        self.capture("anchored")
+        self.select(0)
+        self.app.promote_selected()
+        with mock.patch("cognitive_offload.app.QuadrantDialog") as dialog:
+            dialog.return_value.show.return_value = "schedule"
+            self.app.send_selected_to_matrix()
+        self.app.refresh_matrix()
+        self.app.matrix_lists["schedule"].selection_set(0)
+        self.app.matrix_to_tasks("schedule")
+        self.assertTrue(self.app.tasks[0].pinned)
 
     def test_sending_to_the_matrix_keeps_tags_and_priority(self):
         self.capture("carry everything")

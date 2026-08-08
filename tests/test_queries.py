@@ -38,6 +38,16 @@ class SortTests(unittest.TestCase):
         newer = make("newer", created="2024-06-01 00:00:00")
         self.assertEqual([t.text for t in sort_tasks([older, newer], "priority")], ["newer", "older"])
 
+    def test_ranking_treats_a_pin_like_a_flag(self):
+        flagged = make("flagged", priority=1, created="2024-01-01 00:00:00")
+        pinned = make("pinned", created="2024-01-01 00:00:00")
+        pinned.pinned = True
+        ready = make("ready", created="2024-01-01 00:00:00")
+        ready.first_step = "open the file"
+        order = [t.text for t in rank_for_starting([flagged, pinned, ready])]
+        self.assertEqual(order[0], "ready")          # a first step still wins
+        self.assertEqual(set(order[1:]), {"flagged", "pinned"})  # equal weight
+
     def test_priority_sort_puts_pinned_above_flagged(self):
         flagged = make("flagged", priority=1, created="2024-06-01 00:00:00")
         pinned = make("pinned", created="2024-01-01 00:00:00")
