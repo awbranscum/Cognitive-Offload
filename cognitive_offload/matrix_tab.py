@@ -94,6 +94,9 @@ def _build_quadrant(app, key: str) -> None:
          "Outline.TButton" if key == "schedule" else "Default.TButton"),
         ("Book a time", lambda k=key: app.book_matrix_time(k),
          "Default.TButton" if key == "schedule" else "Outline.TButton"),
+        # The start machinery, reachable from the quadrant where booked work
+        # lives — not four manual steps away on the other tab.
+        ("Focus on this", lambda k=key: app.focus_matrix_task(k), "Outline.TButton"),
         ("Edit", lambda k=key: app.edit_matrix_task(k), "Ghost.TButton"),
         ("Move to…", lambda k=key: app.move_matrix_tasks(k), "Ghost.TButton"),
         ("Send to tasks", lambda k=key: app.matrix_to_tasks(k), "Ghost.TButton"),

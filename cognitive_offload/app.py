@@ -822,33 +822,62 @@ class CognitiveOffloadApp(tk.Tk):
             + f" to {category_label(destination)}."
         )
 
+    def _import_matrix_tasks(self, tasks: list, undo_label: str) -> list[Task]:
+        """Move matrix tasks onto the main stack; returns the imported Tasks.
+
+        Shared by "Send to tasks" and "Focus on this". Delete-first: if the
+        file cannot be removed, the task must not appear on the main list
+        too — a duplicate in both stores is the README's "never in both
+        places" promise broken by an I/O error.
+        """
+        self.push_undo(undo_label)
+        imported: list[Task] = []
+        restored: list = []
+        for task in tasks:
+            try:
+                self.matrix.delete(task)
+            except StorageError as exc:
+                messagebox.showerror("Move failed", str(exc))
+                break
+            main_task = task.to_task()
+            self.tasks.insert(0, main_task)
+            imported.append(main_task)
+            restored.append(task)
+        self.attach_undo(lambda items=restored: self._restore_matrix_tasks(items))
+        self.refresh_matrix()
+        self.refresh_tasks(keep_selection=False)
+        self.mark_dirty()
+        return imported
+
     def matrix_to_tasks(self, category: str) -> None:
         """Move the selected matrix tasks back onto the main stack."""
         tasks = self._selected_matrix_tasks(category)
         if not tasks:
             self.set_status("Select a task to send to the task list.")
             return
-        self.push_undo("import from matrix")
-        moved = 0
-        restored: list = []
-        for task in tasks:
-            # Delete first: if the file cannot be removed, the task must not
-            # appear on the main list too — a duplicate in both stores is the
-            # README's "never in both places" promise broken by an I/O error.
-            try:
-                self.matrix.delete(task)
-            except StorageError as exc:
-                messagebox.showerror("Move failed", str(exc))
-                break
-            self.tasks.insert(0, task.to_task())
-            restored.append(task)
-            moved += 1
-        self.attach_undo(lambda items=restored: self._restore_matrix_tasks(items))
-        self.refresh_matrix()
-        self.refresh_tasks(keep_selection=False)
-        self.mark_dirty()
-        self.set_status(f"Moved {moved} task(s) to the main list.")
+        moved = self._import_matrix_tasks(tasks, "import from matrix")
+        self.set_status(f"Moved {len(moved)} task(s) to the main list.")
         self.notebook.select(0)
+
+    def focus_matrix_task(self, category: str) -> None:
+        """One click from a quadrant to a running session.
+
+        Booking a time is what makes Schedule work happen — but on the
+        booked day the start machinery (warm-up, timer, hand-off) used to be
+        unreachable from here: send to tasks, switch tab, find it, Ctrl+R.
+        Four steps of self-administration is exactly what does not happen
+        at 9am.
+        """
+        tasks = self._selected_matrix_tasks(category)
+        if not tasks:
+            self.set_status("Select a task to start.")
+            return
+        imported = self._import_matrix_tasks(tasks[:1], "start from matrix")
+        if not imported:
+            return
+        self.notebook.select(0)
+        self._select_task(imported[0])
+        self.begin_focus(imported[0])
 
     def copy_matrix_to_tasks(self, category: str) -> None:
         """Copy every task in the quadrant to the main list, leaving the files alone."""
@@ -903,6 +932,18 @@ class CognitiveOffloadApp(tk.Tk):
             f"Moved {moved} task(s) to {category_label(destination)}."
         )
         self.notebook.select(1)
+        # Land on the quadrant the tasks actually went to, with the new rows
+        # selected — a task that visibly vanishes right after an action is a
+        # small jolt of doubt every time, and doubt is what breaks trust in
+        # the offload.
+        self.matrix_notebook.select(CATEGORY_KEYS.index(destination))
+        created_ids = {t.id for t in created}
+        listing = self.matrix_lists.get(destination)
+        if listing is not None:
+            listing.selection_clear(0, tk.END)
+            for index, task in enumerate(self._matrix_cache.get(destination, [])):
+                if task.id in created_ids:
+                    listing.selection_set(index)
 
     # ------------------------------------------------------------------
     # appearance
@@ -1329,7 +1370,15 @@ class CognitiveOffloadApp(tk.Tk):
         booked = [t for t in self._matrix_cache.get("schedule", []) if t.is_due()]
         if booked:
             self.notebook.select(1)
-            self.matrix_notebook.select(1)
+            self.matrix_notebook.select(CATEGORY_KEYS.index("schedule"))
+            # Put the eye on the booked rows, not just the right tab — and
+            # "Focus on this" is one click away from here.
+            listing = self.matrix_lists.get("schedule")
+            if listing is not None:
+                listing.selection_clear(0, tk.END)
+                for index, task in enumerate(self._matrix_cache.get("schedule", [])):
+                    if task.is_due():
+                        listing.selection_set(index)
             self.set_status(f"Booked in Schedule: {booked[0].title}")
 
     def book_matrix_time(self, category: str) -> None:

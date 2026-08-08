@@ -151,7 +151,11 @@ reinstall from python.org).
 **Matrix**
 - Add, edit, delete and move tasks between any two quadrants (not just into
   "Do First").
-- "Book a time" on a Schedule task; booked items show up on the main tab.
+- "Book a time" on a Schedule task; booked items show up on the main tab, and
+  the "booked for today" banner lands on the actual rows, not just the tab.
+- "Focus on this" starts a session straight from a quadrant: one click moves
+  the task to the main list, opens the start dialog, and runs the warm-up —
+  instead of the four manual steps that booked work used to need on its day.
 - Send a selection back to the main task list, or copy a whole quadrant.
 - Each quadrant is a folder; each task is a `.task` JSON file, so the data stays
   readable and greppable outside the app.

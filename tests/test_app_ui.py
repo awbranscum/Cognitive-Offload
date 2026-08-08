@@ -1097,6 +1097,62 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(self.app.matrix.list("schedule"), [])
         self.assertFalse(Path(moved.path).exists())
 
+    def test_focus_on_this_starts_a_session_straight_from_the_matrix(self):
+        """Booked work gets the start machinery in one click, not four steps."""
+        self.app.matrix.create("schedule", "booked deep work", "notes")
+        self.app.refresh_matrix()
+        self.app.matrix_lists["schedule"].selection_set(0)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "open it", "warmup_done": 0,
+            }
+            self.app.focus_matrix_task("schedule")
+        self.assertEqual([t.text for t in self.app.tasks], ["booked deep work"])
+        self.assertEqual(self.app.matrix.list("schedule"), [])
+        self.assertTrue(self.app._timer_running)
+        self.assertEqual(self.app._focus_task_id, self.app.tasks[0].id)
+        self.assertEqual(self.app.notebook.index(self.app.notebook.select()), 0)
+        self.app.pause_timer()
+
+    def test_focus_on_this_cancelled_still_imports_but_starts_nothing(self):
+        self.app.matrix.create("do_first", "urgent thing", "")
+        self.app.refresh_matrix()
+        self.app.matrix_lists["do_first"].selection_set(0)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = None  # user backed out
+            self.app.focus_matrix_task("do_first")
+        self.assertEqual([t.text for t in self.app.tasks], ["urgent thing"])
+        self.assertFalse(self.app._timer_running)
+        # ...and Ctrl+Z reverses even the import.
+        self.app.undo()
+        self.assertEqual(self.app.tasks, [])
+        self.assertEqual([t.title for t in self.app.matrix.list("do_first")],
+                         ["urgent thing"])
+
+    def test_sending_to_the_matrix_lands_on_the_destination_quadrant(self):
+        self.capture("triaged away")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.QuadrantDialog") as dialog:
+            dialog.return_value.show.return_value = "delegate"
+            self.app.send_selected_to_matrix()
+        chosen_page = self.app.matrix_notebook.index(self.app.matrix_notebook.select())
+        from cognitive_offload.storage import CATEGORY_KEYS
+        self.assertEqual(chosen_page, CATEGORY_KEYS.index("delegate"))
+        self.assertEqual(self.app.matrix_lists["delegate"].curselection(), (0,))
+
+    def test_the_booked_banner_selects_the_due_rows(self):
+        from cognitive_offload.models import today_iso
+
+        self.app.matrix.create("schedule", "later", "")
+        created = self.app.matrix.create("schedule", "due now", "")
+        self.app.matrix.set_scheduled(created, today_iso())
+        self.app.refresh_matrix()
+        self.app.show_booked()
+        listing = self.app.matrix_lists["schedule"]
+        selected = [self.app._matrix_cache["schedule"][i].title
+                    for i in listing.curselection()]
+        self.assertEqual(selected, ["due now"])
+
     def test_undo_after_pulling_from_the_matrix_puts_the_file_back(self):
         self.app.matrix.create("schedule", "comes back", "notes")
         self.app.refresh_matrix()

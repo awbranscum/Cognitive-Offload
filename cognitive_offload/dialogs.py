@@ -120,7 +120,7 @@ class TaskEditorDialog(ModalDialog):
         ).pack(anchor="w", pady=(2, 10))
 
         row = ttk.Frame(self.body)
-        row.pack(fill="x", pady=(0, 10))
+        row.pack(fill="x")
         ttk.Label(row, text="Feels like").pack(side="left")
         self.kind_var = tk.StringVar(value=dict(KIND_CHOICES).get(kind, "Unsorted"))
         ttk.Combobox(
@@ -134,9 +134,15 @@ class TaskEditorDialog(ModalDialog):
         self.date_entry = ttk.Entry(row, width=14)
         self.date_entry.pack(side="left", padx=(6, 0))
         self.date_entry.insert(0, scheduled_for)
-        ttk.Label(row, text="today / tomorrow / fri / 2026-08-01", style="Muted.TLabel").pack(
-            side="left", padx=(6, 0)
-        )
+        # On its own line: packed at the row's right edge it clipped to a
+        # single letter, and this is the only place the accepted date
+        # shapes are documented.
+        ttk.Label(
+            self.body,
+            text="Dates can be \"today\", \"tomorrow\", a weekday like \"fri\", "
+                 "or 2026-08-01.",
+            style="Muted.TLabel", wraplength=470, justify="left",
+        ).pack(anchor="w", pady=(2, 10))
 
         ttk.Label(self.body, text="Details").pack(anchor="w")
         self.content_text = tk.Text(self.body, height=8, wrap="word", undo=True)
