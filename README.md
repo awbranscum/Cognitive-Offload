@@ -149,7 +149,13 @@ reinstall from python.org).
   readable and greppable outside the app.
 
 **Saving**
-- Auto-saves every 30s when something changed, and on quit.
+- Auto-saves every 30s when something changed, and on quit. If an auto-save
+  fails (disk full, folder on a paused sync drive), the app says so once,
+  calmly, instead of failing silently for hours — and quitting with a broken
+  save offers to write a copy somewhere else first.
+- A second copy of the app opening the same session folder is caught by a
+  lock file and asked before it can silently overwrite the first copy's
+  saves. (After a crash, answering "open anyway" takes over cleanly.)
 - `Ctrl+Z` reaches across the task list and the matrix: undoing a "to matrix"
   move deletes the file it created, and undoing the reverse writes it back, so
   a task is never left in both places or neither.

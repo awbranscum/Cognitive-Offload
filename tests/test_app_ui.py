@@ -670,6 +670,45 @@ class AppSmokeTests(unittest.TestCase):
         self.app.on_timer_minutes_changed()
         self.assertEqual(self.app._timer_total, 16 * 60)
 
+    def test_a_failing_autosave_says_so_once_not_every_thirty_seconds(self):
+        self.capture("unsaved work")
+        with mock.patch.object(self.app, "save_state", return_value=False):
+            self.app._autosave()
+            self.assertIn("auto-save", self.app.status_var.get().lower())
+            self.app.hold_status("quiet again")
+            self.app._autosave()  # still failing: no fresh nag
+            self.assertEqual(self.app.status_var.get(), "quiet again")
+        self.app.save_state(silent=True)  # a working save clears the streak
+        with mock.patch.object(self.app, "save_state", return_value=False):
+            self.app.capture_entry.insert(0, "more")
+            self.app.add_task_from_capture()
+            self.app._autosave()
+            self.assertIn("auto-save", self.app.status_var.get().lower())
+
+    def test_quit_stays_open_when_the_rescue_export_fails(self):
+        self.capture("precious")
+        with mock.patch.object(self.app, "save_state", return_value=False), \
+                mock.patch("cognitive_offload.app.messagebox.askyesnocancel",
+                           return_value=True), \
+                mock.patch.object(self.app, "export_state", return_value=False):
+            self.app.on_close()
+        self.assertTrue(self.app.winfo_exists())
+
+    def test_quit_cancel_stays_here(self):
+        self.capture("precious")
+        with mock.patch.object(self.app, "save_state", return_value=False), \
+                mock.patch("cognitive_offload.app.messagebox.askyesnocancel",
+                           return_value=None):
+            self.app.on_close()
+        self.assertTrue(self.app.winfo_exists())
+
+    def test_a_failed_session_log_write_is_mentioned_not_fatal(self):
+        with mock.patch.object(self.app.session_log, "save",
+                               side_effect=OSError("disk full")):
+            self.app._bank_session(5)
+        self.assertIn("couldn't write the session log", self.app.status_var.get())
+        self.assertEqual(self.app.session_log.count_today(), 1)  # still in memory
+
     def test_the_timer_waits_for_an_open_modal_before_finishing(self):
         """Completion must not steal the grab from an open dialog."""
         self.capture("focused work")
@@ -1187,7 +1226,9 @@ class AppSmokeTests(unittest.TestCase):
 
         from cognitive_offload.storage import Config
         # A second app in the same process is how "next launch" is observable
-        # without tearing down the interpreter under the test runner.
+        # without tearing down the interpreter under the test runner. The
+        # previous "run" has exited as far as the folder lock is concerned.
+        self.app._instance_lock.release()
         restored = CognitiveOffloadApp(config=Config(self.app.config_store.path).load())
         restored.withdraw()
         self.addCleanup(restored.destroy)
@@ -1393,6 +1434,71 @@ class AppSmokeTests(unittest.TestCase):
         self.app.note_text.insert("1.0", "typing")
         self.app.update()  # let the <<Modified>> event reach the handler
         self.assertTrue(self.app._dirty)
+
+
+@unittest.skipUnless(_display_available(), "tkinter display not available")
+class InstanceGuardTests(unittest.TestCase):
+    """Two copies on one session folder is silent last-writer-wins loss."""
+
+    def _make_config(self):
+        from cognitive_offload.storage import Config
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        config = Config(root / "config.json")
+        config.db_path = root / "db"
+        config.matrix_db_path = root / "matrix"
+        return config
+
+    def test_the_app_locks_its_session_folder(self):
+        from cognitive_offload.app import CognitiveOffloadApp
+
+        config = self._make_config()
+        app = CognitiveOffloadApp(config=config)
+        app.withdraw()
+        self.addCleanup(app.destroy)
+        self.assertFalse(app.aborted)
+        self.assertTrue((config.db_path / ".lock").exists())
+
+    def test_declining_the_takeover_aborts_the_second_copy(self):
+        from cognitive_offload.app import CognitiveOffloadApp
+
+        config = self._make_config()
+        first = CognitiveOffloadApp(config=config)
+        first.withdraw()
+        self.addCleanup(first.destroy)
+        with mock.patch("cognitive_offload.app.messagebox.askyesno",
+                        return_value=False):
+            second = CognitiveOffloadApp(config=config)
+        self.assertTrue(second.aborted)
+        # First copy's lock is untouched.
+        self.assertTrue((config.db_path / ".lock").exists())
+        self.assertTrue(first._instance_lock.owned)
+
+    def test_accepting_the_takeover_claims_the_lock(self):
+        from cognitive_offload.app import CognitiveOffloadApp
+
+        config = self._make_config()
+        first = CognitiveOffloadApp(config=config)
+        first.withdraw()
+        self.addCleanup(first.destroy)
+        with mock.patch("cognitive_offload.app.messagebox.askyesno",
+                        return_value=True):
+            second = CognitiveOffloadApp(config=config)
+        second.withdraw()
+        self.addCleanup(second.destroy)
+        self.assertFalse(second.aborted)
+        self.assertTrue(second._instance_lock.owned)
+
+    def test_closing_releases_the_lock(self):
+        from cognitive_offload.app import CognitiveOffloadApp
+
+        config = self._make_config()
+        app = CognitiveOffloadApp(config=config)
+        app.withdraw()
+        app.on_close()
+        self.assertFalse((config.db_path / ".lock").exists())
 
 
 @unittest.skipUnless(_display_available(), "tkinter display not available")

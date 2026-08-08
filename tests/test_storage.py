@@ -7,6 +7,7 @@ from cognitive_offload.models import Task
 from cognitive_offload.storage import (
     CATEGORY_KEYS,
     Config,
+    InstanceLock,
     MatrixStore,
     NotASessionError,
     StateStore,
@@ -335,6 +336,53 @@ class MatrixUpdateRollbackTests(TempDirTest):
         files = list((self.root / "DoFirst").glob("*.task"))
         self.assertEqual(len(files), 1)
         self.assertIn("new content", files[0].read_text(encoding="utf-8"))
+
+
+class InstanceLockTests(TempDirTest):
+    def test_acquire_creates_and_owns(self):
+        lock = InstanceLock(self.root)
+        self.assertTrue(lock.acquire())
+        self.assertTrue(lock.owned)
+        self.assertTrue((self.root / ".lock").exists())
+
+    def test_a_second_acquire_fails_and_names_the_holder(self):
+        first = InstanceLock(self.root)
+        self.assertTrue(first.acquire())
+        second = InstanceLock(self.root)
+        self.assertFalse(second.acquire())
+        self.assertFalse(second.owned)
+        self.assertIn("started", second.holder())
+
+    def test_takeover_claims_and_release_unlinks(self):
+        first = InstanceLock(self.root)
+        first.acquire()
+        second = InstanceLock(self.root)
+        self.assertFalse(second.acquire())
+        second.takeover()
+        self.assertTrue(second.owned)
+        second.release()
+        self.assertFalse((self.root / ".lock").exists())
+
+    def test_release_without_ownership_leaves_the_lock_alone(self):
+        first = InstanceLock(self.root)
+        first.acquire()
+        second = InstanceLock(self.root)
+        second.acquire()
+        second.release()  # not owned: must not delete first's lock
+        self.assertTrue((self.root / ".lock").exists())
+
+    def test_an_unwritable_folder_does_not_block_the_app(self):
+        blocked = self.root / "file-not-folder"
+        blocked.write_text("x", encoding="utf-8")
+        lock = InstanceLock(blocked / "nested")
+        self.assertTrue(lock.acquire())  # save will complain instead
+        self.assertFalse(lock.owned)
+
+    def test_an_unreadable_lock_still_reports_something(self):
+        lock = InstanceLock(self.root)
+        (self.root / ".lock").write_bytes(b"\xff\xfe garbage")
+        self.assertFalse(lock.acquire())
+        self.assertEqual(lock.holder(), "details unreadable")
 
 
 class SlugTests(unittest.TestCase):

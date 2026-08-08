@@ -38,6 +38,7 @@ from .sessions import DEFAULT_BREAK_MINUTES, SessionLog
 from .storage import (
     CATEGORY_KEYS,
     Config,
+    InstanceLock,
     MatrixStore,
     NotASessionError,
     StateStore,
@@ -79,6 +80,7 @@ class CognitiveOffloadApp(tk.Tk):
         self._undo_stack: list[tuple[str, list[Task]]] = []
         self._dirty = False
         self._autosave_blocked = False
+        self._autosave_complained = False
         self._suppress_scratch_event = False
         self._status_token = 0
         self._status_before_hover: str | None = None
@@ -130,12 +132,41 @@ class CognitiveOffloadApp(tk.Tk):
         self._ui_ready = True
 
         self._ensure_folders()
+        self.aborted = False
+        self._instance_lock = InstanceLock(self.config_store.db_path)
+        if not self._claim_instance_lock(self._instance_lock):
+            self.aborted = True
+            self.destroy()
+            return
         self.load_state(initial=True)
         self.refresh_matrix()
         self.refresh_momentum()
         self._update_timer_label()
         self._schedule_autosave()
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    def _claim_instance_lock(self, lock: InstanceLock) -> bool:
+        """Acquire the folder lock, or ask whether to take it over.
+
+        Two copies autosaving the same file silently overwrite each other's
+        work every 30 seconds — double-clicking run.bat twice, or reopening
+        a window that was just lost behind others, is exactly the slip this
+        guards against.
+        """
+        if lock.acquire():
+            return True
+        answer = messagebox.askyesno(
+            "Already running?",
+            f"Another copy of Cognitive Offload looks open with this session "
+            f"folder ({lock.holder()}).\n\n"
+            "Two copies would silently overwrite each other's saves.\n\n"
+            "Open here anyway? (That is safe if the other copy crashed or "
+            "was force-closed.)",
+        )
+        if answer:
+            lock.takeover()
+            return True
+        return False
 
     # ------------------------------------------------------------------
     # construction
@@ -1173,8 +1204,11 @@ class CognitiveOffloadApp(tk.Tk):
         self._session_banked = True
         self._session_count += 1
         self.refresh_momentum()
+        note = ""
+        if self.session_log.write_failed:
+            note = " (couldn't write the session log — the day strip may forget this one)"
         self.set_status(
-            f"{minutes} min banked" + (f' on "{task.text}".' if task else ".")
+            f"{minutes} min banked" + (f' on "{task.text}"' if task else "") + "." + note
         )
 
     def _finish_session(self, minutes: int) -> None:
@@ -1566,6 +1600,7 @@ class CognitiveOffloadApp(tk.Tk):
                 messagebox.showerror("Save failed", str(exc))
             return False
         self._dirty = False
+        self._autosave_complained = False  # a working save clears the warning
         if not silent:
             self.set_status(f"Saved to {self.state_store.path}")
         return True
@@ -1595,21 +1630,23 @@ class CognitiveOffloadApp(tk.Tk):
         self._apply_state(data)
         self.set_status(f"Working in {Path(path).name}")
 
-    def export_state(self) -> None:
+    def export_state(self) -> bool:
+        """Write a copy anywhere. True only when a copy actually landed."""
         path = filedialog.asksaveasfilename(
             title="Export session",
             defaultextension=".json",
             filetypes=[("JSON files", "*.json")],
         )
         if not path:
-            return
+            return False
         try:
             StateStore(Path(path)).save(self.tasks, self.scratchpad_text(), self._minutes(),
                                         self.completed_log)
         except StorageError as exc:
             messagebox.showerror("Export failed", str(exc))
-            return
+            return False
         self.set_status(f"Exported to {Path(path).name}")
+        return True
 
     def change_db_folder(self) -> None:
         new_path = filedialog.askdirectory(initialdir=str(self.config_store.db_path))
@@ -1622,6 +1659,12 @@ class CognitiveOffloadApp(tk.Tk):
                 "Switch folders anyway and lose the unsaved changes?",
             ):
                 return
+        new_lock = InstanceLock(Path(new_path))
+        if not self._claim_instance_lock(new_lock):
+            self.set_status("Kept the current session folder.")
+            return
+        self._instance_lock.release()
+        self._instance_lock = new_lock
         self.config_store.db_path = Path(new_path)
         self.state_store.set_path(self.config_store.state_file)
         self.session_log.set_path(self.config_store.sessions_file)
@@ -1677,13 +1720,33 @@ class CognitiveOffloadApp(tk.Tk):
         if self.config_store.autosave and self._dirty and not self._autosave_blocked:
             if self.save_state(silent=True):
                 self.set_status("Auto-saved.")
+            elif not self._autosave_complained:
+                # Say it once, calmly, and keep saying nothing while it stays
+                # broken — the user needs the fact, not a nag every 30s. The
+                # old behaviour was worse than either: hours of silent
+                # failure discovered only at quit.
+                self._autosave_complained = True
+                self.hold_status(
+                    "Couldn't auto-save — disk full, or the folder "
+                    "unavailable? Your work is only in this window for now: "
+                    "try Save, or Export a copy somewhere safe."
+                )
         self._schedule_autosave()
 
     def on_close(self) -> None:
         if self._dirty and not self.save_state(silent=True):
-            if not messagebox.askyesno("Quit", "Saving failed. Quit and lose the changes?"):
+            choice = messagebox.askyesnocancel(
+                "Save failed",
+                "Saving to the session folder failed.\n\n"
+                "Save a copy somewhere else before quitting?\n\n"
+                "(“No” quits without saving. “Cancel” stays here.)",
+            )
+            if choice is None:
                 return
+            if choice and not self.export_state():
+                return  # no copy was written; don't quit on a failed rescue
         self._save_config()
+        self._instance_lock.release()
         self._stop_ticking()
         if self._focus_window is not None:
             self._focus_window.close()
@@ -1768,4 +1831,5 @@ def _sort_label(order: str) -> str:
 
 def main() -> None:
     app = CognitiveOffloadApp()
-    app.mainloop()
+    if not app.aborted:
+        app.mainloop()

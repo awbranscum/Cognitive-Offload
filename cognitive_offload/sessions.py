@@ -63,6 +63,7 @@ class SessionLog:
     def __init__(self, path: Path):
         self.path = Path(path)
         self.sessions: list[FocusSession] = []
+        self.write_failed = False  # did the most recent record() reach disk?
 
     def set_path(self, path: Path) -> None:
         self.path = Path(path)
@@ -108,8 +109,11 @@ class SessionLog:
         self.sessions.append(session)
         try:
             self.save()
+            self.write_failed = False
         except OSError:
-            pass  # Losing a log entry must never cost you the session itself.
+            # Losing a log entry must never cost you the session itself —
+            # but the caller may want to mention it happened.
+            self.write_failed = True
         return session
 
     # -- reporting -----------------------------------------------------

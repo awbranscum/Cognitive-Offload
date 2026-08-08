@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import tempfile
 import time
 from pathlib import Path
@@ -192,6 +193,76 @@ def _int_or(value, fallback: int, low: int, high: int) -> int:
         return max(low, min(high, int(value)))
     except (TypeError, ValueError):
         return fallback
+
+
+class InstanceLock:
+    """Guards a session folder against a second running copy.
+
+    Two instances autosaving the same ``data.json`` is last-writer-wins data
+    loss: every change made in one is silently erased by the other within 30
+    seconds. The lock is advisory — a ``.lock`` file with pid/host/started
+    inside — and staleness is deliberately the *user's* call: probing pid
+    liveness portably is a trap (``os.kill(pid, 0)`` terminates the target
+    process on Windows).
+    """
+
+    def __init__(self, folder: Path):
+        self.path = Path(folder) / ".lock"
+        self.owned = False
+
+    def _stamp(self) -> dict:
+        return {
+            "pid": os.getpid(),
+            "host": socket.gethostname(),
+            "started": now_stamp(),
+        }
+
+    def acquire(self) -> bool:
+        """Take the lock. False when another copy seems to hold it."""
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            return False
+        except OSError:
+            # An unwritable folder will fail loudly at the first save; a
+            # second refusal here would just be in the way.
+            return True
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(self._stamp(), fh)
+        except OSError:
+            pass
+        self.owned = True
+        return True
+
+    def takeover(self) -> None:
+        """The user says the other copy is gone: claim the lock anyway."""
+        try:
+            self.path.write_text(json.dumps(self._stamp()), encoding="utf-8")
+        except OSError:
+            pass
+        self.owned = True
+
+    def holder(self) -> str:
+        """Human-readable description of whoever seems to hold the lock."""
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            return "details unreadable"
+        started = data.get("started") or "unknown time"
+        host = data.get("host") or ""
+        return f"started {started}" + (f" on {host}" if host else "")
+
+    def release(self) -> None:
+        """Remove the lock file — only if this instance owns it."""
+        if not self.owned:
+            return
+        try:
+            self.path.unlink()
+        except OSError:
+            pass
+        self.owned = False
 
 
 class NotASessionError(StorageError):
