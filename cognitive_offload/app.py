@@ -312,7 +312,8 @@ class CognitiveOffloadApp(tk.Tk):
         one decision and two. "Where do I start?" is still there for when the
         answer needs to match how you feel; this is the default.
         """
-        suggestions = suggest_tasks(self.tasks, limit=1, offset=self._next_offset)
+        suggestions = suggest_tasks(self.tasks, limit=1, offset=self._next_offset,
+                                    warm=self.session_log.recent_task_ids())
         if not suggestions:
             self._next_task_id = None
             self.next_title_var.set("")
@@ -342,6 +343,25 @@ class CognitiveOffloadApp(tk.Tk):
         self._next_offset = 0
         self._select_task(task)
         self.begin_focus(task)
+
+    def snooze_next(self) -> None:
+        """Not today. The task keeps its place on the list; the suggestion
+        slot stops being guarded by something you cannot face right now.
+
+        Repeated forced contact with a dreaded task does not build willpower
+        — it builds avoidance of the whole app. One day, no badge, no
+        counter, silent expiry."""
+        task = self.next_task()
+        if task is None:
+            return
+        from datetime import date, timedelta
+
+        self.push_undo("not today")
+        task.snoozed_until = (date.today() + timedelta(days=1)).isoformat()
+        self.mark_dirty()
+        self._next_offset = 0
+        self.refresh_next_up()
+        self.set_status("Okay — it will come back tomorrow.")
 
     def skip_next(self) -> None:
         """Not that one. Walk to the next suggestion, wrapping around."""
@@ -958,7 +978,8 @@ class CognitiveOffloadApp(tk.Tk):
         if not open_tasks:
             self.set_status("Nothing open. That is a fine place to be.")
             return
-        chosen = StartHereDialog(self, self.tasks).show()
+        chosen = StartHereDialog(self, self.tasks,
+                                 warm=self.session_log.recent_task_ids()).show()
         if chosen is None:
             return
         self._select_task(chosen)
@@ -1200,7 +1221,8 @@ class CognitiveOffloadApp(tk.Tk):
     def _bank_session(self, minutes: int) -> None:
         """Log the minutes; no dialog, no ceremony."""
         task = self._focus_task()
-        self.session_log.record(minutes=minutes, task=task.text if task else "")
+        self.session_log.record(minutes=minutes, task=task.text if task else "",
+                                task_id=task.id if task else "")
         self._session_banked = True
         self._session_count += 1
         self.refresh_momentum()

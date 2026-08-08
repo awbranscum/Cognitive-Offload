@@ -192,9 +192,10 @@ class StartHereDialog(ModalDialog):
     place.
     """
 
-    def __init__(self, parent: tk.Misc, tasks: list[Task]):
+    def __init__(self, parent: tk.Misc, tasks: list[Task], warm: set | None = None):
         super().__init__(parent, "Where do I start?", size=(560, 460))
         self._tasks = tasks
+        self._warm = warm
         self._offset = 0
         self._suggestions: list[Task] = []
 
@@ -237,7 +238,8 @@ class StartHereDialog(ModalDialog):
         for child in self.choices.winfo_children():
             child.destroy()
         self._suggestions = suggest_tasks(
-            self._tasks, kind=self.kind_var.get() or None, limit=3, offset=self._offset
+            self._tasks, kind=self.kind_var.get() or None, limit=3, offset=self._offset,
+            warm=self._warm,
         )
         if not self._suggestions:
             ttk.Label(

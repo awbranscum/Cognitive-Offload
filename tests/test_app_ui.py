@@ -748,6 +748,59 @@ class AppSmokeTests(unittest.TestCase):
         self.app.load_state()
         self.assertIn("broken", self.app.tasks[0].text)
 
+    # -- not today / warm start ----------------------------------------
+    def test_not_today_excuses_the_suggestion_but_keeps_the_task(self):
+        self.capture("dreaded thing")
+        self.assertEqual(self.app.next_title_var.get(), "dreaded thing")
+        self.app.snooze_next()
+        # The strip moved on (nothing else open, so it hides)...
+        self.assertEqual(self.app.next_title_var.get(), "")
+        # ...but the task is still on the list, unbadged and undeleted.
+        self.assertEqual([t.text for t in self.app.tasks], ["dreaded thing"])
+        self.assertIn("come back tomorrow", self.app.status_var.get())
+        self.assertNotIn("snooze", self.visible_texts()[0].lower())
+
+    def test_not_today_moves_to_the_next_open_task(self):
+        self.capture("dreaded")
+        self.capture("doable")
+        first = self.app.next_title_var.get()
+        self.app.snooze_next()
+        second = self.app.next_title_var.get()
+        self.assertNotEqual(first, second)
+        self.assertTrue(second)
+
+    def test_undo_reverses_a_snooze(self):
+        self.capture("dreaded thing")
+        self.app.snooze_next()
+        self.app.undo()
+        self.assertEqual(self.app.tasks[0].snoozed_until, "")
+        self.assertEqual(self.app.next_title_var.get(), "dreaded thing")
+
+    def test_a_banked_session_makes_the_task_warm_in_next_up(self):
+        """Yesterday's work resurfaces instead of being buried by age."""
+        self.capture("ancient backlog")
+        self.capture("worked on recently")
+        worked = next(t for t in self.app.tasks if t.text == "worked on recently")
+        ancient = next(t for t in self.app.tasks if t.text == "ancient backlog")
+        ancient.created_at = "2020-01-01 00:00:00"
+        worked.created_at = "2020-06-01 00:00:00"
+        # Without warmth, the older task wins the tiebreak.
+        self.app.refresh_next_up()
+        self.assertEqual(self.app.next_title_var.get(), "ancient backlog")
+        self.select(next(i for i, t in enumerate(self.app._visible)
+                         if t.id == worked.id))
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "", "warmup_done": 0,
+            }
+            self.app.focus_on_selected()
+        self.app._timer_deadline -= 300
+        self.app._tick_timer()
+        with self.answer_session_end("carry_on"):
+            self.app.finish_session_early()
+        self.app.refresh_next_up()
+        self.assertEqual(self.app.next_title_var.get(), "worked on recently")
+
     # -- pinning -------------------------------------------------------
     def test_pinning_actually_reorders_the_visible_list(self):
         """The old 'move to top' reordered a list the sort immediately re-sorted."""

@@ -193,6 +193,11 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
                command=app.start_next).pack(anchor="e")
     ttk.Button(next_buttons, text="Not that one", style="SmGhost.TButton",
                command=app.skip_next).pack(anchor="e", pady=(4, 0))
+    # "Not that one" walks the list; "Not today" excuses the task until
+    # tomorrow. The difference matters when the same dreaded task greets
+    # you at every launch.
+    ttk.Button(next_buttons, text="Not today", style="SmGhost.TButton",
+               command=app.snooze_next).pack(anchor="e", pady=(2, 0))
 
     # The way in when even that is too much of a decision.
     start_row = ttk.Frame(inner, style="Card.TFrame")

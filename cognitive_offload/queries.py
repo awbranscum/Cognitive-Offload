@@ -120,7 +120,8 @@ def due_tasks(tasks: list[Task], on: str | None = None) -> list[Task]:
     return sorted(due, key=lambda t: t.scheduled_for)
 
 
-def rank_for_starting(tasks: list[Task], kind: str | None = None, on: str | None = None) -> list[Task]:
+def rank_for_starting(tasks: list[Task], kind: str | None = None, on: str | None = None,
+                      warm: set | None = None) -> list[Task]:
     """Order open tasks by how easy they are to *start*, best first.
 
     Knowing what matters most is not the problem; getting moving is. So this
@@ -137,6 +138,9 @@ def rank_for_starting(tasks: list[Task], kind: str | None = None, on: str | None
     """
     on = on or today_iso()
     candidates = [t for t in tasks if not t.done]
+    # "Not today" means not today: the task stays on the list and in every
+    # search, it just stops guarding the suggestion slot until tomorrow.
+    candidates = [t for t in candidates if not t.snoozed_until or t.snoozed_until <= on]
     if kind:
         candidates = [t for t in candidates if t.kind == kind or t.kind == KIND_UNSET]
 
@@ -150,6 +154,10 @@ def rank_for_starting(tasks: list[Task], kind: str | None = None, on: str | None
             # to start. Same weight as the flag, still below a written first
             # step or an arrived booking.
             - (2 if task.pinned else 0)
+            # Warm: worked on in the last couple of days. Re-entry is far
+            # cheaper than a cold start, and the hand-off step written at the
+            # last session end is only useful if this task comes back up.
+            - (2 if warm and task.id in warm else 0)
             - (1 if kind and task.kind == kind else 0)
             # Captured today: it is the thing currently on your mind, and the
             # age tiebreak below would otherwise bury it under everything old.
@@ -167,9 +175,10 @@ def suggest_tasks(
     limit: int = 3,
     offset: int = 0,
     on: str | None = None,
+    warm: set | None = None,
 ) -> list[Task]:
     """A short shortlist. Long lists are the thing that causes the freeze."""
-    ranked = rank_for_starting(tasks, kind, on)
+    ranked = rank_for_starting(tasks, kind, on, warm)
     if not ranked:
         return []
     limit = max(1, limit)

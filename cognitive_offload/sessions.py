@@ -29,18 +29,24 @@ class FocusSession:
     task: str = ""
     started_at: str = field(default_factory=now_stamp)
     completed: bool = True
+    # Which task the block was on (Task.id) — what makes "the thing you
+    # worked on yesterday" findable again tomorrow.
+    task_id: str = ""
 
     @property
     def day(self) -> str:
         return self.started_at[:10]
 
     def to_dict(self) -> dict:
-        return {
+        record = {
             "started_at": self.started_at,
             "minutes": int(self.minutes),
             "task": self.task,
             "completed": bool(self.completed),
         }
+        if self.task_id:
+            record["task_id"] = self.task_id
+        return record
 
     @classmethod
     def from_dict(cls, data: dict) -> "FocusSession":
@@ -54,6 +60,7 @@ class FocusSession:
             task=data.get("task") if isinstance(data.get("task"), str) else "",
             started_at=started if isinstance(started, str) else now_stamp(),
             completed=bool(data.get("completed", True)),
+            task_id=data.get("task_id") if isinstance(data.get("task_id"), str) else "",
         )
 
 
@@ -104,8 +111,10 @@ class SessionLog:
         self.sessions = self.sessions[-MAX_SESSIONS:]
         write_json(self.path, {"sessions": [s.to_dict() for s in self.sessions]}, indent=1)
 
-    def record(self, minutes: int, task: str = "", completed: bool = True) -> FocusSession:
-        session = FocusSession(minutes=minutes, task=task, completed=completed)
+    def record(self, minutes: int, task: str = "", completed: bool = True,
+               task_id: str = "") -> FocusSession:
+        session = FocusSession(minutes=minutes, task=task, completed=completed,
+                               task_id=task_id)
         self.sessions.append(session)
         try:
             self.save()
@@ -122,6 +131,20 @@ class SessionLog:
 
     def count_today(self) -> int:
         return len(self.on_day(today_iso()))
+
+    def recent_task_ids(self, days: int = 2, end: str | None = None) -> set:
+        """Ids of tasks with a focus session in the last ``days`` days.
+
+        A task worked on yesterday is warm — its context is half-loaded and
+        its hand-off step freshly written — and far cheaper to re-enter than
+        a cold start. The ranking uses this to resurface it.
+        """
+        last = _parse_day(end) if end else date.today()
+        first = last - timedelta(days=max(0, days - 1))
+        window = {(first + timedelta(days=i)).isoformat()
+                  for i in range((last - first).days + 1)}
+        return {s.task_id for s in self.sessions
+                if s.task_id and s.day in window}
 
     def minutes_today(self) -> int:
         return sum(s.minutes for s in self.on_day(today_iso()))

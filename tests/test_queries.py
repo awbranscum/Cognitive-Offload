@@ -38,6 +38,32 @@ class SortTests(unittest.TestCase):
         newer = make("newer", created="2024-06-01 00:00:00")
         self.assertEqual([t.text for t in sort_tasks([older, newer], "priority")], ["newer", "older"])
 
+    def test_a_snoozed_task_leaves_the_suggestions_but_not_the_list(self):
+        dreaded = make("dreaded")
+        dreaded.snoozed_until = "2024-06-02"
+        other = make("other")
+        ranked = rank_for_starting([dreaded, other], on="2024-06-01")
+        self.assertEqual([t.text for t in ranked], ["other"])
+        # The list itself never hides it.
+        self.assertEqual(len(filter_tasks([dreaded, other])), 2)
+
+    def test_a_snooze_expires_silently_on_its_day(self):
+        dreaded = make("dreaded")
+        dreaded.snoozed_until = "2024-06-02"
+        ranked = rank_for_starting([dreaded], on="2024-06-02")
+        self.assertEqual([t.text for t in ranked], ["dreaded"])
+
+    def test_warm_tasks_rank_like_flagged_ones(self):
+        cold = make("cold", priority=1, created="2024-01-01 00:00:00")
+        warm_task = make("warm", created="2024-01-01 00:00:00")
+        ranked = rank_for_starting([cold, warm_task], warm={warm_task.id})
+        self.assertEqual({t.text for t in ranked[:2]}, {"cold", "warm"})
+        # Warmth alone does not beat a written first step.
+        ready = make("ready", created="2024-06-01 00:00:00")
+        ready.first_step = "open the doc"
+        ranked = rank_for_starting([ready, warm_task], warm={warm_task.id})
+        self.assertEqual(ranked[0].text, "ready")
+
     def test_ranking_treats_a_pin_like_a_flag(self):
         flagged = make("flagged", priority=1, created="2024-01-01 00:00:00")
         pinned = make("pinned", created="2024-01-01 00:00:00")

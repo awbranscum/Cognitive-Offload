@@ -22,8 +22,16 @@ able to begin. The app is built around four things that help with that:
   and are ranked first when the app suggests something.
 - **The app names the next thing.** Opening it shows a "NEXT UP" line — the
   task, its first step, and a Start button. No picker, no dialog, no second
-  decision. "Not that one" walks to the next suggestion. It stays visible in
-  Calm mode, because it is the thing Calm mode is for.
+  decision. "Not that one" walks to the next suggestion; "Not today" excuses
+  a task you cannot face until tomorrow — it keeps its place on the list, gets
+  no badge and no count, and the snooze expires silently. Repeated forced
+  contact with a dreaded task builds avoidance, not willpower. The strip stays
+  visible in Calm mode, because it is the thing Calm mode is for.
+- **Yesterday's task comes back warm.** The session log remembers which task
+  each block was on, and anything worked in the last two days ranks higher in
+  NEXT UP and "Where do I start?". Re-entry is cheaper than a cold start — and
+  it is what makes the hand-off step you wrote at the last session end
+  actually get read.
 - **Where do I start?** (`Ctrl+G`) asks what you can *face* right now — an urgent
   sprint, a deadline sprint, admin, or something creative — and offers three
   tasks, not forty. "Show me others" reshuffles. Picking badly beats not picking.

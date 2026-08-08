@@ -26,6 +26,30 @@ class SessionLogTests(unittest.TestCase):
         self.assertEqual(reloaded.sessions[0].minutes, 15)
         self.assertEqual(reloaded.sessions[0].task, "write the thing")
 
+    def test_task_id_round_trips_and_old_records_tolerate_its_absence(self):
+        self.log.record(minutes=15, task="thing", task_id="abc123")
+        reloaded = SessionLog(self.path).load()
+        self.assertEqual(reloaded.sessions[0].task_id, "abc123")
+        old = FocusSession.from_dict({"minutes": 10, "task": "older"})
+        self.assertEqual(old.task_id, "")
+        self.assertNotIn("task_id", FocusSession(minutes=5).to_dict())
+
+    def test_recent_task_ids_is_a_two_day_window(self):
+        today = date.today().isoformat()
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        stale = (date.today() - timedelta(days=5)).isoformat()
+        self.log.sessions = [
+            FocusSession(minutes=15, task_id="warm-today",
+                         started_at=f"{today} 09:00:00"),
+            FocusSession(minutes=15, task_id="warm-yesterday",
+                         started_at=f"{yesterday} 21:00:00"),
+            FocusSession(minutes=15, task_id="cold",
+                         started_at=f"{stale} 09:00:00"),
+            FocusSession(minutes=15, started_at=f"{today} 10:00:00"),  # no id
+        ]
+        self.assertEqual(self.log.recent_task_ids(),
+                         {"warm-today", "warm-yesterday"})
+
     def test_counts_and_minutes_for_today(self):
         self.log.record(minutes=15)
         self.log.record(minutes=25)
