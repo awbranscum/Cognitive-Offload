@@ -169,8 +169,12 @@ Press `F1` in the app for the full keyboard-shortcut list.
 | Preferences | `~/.cognitive_offload_config.json` |
 
 A session file that is valid JSON but not a Cognitive Offload session is
-refused rather than loaded as empty, and an unreadable `sessions.json` is moved
-to `sessions.json.corrupt` instead of being silently overwritten.
+refused rather than loaded as empty — and left exactly where it is. An
+unreadable `data.json` is set aside under a timestamped `.corrupt-` name
+(never deleted, never overwritten) and the app offers to restore the `.bak`
+on the spot; declining starts fresh while the backup stays protected for the
+rest of the run. An unreadable `sessions.json` is likewise moved to
+`sessions.json.corrupt` instead of being silently overwritten.
 
 Both folders can be moved from inside the app ("Change folder"). Sessions saved
 by earlier versions — including the old timestamped notes list and plain-text

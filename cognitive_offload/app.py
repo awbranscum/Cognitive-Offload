@@ -39,6 +39,7 @@ from .storage import (
     CATEGORY_KEYS,
     Config,
     MatrixStore,
+    NotASessionError,
     StateStore,
     StorageError,
     category_label,
@@ -948,8 +949,11 @@ class CognitiveOffloadApp(tk.Tk):
 
         if self._timer_running:
             # Only now is the replacement certain. Bank what was actually done
-            # rather than dropping those minutes on the floor.
-            self.finish_session_early()
+            # rather than dropping those minutes on the floor — silently: the
+            # old block's end dialog in the middle of starting a new one is a
+            # decision at the wrong moment, and its break option used to
+            # swallow the session being started.
+            self.finish_session_early(interactive=False)
 
         if task is not None and result["first_step"] and result["first_step"] != task.first_step:
             # Naming the first move is worth keeping even if the session dies.
@@ -1059,8 +1063,15 @@ class CognitiveOffloadApp(tk.Tk):
         except tk.TclError:
             self._focus_window = None
 
-    def finish_session_early(self) -> None:
-        """Stop now and keep the minutes you actually did."""
+    def finish_session_early(self, interactive: bool = True) -> None:
+        """Stop now and keep the minutes you actually did.
+
+        ``interactive=False`` banks the minutes with a status line and no
+        end-of-session dialog — used when the block is being replaced by a
+        new one, where opening the old block's full end ceremony mid-start
+        is a decision forced at exactly the wrong moment (and choosing
+        "take a break" there used to swallow the new session entirely).
+        """
         if self._session_banked or (
             not self._timer_running and self._timer_remaining >= self._timer_total
         ):
@@ -1078,7 +1089,10 @@ class CognitiveOffloadApp(tk.Tk):
         if mode == "break":
             self.set_status("Break ended.")
             return
-        self._finish_session(elapsed)
+        if interactive:
+            self._finish_session(elapsed)
+        else:
+            self._bank_session(elapsed)
 
     def _restore_matrix_tasks(self, tasks: list) -> None:
         for task in tasks:
@@ -1104,13 +1118,21 @@ class CognitiveOffloadApp(tk.Tk):
             self.hold_status(self._status_before_hover)
             self._status_before_hover = None
 
-    def _finish_session(self, minutes: int) -> None:
-        """Log a completed focus block and offer the break."""
+    def _bank_session(self, minutes: int) -> None:
+        """Log the minutes; no dialog, no ceremony."""
         task = self._focus_task()
         self.session_log.record(minutes=minutes, task=task.text if task else "")
         self._session_banked = True
         self._session_count += 1
         self.refresh_momentum()
+        self.set_status(
+            f"{minutes} min banked" + (f' on "{task.text}".' if task else ".")
+        )
+
+    def _finish_session(self, minutes: int) -> None:
+        """Log a completed focus block and offer the break."""
+        task = self._focus_task()
+        self._bank_session(minutes)
 
         message = DONE_MESSAGES[self._session_count % len(DONE_MESSAGES)].format(minutes=minutes)
         self.set_status(message)
@@ -1375,22 +1397,89 @@ class CognitiveOffloadApp(tk.Tk):
     def load_state(self, initial: bool = False) -> None:
         try:
             data = self.state_store.load()
-        except StorageError as exc:
-            # Don't let autosave overwrite a file we failed to read - the user
-            # may still be able to recover it (or the .bak next to it) by hand.
+        except NotASessionError as exc:
+            # The file is fine, it just belongs to something else. Leave it
+            # exactly where it is and refuse to write anywhere near it.
             self._autosave_blocked = True
             messagebox.showerror(
                 "Load failed",
-                f"{exc}\n\nAuto-save is off for this session so the existing file "
-                f"is not overwritten. Use Save explicitly to replace it.",
+                f"{exc}\n\nAuto-save is off for this session so the file is not "
+                f"overwritten. Choose a different session folder, or move the "
+                f"file out of the way first.",
             )
             return
+        except StorageError as exc:
+            data = self._recover_state(exc)
+            if data is None:
+                return
         self._autosave_blocked = False
         self._apply_state(data)
         if not initial:
             self.set_status(f"Loaded {self.state_store.path}")
         elif self.tasks:
             self.set_status(f"Loaded {len(self.tasks)} task(s).")
+
+    def _recover_state(self, exc: StorageError) -> dict | None:
+        """The session file is unreadable. Make that survivable.
+
+        The old behaviour was the worst of all worlds: it advised an explicit
+        Save, whose once-per-run backup copied the corrupt file over the last
+        good ``.bak`` and then wrote the empty in-memory session over the
+        data — the app's own advice destroyed both copies. Now the bad file
+        is set aside first, so nothing that happens afterwards can lose it,
+        and the backup is offered instead of sacrificed.
+        """
+        spoiled = self.state_store.quarantine()
+        if spoiled is None:
+            # Could not move it aside (read-only folder?). Fall back to the
+            # cautious old stance: touch nothing, save nothing.
+            self._autosave_blocked = True
+            messagebox.showerror(
+                "Load failed",
+                f"{exc}\n\nThe file could not be moved aside either, so "
+                f"auto-save is off for this session and nothing will be "
+                f"overwritten.",
+            )
+            return None
+        intro = (f"{exc}\n\nThe unreadable file was set aside as "
+                 f"{spoiled.name}, so nothing is lost.")
+        backup = self.state_store.backup_path
+        if backup.exists():
+            with self._ask_over_focus():
+                restore = messagebox.askyesno(
+                    "Load failed",
+                    intro + f"\n\nRestore the previous session from "
+                            f"{backup.name} now?",
+                )
+            if restore:
+                if self.state_store.restore_backup():
+                    try:
+                        return self.state_store.load()
+                    except StorageError as exc2:
+                        self._autosave_blocked = True
+                        messagebox.showerror(
+                            "Load failed",
+                            f"The backup could not be read either: {exc2}",
+                        )
+                        return None
+                messagebox.showerror(
+                    "Load failed",
+                    f"Could not copy {backup.name} back into place. It is "
+                    f"still there, untouched.",
+                )
+                self._autosave_blocked = True
+                return None
+            # Declined: start fresh, but keep the .bak exactly as it is —
+            # the once-per-run backup must not replace it with an empty file.
+            self.state_store.preserve_backup()
+        else:
+            messagebox.showinfo(
+                "Load failed",
+                intro + "\n\nThere is no backup next to it, so this session "
+                        "starts empty. The set-aside file is untouched.",
+            )
+        self.set_status(f"Started fresh. The unreadable file is kept as {spoiled.name}.")
+        return {"tasks": [], "scratchpad": "", "timer_minutes": 15, "completed_log": []}
 
     def _apply_state(self, data: dict) -> None:
         self.tasks = data["tasks"]

@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import tempfile
+import time
 from pathlib import Path
 
 from .models import MatrixTask, Note, Task, now_stamp
@@ -189,19 +190,30 @@ def _int_or(value, fallback: int, low: int, high: int) -> int:
         return fallback
 
 
+class NotASessionError(StorageError):
+    """The file is readable, it just isn't ours. Never quarantine these:
+    renaming a file that belongs to something else is worse than refusing it."""
+
+
 class StateStore:
     """Reads/writes the tasks + scratchpad document."""
 
     def __init__(self, path: Path):
         self.path = Path(path)
         self._backed_up = False
+        self._suspect = False
 
     def set_path(self, path: Path) -> None:
         self.path = Path(path)
         self._backed_up = False
+        self._suspect = False
 
     def exists(self) -> bool:
         return self.path.exists()
+
+    @property
+    def backup_path(self) -> Path:
+        return self.path.with_suffix(self.path.suffix + ".bak")
 
     def load(self) -> dict:
         """Return ``{"tasks": [...], "scratchpad": str, "timer_minutes": int}``."""
@@ -210,17 +222,57 @@ class StateStore:
         except FileNotFoundError:
             return {"tasks": [], "scratchpad": "", "timer_minutes": 15, "completed_log": []}
         except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            # An unreadable file must never reach _backup(): copying it over
+            # the .bak would destroy the last good copy at the exact moment
+            # it is needed.
+            self._suspect = True
             raise StorageError(f"Could not read {self.path}: {exc}") from exc
         if not isinstance(data, dict):
-            raise StorageError(f"{self.path} does not contain a saved session")
+            raise NotASessionError(f"{self.path} does not contain a saved session")
         if "tasks" not in data and "notes" not in data and "scratchpad" not in data:
             # Valid JSON, but nothing this app wrote. Loading it as an empty
             # session and then autosaving over the file is how data vanishes.
-            raise StorageError(
+            raise NotASessionError(
                 f"{self.path} is JSON, but not a Cognitive Offload session "
                 f"(no tasks, notes or scratchpad in it)"
             )
+        self._suspect = False
         return self.deserialize(data)
+
+    def quarantine(self) -> Path | None:
+        """Move an unreadable session file aside instead of leaving it where
+        the next save would fight it. Returns the new path, or None if the
+        move failed (the file then stays put and stays protected)."""
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        target = self.path.with_name(f"{self.path.name}.corrupt-{stamp}")
+        counter = 0
+        while target.exists():
+            counter += 1
+            target = self.path.with_name(f"{self.path.name}.corrupt-{stamp}-{counter}")
+        try:
+            self.path.rename(target)
+        except OSError:
+            return None
+        self._suspect = False  # nothing suspect left at self.path
+        return target
+
+    def restore_backup(self) -> bool:
+        """Copy the .bak back over the session file. True on success."""
+        try:
+            shutil.copy2(self.backup_path, self.path)
+        except OSError:
+            return False
+        self._suspect = False
+        return True
+
+    def preserve_backup(self) -> None:
+        """Keep the current .bak for the rest of this run.
+
+        After starting fresh from a quarantined file, the once-per-run backup
+        would otherwise copy the brand-new (empty) session over the last good
+        .bak on the second save.
+        """
+        self._backed_up = True
 
     @staticmethod
     def deserialize(data: dict) -> dict:
@@ -285,7 +337,7 @@ class StateStore:
         every write is gone long before anyone notices they need it. Writing
         it once per run means the fallback is the state you last opened.
         """
-        if self._backed_up or not self.path.exists():
+        if self._backed_up or self._suspect or not self.path.exists():
             return
         try:
             shutil.copy2(self.path, self.path.with_suffix(self.path.suffix + ".bak"))

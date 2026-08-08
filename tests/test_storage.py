@@ -8,6 +8,7 @@ from cognitive_offload.storage import (
     CATEGORY_KEYS,
     Config,
     MatrixStore,
+    NotASessionError,
     StateStore,
     StorageError,
     atomic_write_text,
@@ -204,6 +205,17 @@ class NotASessionFileTests(TempDirTest):
         with self.assertRaises(StorageError):
             StateStore(path).load()
 
+    def test_a_foreign_file_is_refused_as_not_ours_never_corrupt(self):
+        # NotASessionError is the "leave it alone" signal: the file is fine,
+        # so the recovery flow must not quarantine or rename it.
+        path = self.root / "data.json"
+        path.write_text(json.dumps({"unrelated": "document"}), encoding="utf-8")
+        with self.assertRaises(NotASessionError):
+            StateStore(path).load()
+        path.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
+        with self.assertRaises(NotASessionError):
+            StateStore(path).load()
+
     def test_a_session_with_only_a_scratchpad_still_loads(self):
         path = self.root / "data.json"
         path.write_text(json.dumps({"scratchpad": "just notes"}), encoding="utf-8")
@@ -221,6 +233,80 @@ class BackupPolicyTests(TempDirTest):
         backup = (self.root / "data.json.bak").read_text(encoding="utf-8")
         self.assertIn("as opened", backup)
         self.assertNotIn("second edit", backup)
+
+
+class RecoveryTests(TempDirTest):
+    """The corrupt-file paths: quarantine, restore, and .bak protection."""
+
+    def _spoil(self, store):
+        store.path.write_text("{not json", encoding="utf-8")
+        with self.assertRaises(StorageError):
+            store.load()
+
+    def test_quarantine_moves_the_bad_file_aside(self):
+        store = StateStore(self.root / "data.json")
+        self._spoil(store)
+        spoiled = store.quarantine()
+        self.assertIsNotNone(spoiled)
+        self.assertFalse(store.path.exists())
+        self.assertTrue(spoiled.name.startswith("data.json.corrupt-"))
+        self.assertEqual(spoiled.read_text(encoding="utf-8"), "{not json")
+
+    def test_two_quarantines_do_not_overwrite_each_other(self):
+        store = StateStore(self.root / "data.json")
+        self._spoil(store)
+        first = store.quarantine()
+        self._spoil(store)
+        second = store.quarantine()
+        self.assertNotEqual(first, second)
+        self.assertTrue(first.exists() and second.exists())
+
+    def test_a_failed_load_keeps_the_backup_out_of_reach_of_save(self):
+        # The old catastrophe: load fails, user is told to Save, and the
+        # once-per-run backup copies the corrupt file over the good .bak.
+        store = StateStore(self.root / "data.json")
+        store.save([Task(text="the good copy")], "", 15)
+        store._backed_up = False  # a fresh run opens the file
+        store.save([Task(text="still good")], "", 15)  # writes the .bak
+        store._backed_up = False  # next run...
+        self._spoil(store)  # ...finds the file corrupt
+        store.save([], "", 15)  # explicit Save after the failed load
+        backup = store.backup_path.read_text(encoding="utf-8")
+        self.assertIn("the good copy", backup)
+        self.assertNotIn("{not json", backup)
+
+    def test_restore_backup_brings_the_previous_session_back(self):
+        store = StateStore(self.root / "data.json")
+        store.save([Task(text="yesterday's work")], "", 15)
+        store._backed_up = False
+        store.save([Task(text="also kept")], "", 15)
+        self._spoil(store)
+        self.assertIsNotNone(store.quarantine())
+        self.assertTrue(store.restore_backup())
+        loaded = store.load()
+        self.assertEqual([t.text for t in loaded["tasks"]], ["yesterday's work"])
+
+    def test_preserve_backup_stops_a_fresh_start_replacing_the_bak(self):
+        store = StateStore(self.root / "data.json")
+        store.save([Task(text="the last good session")], "", 15)
+        store._backed_up = False
+        store.save([Task(text="edit")], "", 15)  # .bak now holds the good session
+        self._spoil(store)
+        store.quarantine()
+        store.preserve_backup()  # user declined the restore; starting fresh
+        store.save([], "", 15)
+        store.save([Task(text="new life")], "", 15)
+        backup = store.backup_path.read_text(encoding="utf-8")
+        self.assertIn("the last good session", backup)
+
+    def test_a_successful_load_clears_the_suspect_flag(self):
+        store = StateStore(self.root / "data.json")
+        self._spoil(store)
+        store.path.write_text(
+            json.dumps({"tasks": [], "scratchpad": "ok"}), encoding="utf-8")
+        store.load()
+        store.save([Task(text="fine again")], "", 15)
+        self.assertTrue(store.backup_path.exists())
 
 
 class SlugTests(unittest.TestCase):

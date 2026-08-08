@@ -670,6 +670,43 @@ class AppSmokeTests(unittest.TestCase):
         self.app.on_timer_minutes_changed()
         self.assertEqual(self.app._timer_total, 16 * 60)
 
+    def test_replacing_a_running_session_banks_silently_and_starts_the_new_one(self):
+        """No end-of-session ceremony for the old block mid-start.
+
+        The old flow opened the replaced task's SessionEndDialog in the middle
+        of starting the new one, and its "take a break" answer started a break
+        that silently swallowed the session being started.
+        """
+        self.capture("old thing")
+        self.capture("new thing")
+        old = next(t for t in self.app.tasks if t.text == "old thing")
+        new = next(t for t in self.app.tasks if t.text == "new thing")
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "", "warmup_done": 0,
+            }
+            self.app.begin_focus(old)
+        self.app._timer_deadline -= 300  # five minutes in
+        self.app._tick_timer()
+
+        with mock.patch("cognitive_offload.app.SessionEndDialog") as ender, \
+                mock.patch("cognitive_offload.app.messagebox.askyesno",
+                           return_value=True), \
+                mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "", "warmup_done": 0,
+            }
+            self.app.begin_focus(new)
+            ender.assert_not_called()
+
+        self.assertEqual(self.app.session_log.sessions[-1].minutes, 5)
+        self.assertEqual(self.app.session_log.sessions[-1].task, "old thing")
+        self.assertTrue(self.app._timer_running)
+        self.assertEqual(self.app._timer_mode, "focus")
+        self.assertFalse(self.app._session_banked)
+        self.assertEqual(self.app._focus_task_id, new.id)
+        self.app.pause_timer()
+
     def test_pausing_updates_the_pop_out_button(self):
         self.app.start_timer(minutes=10)
         self.app.open_focus_window()
@@ -1206,6 +1243,96 @@ class AppSmokeTests(unittest.TestCase):
         self.app.note_text.insert("1.0", "typing")
         self.app.update()  # let the <<Modified>> event reach the handler
         self.assertTrue(self.app._dirty)
+
+
+@unittest.skipUnless(_display_available(), "tkinter display not available")
+class CorruptRecoveryTests(unittest.TestCase):
+    """Opening the app on an unreadable data.json must never cost data."""
+
+    GOOD_SESSION = ('{"tasks": [{"text": "saved yesterday"}], '
+                    '"scratchpad": "", "timer_minutes": 15}')
+
+    def _make_app(self, corrupt=True, backup=None, restore=True):
+        from cognitive_offload.app import CognitiveOffloadApp
+        from cognitive_offload.storage import Config
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        config = Config(root / "config.json")
+        config.db_path = root / "db"
+        config.matrix_db_path = root / "matrix"
+        db = root / "db"
+        db.mkdir(parents=True)
+        if corrupt:
+            (db / "data.json").write_text("{not json", encoding="utf-8")
+        if backup is not None:
+            (db / "data.json.bak").write_text(backup, encoding="utf-8")
+        with mock.patch("cognitive_offload.app.messagebox.askyesno",
+                        return_value=restore), \
+                mock.patch("cognitive_offload.app.messagebox.showerror"), \
+                mock.patch("cognitive_offload.app.messagebox.showinfo"):
+            app = CognitiveOffloadApp(config=config)
+        app.withdraw()
+        self.addCleanup(app.destroy)
+        return app, db
+
+    def _quarantined(self, db):
+        return sorted(db.glob("data.json.corrupt-*"))
+
+    def test_restoring_the_backup_brings_the_session_back(self):
+        app, db = self._make_app(backup=self.GOOD_SESSION, restore=True)
+        self.assertEqual([t.text for t in app.tasks], ["saved yesterday"])
+        self.assertFalse(app._autosave_blocked)
+        spoiled = self._quarantined(db)
+        self.assertEqual(len(spoiled), 1)
+        self.assertEqual(spoiled[0].read_text(encoding="utf-8"), "{not json")
+
+    def test_declining_the_restore_starts_fresh_and_keeps_the_bak(self):
+        app, db = self._make_app(backup=self.GOOD_SESSION, restore=False)
+        self.assertEqual(app.tasks, [])
+        self.assertFalse(app._autosave_blocked)
+        # Two saves: the once-per-run backup must NOT replace the good .bak
+        # with the fresh empty session.
+        self.assertTrue(app.save_state(silent=True))
+        app.capture_entry.insert(0, "new life")
+        app.add_task_from_capture()
+        self.assertTrue(app.save_state(silent=True))
+        self.assertEqual((db / "data.json.bak").read_text(encoding="utf-8"),
+                         self.GOOD_SESSION)
+        self.assertEqual(len(self._quarantined(db)), 1)
+
+    def test_no_backup_starts_fresh_with_the_bad_file_kept(self):
+        app, db = self._make_app(backup=None)
+        self.assertEqual(app.tasks, [])
+        self.assertFalse(app._autosave_blocked)
+        spoiled = self._quarantined(db)
+        self.assertEqual(len(spoiled), 1)
+        self.assertEqual(spoiled[0].read_text(encoding="utf-8"), "{not json")
+
+    def test_a_foreign_file_is_left_exactly_where_it_is(self):
+        from cognitive_offload.app import CognitiveOffloadApp
+        from cognitive_offload.storage import Config
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        config = Config(root / "config.json")
+        config.db_path = root / "db"
+        config.matrix_db_path = root / "matrix"
+        db = root / "db"
+        db.mkdir(parents=True)
+        foreign = '{"someone": "elses file"}'
+        (db / "data.json").write_text(foreign, encoding="utf-8")
+        with mock.patch("cognitive_offload.app.messagebox.askyesno"), \
+                mock.patch("cognitive_offload.app.messagebox.showerror"), \
+                mock.patch("cognitive_offload.app.messagebox.showinfo"):
+            app = CognitiveOffloadApp(config=config)
+        app.withdraw()
+        self.addCleanup(app.destroy)
+        self.assertTrue(app._autosave_blocked)
+        self.assertEqual((db / "data.json").read_text(encoding="utf-8"), foreign)
+        self.assertEqual(sorted(db.glob("data.json.corrupt-*")), [])
 
 
 if __name__ == "__main__":
