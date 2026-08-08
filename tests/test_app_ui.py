@@ -748,6 +748,30 @@ class AppSmokeTests(unittest.TestCase):
         self.app.load_state()
         self.assertIn("broken", self.app.tasks[0].text)
 
+    # -- the estimate --------------------------------------------------
+    def test_an_estimate_shows_as_a_quiet_badge(self):
+        self.capture("guessed work")
+        self.app.tasks[0].estimate_minutes = 25
+        self.app.refresh_tasks()
+        self.assertIn("~25 min", self.visible_texts()[0])
+
+    def test_finishing_a_guessed_task_states_both_numbers_without_judgment(self):
+        self.capture("guessed work")
+        self.app.tasks[0].estimate_minutes = 10
+        self.select(0)
+        self.run_session(minutes=15, choice="done")
+        status = self.app.status_var.get()
+        self.assertIn("guessed ~10 min", status.lower())
+        self.assertIn("about 15", status)
+        for scold in ("late", "over", "wrong", "should", "only"):
+            self.assertNotIn(scold, status.lower())
+
+    def test_finishing_without_a_guess_keeps_the_plain_message(self):
+        self.capture("no guess")
+        self.select(0)
+        self.run_session(minutes=15, choice="done")
+        self.assertNotIn("guessed", self.app.status_var.get().lower())
+
     # -- not today / warm start ----------------------------------------
     def test_not_today_excuses_the_suggestion_but_keeps_the_task(self):
         self.capture("dreaded thing")

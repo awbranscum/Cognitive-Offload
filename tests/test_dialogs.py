@@ -109,6 +109,21 @@ class DialogCollectTests(unittest.TestCase):
         self.assertEqual(dialog.collect(), "")  # blank clears a booking
         dialog.destroy()
 
+    # -- the estimate --------------------------------------------------
+    def test_the_estimate_collects_as_minutes_and_junk_is_no_guess(self):
+        from cognitive_offload.dialogs import TaskEditorDialog
+
+        dialog = TaskEditorDialog(self.root, title="t", estimate_minutes=25)
+        self.assertEqual(dialog.collect()["estimate_minutes"], 25)
+        dialog.estimate_entry.delete(0, "end")
+        self.assertEqual(dialog.collect()["estimate_minutes"], 0)
+        dialog.estimate_entry.insert(0, "an hour?")
+        self.assertEqual(dialog.collect()["estimate_minutes"], 0)  # never an error
+        dialog.estimate_entry.delete(0, "end")
+        dialog.estimate_entry.insert(0, "9999")
+        self.assertEqual(dialog.collect()["estimate_minutes"], 480)
+        dialog.destroy()
+
     # -- session end ---------------------------------------------------
     def test_closing_the_session_dialog_means_carry_on(self):
         from cognitive_offload.dialogs import SessionEndDialog

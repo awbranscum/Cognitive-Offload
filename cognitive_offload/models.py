@@ -82,6 +82,14 @@ def _as_str(value, default: str = "") -> str:
     return value if isinstance(value, str) else default
 
 
+def _as_minutes(value) -> int:
+    """A minutes estimate: 0 (no guess) to 8 hours, junk becomes no guess."""
+    try:
+        return max(0, min(480, int(value)))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _as_tags(value) -> list[str]:
     if not isinstance(value, (list, tuple, set)):
         return []
@@ -127,6 +135,10 @@ class Task:
     # date (YYYY-MM-DD, exclusive). Never filters the task list itself, has
     # no badge and no counter, and expires silently.
     snoozed_until: str = ""
+    # "About how long?" in minutes; 0 means no guess. A written guess is
+    # what makes time-sense calibrate: compared later with what the sessions
+    # actually took — as data, never as a mark.
+    estimate_minutes: int = 0
 
     def __post_init__(self) -> None:
         self.text = _as_str(self.text).strip()
@@ -136,6 +148,7 @@ class Task:
         self.done = _as_bool(self.done)
         self.pinned = _as_bool(self.pinned)
         self.snoozed_until = _as_str(self.snoozed_until).strip()
+        self.estimate_minutes = _as_minutes(self.estimate_minutes)
         self.first_step = _as_str(self.first_step).strip()
         self.kind = self.kind if self.kind in TASK_KINDS else KIND_UNSET
         self.scheduled_for = _as_str(self.scheduled_for).strip()
@@ -206,6 +219,7 @@ class Task:
             "scheduled_for": self.scheduled_for,
             "pinned": self.pinned,
             "snoozed_until": self.snoozed_until,
+            "estimate_minutes": self.estimate_minutes,
         }
 
     @classmethod
@@ -228,6 +242,7 @@ class Task:
             scheduled_for=_as_str(data.get("scheduled_for")),
             pinned=_as_bool(data.get("pinned")),
             snoozed_until=_as_str(data.get("snoozed_until")),
+            estimate_minutes=_as_minutes(data.get("estimate_minutes")),
         )
 
     def copy(self) -> "Task":
@@ -274,6 +289,7 @@ class MatrixTask:
     tags: list[str] = field(default_factory=list)
     priority: int = 0
     pinned: bool = False
+    estimate_minutes: int = 0
     # Absolute path of the backing file; assigned by the store, never stored.
     path: object = None
 
@@ -284,6 +300,7 @@ class MatrixTask:
         self.tags = _as_tags(self.tags)
         self.priority = 1 if self.priority else 0
         self.pinned = _as_bool(self.pinned)
+        self.estimate_minutes = _as_minutes(self.estimate_minutes)
 
     def to_dict(self) -> dict:
         return {
@@ -299,6 +316,7 @@ class MatrixTask:
             "tags": list(self.tags),
             "priority": self.priority,
             "pinned": self.pinned,
+            "estimate_minutes": self.estimate_minutes,
         }
 
     @classmethod
@@ -316,6 +334,7 @@ class MatrixTask:
             tags=_as_tags(data.get("tags")),
             priority=1 if data.get("priority") else 0,
             pinned=_as_bool(data.get("pinned")),
+            estimate_minutes=_as_minutes(data.get("estimate_minutes")),
         )
 
     @property
@@ -339,4 +358,5 @@ class MatrixTask:
             tags=list(self.tags),
             priority=self.priority,
             pinned=self.pinned,
+            estimate_minutes=self.estimate_minutes,
         )

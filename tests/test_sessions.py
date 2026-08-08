@@ -34,6 +34,16 @@ class SessionLogTests(unittest.TestCase):
         self.assertEqual(old.task_id, "")
         self.assertNotIn("task_id", FocusSession(minutes=5).to_dict())
 
+    def test_minutes_for_task_sums_only_that_tasks_completed_sessions(self):
+        self.log.sessions = [
+            FocusSession(minutes=15, task_id="a"),
+            FocusSession(minutes=10, task_id="a"),
+            FocusSession(minutes=99, task_id="b"),
+            FocusSession(minutes=7, task_id="a", completed=False),
+        ]
+        self.assertEqual(self.log.minutes_for_task("a"), 25)
+        self.assertEqual(self.log.minutes_for_task(""), 0)
+
     def test_recent_task_ids_is_a_two_day_window(self):
         today = date.today().isoformat()
         yesterday = (date.today() - timedelta(days=1)).isoformat()

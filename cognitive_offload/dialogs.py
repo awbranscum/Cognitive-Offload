@@ -97,6 +97,7 @@ class TaskEditorDialog(ModalDialog):
         first_step: str = "",
         kind: str = KIND_UNSET,
         scheduled_for: str = "",
+        estimate_minutes: int = 0,
         window_title: str = "Task",
         with_tags: bool = False,
     ):
@@ -134,13 +135,21 @@ class TaskEditorDialog(ModalDialog):
         self.date_entry = ttk.Entry(row, width=14)
         self.date_entry.pack(side="left", padx=(6, 0))
         self.date_entry.insert(0, scheduled_for)
-        # On its own line: packed at the row's right edge it clipped to a
-        # single letter, and this is the only place the accepted date
-        # shapes are documented.
+        # The estimate gets its own row — packed onto the row above it clips
+        # off the dialog edge, the same trap the date hint fell into.
+        estimate_row = ttk.Frame(self.body)
+        estimate_row.pack(fill="x", pady=(6, 0))
+        ttk.Label(estimate_row, text="About").pack(side="left")
+        self.estimate_entry = ttk.Entry(estimate_row, width=5)
+        self.estimate_entry.pack(side="left", padx=(6, 0))
+        if estimate_minutes:
+            self.estimate_entry.insert(0, str(estimate_minutes))
+        ttk.Label(estimate_row, text="minutes, at a guess").pack(side="left", padx=(4, 0))
         ttk.Label(
             self.body,
             text="Dates can be \"today\", \"tomorrow\", a weekday like \"fri\", "
-                 "or 2026-08-01.",
+                 "or 2026-08-01. The minutes are a guess, and a guess is "
+                 "plenty — nothing holds you to it.",
             style="Muted.TLabel", wraplength=470, justify="left",
         ).pack(anchor="w", pady=(2, 10))
 
@@ -177,12 +186,17 @@ class TaskEditorDialog(ModalDialog):
             self.date_entry.focus_set()
             return None
         label_to_key = {label: key for key, label in KIND_CHOICES}
+        try:
+            estimate = max(0, min(480, int(self.estimate_entry.get().strip() or 0)))
+        except ValueError:
+            estimate = 0  # junk is just "no guess", never an error dialog
         result = {
             "title": title,
             "content": self.content_text.get("1.0", "end").strip(),
             "first_step": self.step_entry.get().strip(),
             "kind": label_to_key.get(self.kind_var.get(), KIND_UNSET),
             "scheduled_for": scheduled,
+            "estimate_minutes": estimate,
         }
         if self.tags_entry is not None:
             tags = [t.strip().lower() for t in self.tags_entry.get().split(",")]
@@ -300,6 +314,7 @@ class StartFocusDialog(ModalDialog):
         minutes: int = 15,
         warmup_steps: list[str] | None = None,
         show_warmup: bool = True,
+        estimate_minutes: int = 0,
     ):
         super().__init__(parent, "Start a focus session", size=(520, 460))
 
@@ -310,7 +325,14 @@ class StartFocusDialog(ModalDialog):
             font=font(SIZE_LG, "bold"),
             wraplength=470,
             justify="left",
-        ).pack(anchor="w", pady=(0, 12))
+        ).pack(anchor="w", pady=(0, 2 if estimate_minutes else 12))
+        if estimate_minutes:
+            # Display only — the session length below stays the user's call.
+            ttk.Label(
+                self.body,
+                text=f"Your guess: about {estimate_minutes} min.",
+                style="Muted.TLabel",
+            ).pack(anchor="w", pady=(0, 12))
 
         ttk.Label(self.body, text="First move").pack(anchor="w")
         self.step_entry = ttk.Entry(self.body)

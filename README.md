@@ -114,7 +114,12 @@ reinstall from python.org).
 - Pin a task (`Ctrl+Up`, again to unpin) and it stays above everything open
   under the default sort — an anchor for the thing you are afraid of losing
   track of, one that survives every re-sort, save and restart.
-- Each task can carry a first step, a "feels like" category, and a booked date.
+- Each task can carry a first step, a "feels like" category, a booked date,
+  and an "about how long?" guess in minutes. The guess shows as a quiet
+  `~25 min` badge and in the start dialog; when the task is finished, the
+  status line sets the guess beside what the sessions actually took — as
+  calibration, never as a mark. Time-sense only improves when the guess
+  meets the real number somewhere visible and kind.
 - Search across titles, descriptions, first steps and tags; filter by tag or by
   feel; hide completed.
 - Anything captured today is nudged up the "Where do I start?" ranking — it is

@@ -563,6 +563,7 @@ class CognitiveOffloadApp(tk.Tk):
             first_step=task.first_step,
             kind=task.kind,
             scheduled_for=task.scheduled_for,
+            estimate_minutes=task.estimate_minutes,
             window_title="Edit task",
             with_tags=True,
         ).show()
@@ -575,6 +576,7 @@ class CognitiveOffloadApp(tk.Tk):
         task.first_step = result["first_step"]
         task.kind = result["kind"]
         task.scheduled_for = result["scheduled_for"]
+        task.estimate_minutes = result.get("estimate_minutes", task.estimate_minutes)
         self.refresh_tasks()
         self.mark_dirty()
         self.set_status("Task updated.")
@@ -766,6 +768,7 @@ class CognitiveOffloadApp(tk.Tk):
             first_step=task.first_step,
             kind=task.kind,
             scheduled_for=task.scheduled_for,
+            estimate_minutes=task.estimate_minutes,
             window_title="Edit matrix task",
         ).show()
         if not result:
@@ -774,6 +777,7 @@ class CognitiveOffloadApp(tk.Tk):
             task.first_step = result["first_step"]
             task.kind = result["kind"]
             task.scheduled_for = result["scheduled_for"]
+            task.estimate_minutes = result.get("estimate_minutes", task.estimate_minutes)
             self.matrix.update(task, result["title"], result["content"])
         except StorageError as exc:
             messagebox.showerror("Save failed", str(exc))
@@ -1061,6 +1065,7 @@ class CognitiveOffloadApp(tk.Tk):
                 minutes=self.config_store.focus_minutes,
                 warmup_steps=self.config_store.warmup_steps,
                 show_warmup=self.config_store.show_warmup,
+                estimate_minutes=task.estimate_minutes if task else 0,
             ).show()
         if not result:
             return  # nothing torn down: the running block is still running
@@ -1309,7 +1314,14 @@ class CognitiveOffloadApp(tk.Tk):
             task.set_done(True)
             self.refresh_tasks()
             self.mark_dirty()
-            self.set_status(f"{minutes} min, and it's finished. Nice.")
+            finished = f"{minutes} min, and it's finished. Nice."
+            actual = self.session_log.minutes_for_task(task.id)
+            if task.estimate_minutes and actual:
+                # Calibration, not a mark: time-sense only improves when the
+                # guess meets the actual number somewhere visible and quiet.
+                finished += (f" You guessed ~{task.estimate_minutes} min; "
+                             f"it took about {actual} across your sessions.")
+            self.set_status(finished)
             self._focus_task_id = None
             self.focus_task_var.set(f"{minutes} min logged, and that one is done.")
             self._sync_focus_window()
@@ -1854,6 +1866,8 @@ def _task_row(task: Task) -> Row:
                 "today" if task.is_due() else f"booked {task.scheduled_for}",
                 "today" if task.is_due() else "booked",
             ))
+        if task.estimate_minutes:
+            badges.append(Badge(f"~{task.estimate_minutes} min", "estimate"))
     badges.extend(Badge(f"#{tag}", "tag") for tag in task.tags)
 
     if task.done and task.completed_at:
@@ -1881,6 +1895,8 @@ def _matrix_row(task) -> Row:
             "today" if task.is_due() else f"booked {task.scheduled_for}",
             "today" if task.is_due() else "booked",
         ))
+    if task.estimate_minutes:
+        badges.append(Badge(f"~{task.estimate_minutes} min", "estimate"))
     subtitle = f"→ {task.first_step}" if task.first_step else (
         task.content.strip().splitlines()[0][:80] if task.content.strip() else ""
     )

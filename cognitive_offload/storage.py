@@ -572,6 +572,7 @@ class MatrixStore:
             first_step=task.first_step, kind=task.kind,
             scheduled_for=task.scheduled_for, tags=list(task.tags),
             priority=task.priority, pinned=task.pinned,
+            estimate_minutes=task.estimate_minutes,
         )
         created.path = self._new_path(category, created)
         self._write(created)

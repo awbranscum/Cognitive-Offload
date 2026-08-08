@@ -132,6 +132,13 @@ class SessionLog:
     def count_today(self) -> int:
         return len(self.on_day(today_iso()))
 
+    def minutes_for_task(self, task_id: str) -> int:
+        """Total completed focus minutes ever logged against one task."""
+        if not task_id:
+            return 0
+        return sum(s.minutes for s in self.sessions
+                   if s.completed and s.task_id == task_id)
+
     def recent_task_ids(self, days: int = 2, end: str | None = None) -> set:
         """Ids of tasks with a focus session in the last ``days`` days.
 

@@ -65,6 +65,23 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(task.priority, 1)
         self.assertTrue(task.done)
 
+    def test_estimate_round_trips_clamps_and_tolerates_junk(self):
+        task = Task(text="x", estimate_minutes=25)
+        self.assertEqual(Task.from_dict(task.to_dict()).estimate_minutes, 25)
+        self.assertEqual(Task(text="x", estimate_minutes=9999).estimate_minutes, 480)
+        self.assertEqual(Task(text="x", estimate_minutes=-5).estimate_minutes, 0)
+        self.assertEqual(Task.from_dict({"text": "old file"}).estimate_minutes, 0)
+        self.assertEqual(Task.from_dict({"text": "x", "estimate_minutes": "junk"})
+                         .estimate_minutes, 0)
+
+    def test_estimate_survives_the_matrix_round_trip(self):
+        from cognitive_offload.models import MatrixTask
+
+        task = Task(text="guessed", estimate_minutes=40)
+        boxed = MatrixTask(title=task.text, estimate_minutes=task.estimate_minutes)
+        self.assertEqual(MatrixTask.from_dict(boxed.to_dict()).estimate_minutes, 40)
+        self.assertEqual(boxed.to_task().estimate_minutes, 40)
+
     def test_pinned_round_trips_and_tolerates_junk(self):
         task = Task(text="anchor", pinned=True)
         clone = Task.from_dict(task.to_dict())
