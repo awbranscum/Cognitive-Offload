@@ -198,7 +198,8 @@ reinstall from python.org).
   `data.json.bak`, so a crash mid-save cannot cost you the file.
 - `Export…` writes a copy anywhere; `Open…` loads a session from elsewhere.
 
-Press `F1` in the app for the full keyboard-shortcut list.
+Press `F1` in the app for the full keyboard-shortcut list. `CHANGELOG.md`
+tracks what changed, version by version.
 
 ## Where the data lives
 
