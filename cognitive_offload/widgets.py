@@ -576,8 +576,10 @@ class FocusWindow(tk.Toplevel):
                   wraplength=280, justify="center", anchor="center").pack(fill="x")
         ttk.Label(body, textvariable=self.step_var, style="CardMuted.TLabel",
                   wraplength=280, justify="center", anchor="center").pack(fill="x", pady=(2, 6))
-        ttk.Label(body, textvariable=self.time_var, style="Timer.TLabel",
-                  anchor="center").pack(fill="x")
+        self.time_label = ttk.Label(body, textvariable=self.time_var,
+                                    style="Timer.TLabel", anchor="center")
+        self.time_label.pack(fill="x")
+        self._closing = False
 
         self.progress = ttk.Progressbar(body, mode="determinate", maximum=1000)
         self.progress.pack(fill="x", pady=(4, 12))
@@ -619,10 +621,22 @@ class FocusWindow(tk.Toplevel):
             pass
 
     def update_session(self, task: str, step: str, time_text: str, fraction: float,
-                       running: bool) -> None:
+                       running: bool, closing: bool = False) -> None:
         self.task_var.set(task or "Free focus")
-        self.step_var.set(f"→ {step}" if step else "")
+        if closing:
+            # The last two minutes: a soft landing, not an ambush. Amber,
+            # never red — a heads-up is not an alarm.
+            self.step_var.set("a good moment to find a stopping point")
+        else:
+            self.step_var.set(f"→ {step}" if step else "")
         self.time_var.set(time_text)
+        if closing != self._closing:
+            self._closing = closing
+            try:
+                self.time_label.configure(
+                    foreground=tokens().warning if closing else "")
+            except tk.TclError:
+                pass
         self.progress["value"] = int(max(0.0, min(1.0, fraction)) * 1000)
         self.pause_button.configure(text="Pause" if running else "Resume")
 

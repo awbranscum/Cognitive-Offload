@@ -748,6 +748,64 @@ class AppSmokeTests(unittest.TestCase):
         self.app.load_state()
         self.assertIn("broken", self.app.tasks[0].text)
 
+    # -- soft landing / relative dates / snooze exit -------------------
+    def test_the_last_two_minutes_announce_a_soft_landing(self):
+        self.app.start_timer(minutes=15)
+        self.app._timer_deadline = __import__("time").monotonic() + 100
+        self.app._tick_timer()
+        self.assertIn("stopping point", self.app.finish_var.get())
+        self.app.pause_timer()
+
+    def test_mid_block_has_no_landing_chatter(self):
+        self.app.start_timer(minutes=15)
+        self.app._tick_timer()
+        self.assertNotIn("stopping point", self.app.finish_var.get())
+        self.assertIn("ends ", self.app.finish_var.get())
+        self.app.pause_timer()
+
+    def test_the_pop_out_goes_amber_for_the_landing_and_back(self):
+        from cognitive_offload.theme import tokens
+
+        self.app.start_timer(minutes=15)
+        self.app.open_focus_window()
+        window = self.app._focus_window
+        self.app._timer_deadline = __import__("time").monotonic() + 90
+        self.app._tick_timer()
+        self.assertIn("stopping point", window.step_var.get())
+        self.assertEqual(str(window.time_label.cget("foreground")),
+                         tokens().warning)
+        self.app._timer_deadline = __import__("time").monotonic() + 600
+        self.app._tick_timer()
+        self.assertNotIn("stopping point", window.step_var.get())
+        self.assertEqual(str(window.time_label.cget("foreground")), "")
+        window.close()
+        self.app.pause_timer()
+
+    def test_booked_badges_speak_in_relative_dates(self):
+        from datetime import date, timedelta
+
+        self.capture("future thing")
+        self.app.tasks[0].scheduled_for = (date.today() + timedelta(days=1)).isoformat()
+        self.app.refresh_tasks()
+        self.assertIn("booked tomorrow", self.visible_texts()[0])
+
+    def test_clearing_a_snooze_from_the_editor(self):
+        from datetime import date, timedelta
+
+        self.capture("dreaded thing")
+        task = self.app.tasks[0]
+        task.snoozed_until = (date.today() + timedelta(days=1)).isoformat()
+        self.select(0)
+        with mock.patch("cognitive_offload.app.TaskEditorDialog") as editor:
+            editor.return_value.show.return_value = {
+                "title": task.text, "content": "", "tags": [], "first_step": "",
+                "kind": "", "scheduled_for": "", "estimate_minutes": 0,
+                "clear_snooze": True,
+            }
+            self.app.edit_selected_details()
+        self.assertEqual(task.snoozed_until, "")
+        self.assertEqual(self.app.next_title_var.get(), "dreaded thing")
+
     # -- the estimate --------------------------------------------------
     def test_an_estimate_shows_as_a_quiet_badge(self):
         self.capture("guessed work")

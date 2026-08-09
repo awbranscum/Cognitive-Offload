@@ -10,7 +10,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from .models import KIND_UNSET, TASK_KINDS, Task, parse_date_input
+from .models import KIND_UNSET, TASK_KINDS, Task, humanize_date, parse_date_input, today_iso
 from .queries import suggest_tasks
 from .storage import CATEGORIES, CATEGORY_KEYS
 from .theme import SIZE_BASE, SIZE_LG, SIZE_SM, font, style_text, tokens
@@ -98,6 +98,7 @@ class TaskEditorDialog(ModalDialog):
         kind: str = KIND_UNSET,
         scheduled_for: str = "",
         estimate_minutes: int = 0,
+        snoozed_until: str = "",
         window_title: str = "Task",
         with_tags: bool = False,
     ):
@@ -153,6 +154,19 @@ class TaskEditorDialog(ModalDialog):
             style="Muted.TLabel", wraplength=470, justify="left",
         ).pack(anchor="w", pady=(2, 10))
 
+        # The one exit from "Not today" besides waiting: visible only while
+        # a snooze is actually in effect, and still no badge on the list.
+        self.unsnooze_var = None
+        if snoozed_until and snoozed_until > today_iso():
+            self.unsnooze_var = tk.BooleanVar(value=False)
+            ttk.Checkbutton(
+                self.body,
+                text=f"Excused from suggestions until "
+                     f"{humanize_date(snoozed_until)} — put it back in the "
+                     f"running now",
+                variable=self.unsnooze_var,
+            ).pack(anchor="w", pady=(0, 10))
+
         ttk.Label(self.body, text="Details").pack(anchor="w")
         self.content_text = tk.Text(self.body, height=8, wrap="word", undo=True)
         style_text(self.content_text)
@@ -197,6 +211,7 @@ class TaskEditorDialog(ModalDialog):
             "kind": label_to_key.get(self.kind_var.get(), KIND_UNSET),
             "scheduled_for": scheduled,
             "estimate_minutes": estimate,
+            "clear_snooze": bool(self.unsnooze_var and self.unsnooze_var.get()),
         }
         if self.tags_entry is not None:
             tags = [t.strip().lower() for t in self.tags_entry.get().split(",")]

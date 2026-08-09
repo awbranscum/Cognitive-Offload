@@ -73,7 +73,14 @@ commitment, and deciding is what you are trying not to do right then.
 **Where the block lands on the clock.** The timer shows "ends 15:42" under the
 countdown as well as the time remaining — a duration is exactly the
 representation that time blindness struggles with, and a clock time is
-something you can anchor to.
+something you can anchor to. Booked dates speak the same language: badges say
+"booked tomorrow" or "booked Fri", not a raw date that needs arithmetic.
+
+**A soft landing.** In the last two minutes of a block the timer line (and the
+pop-out, in amber — never red) adds "a good moment to find a stopping point".
+An unannounced hard stop is the most expensive kind of transition, and a
+stopping point you chose is what makes "where does it pick up next time?"
+answerable.
 
 **Less on screen when you need less.** *Calm mode* (top right) folds away
 search, filters, sort and the task toolbar, leaving a capture box, the list, and

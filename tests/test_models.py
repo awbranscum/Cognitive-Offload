@@ -65,6 +65,20 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(task.priority, 1)
         self.assertTrue(task.done)
 
+    def test_humanize_date_speaks_in_temporal_distance(self):
+        from cognitive_offload.models import humanize_date
+
+        on = "2026-08-05"  # a Wednesday
+        self.assertEqual(humanize_date("2026-08-05", on), "today")
+        self.assertEqual(humanize_date("2026-08-06", on), "tomorrow")
+        self.assertEqual(humanize_date("2026-08-07", on), "Fri")
+        self.assertEqual(humanize_date("2026-08-11", on), "Tue")
+        self.assertEqual(humanize_date("2026-08-12", on), "in 7 days")
+        self.assertEqual(humanize_date("2026-08-19", on), "in 14 days")
+        self.assertEqual(humanize_date("2026-08-20", on), "2026-08-20")  # far: plain
+        self.assertEqual(humanize_date("2026-08-01", on), "2026-08-01")  # past: plain
+        self.assertEqual(humanize_date("not-a-date", on), "not-a-date")
+
     def test_estimate_round_trips_clamps_and_tolerates_junk(self):
         task = Task(text="x", estimate_minutes=25)
         self.assertEqual(Task.from_dict(task.to_dict()).estimate_minutes, 25)

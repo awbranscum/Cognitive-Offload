@@ -64,6 +64,30 @@ def parse_date_input(text: str) -> str | None:
         return None
 
 
+def humanize_date(iso: str, on: str | None = None) -> str:
+    """A date in the units a time-blind brain actually acts on.
+
+    "2026-08-22" is flat data that needs deliberate date arithmetic —
+    everything beyond now collapses into "not now". "Fri" and "in 12 days"
+    are pre-computed temporal distance. The inverse of parse_date_input.
+    """
+    try:
+        target = date.fromisoformat(iso)
+    except (TypeError, ValueError):
+        return iso
+    base = date.fromisoformat(on) if on else date.today()
+    delta = (target - base).days
+    if delta == 0:
+        return "today"
+    if delta == 1:
+        return "tomorrow"
+    if 2 <= delta <= 6:
+        return target.strftime("%a")
+    if 7 <= delta <= 14:
+        return f"in {delta} days"
+    return iso  # far future (and the past) stays a plain date
+
+
 def kind_label(kind: str) -> str:
     return KIND_LABELS.get(kind, KIND_LABELS[KIND_UNSET])
 

@@ -124,6 +124,28 @@ class DialogCollectTests(unittest.TestCase):
         self.assertEqual(dialog.collect()["estimate_minutes"], 480)
         dialog.destroy()
 
+    # -- the snooze exit -----------------------------------------------
+    def test_a_snoozed_task_offers_a_way_back_into_the_running(self):
+        from datetime import date, timedelta
+
+        from cognitive_offload.dialogs import TaskEditorDialog
+
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        dialog = TaskEditorDialog(self.root, title="t", snoozed_until=tomorrow)
+        self.assertIsNotNone(dialog.unsnooze_var)
+        self.assertFalse(dialog.collect()["clear_snooze"])
+        dialog.unsnooze_var.set(True)
+        self.assertTrue(dialog.collect()["clear_snooze"])
+        dialog.destroy()
+
+    def test_an_unsnoozed_task_shows_no_snooze_chrome(self):
+        from cognitive_offload.dialogs import TaskEditorDialog
+
+        dialog = TaskEditorDialog(self.root, title="t")
+        self.assertIsNone(dialog.unsnooze_var)
+        self.assertFalse(dialog.collect()["clear_snooze"])
+        dialog.destroy()
+
     # -- session end ---------------------------------------------------
     def test_closing_the_session_dialog_means_carry_on(self):
         from cognitive_offload.dialogs import SessionEndDialog

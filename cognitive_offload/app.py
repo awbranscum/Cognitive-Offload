@@ -21,7 +21,14 @@ from .dialogs import (
 )
 from .main_tab import build_main_tab
 from .matrix_tab import build_matrix_tab
-from .models import KIND_LABELS, Task, kind_label, now_stamp, parse_date_input
+from .models import (
+    KIND_LABELS,
+    Task,
+    humanize_date,
+    kind_label,
+    now_stamp,
+    parse_date_input,
+)
 from .queries import (
     ALL_KINDS,
     DEFAULT_SORT,
@@ -564,6 +571,7 @@ class CognitiveOffloadApp(tk.Tk):
             kind=task.kind,
             scheduled_for=task.scheduled_for,
             estimate_minutes=task.estimate_minutes,
+            snoozed_until=task.snoozed_until,
             window_title="Edit task",
             with_tags=True,
         ).show()
@@ -577,6 +585,8 @@ class CognitiveOffloadApp(tk.Tk):
         task.kind = result["kind"]
         task.scheduled_for = result["scheduled_for"]
         task.estimate_minutes = result.get("estimate_minutes", task.estimate_minutes)
+        if result.get("clear_snooze"):
+            task.snoozed_until = ""
         self.refresh_tasks()
         self.mark_dirty()
         self.set_status("Task updated.")
@@ -1192,9 +1202,15 @@ class CognitiveOffloadApp(tk.Tk):
                 f"{minutes:02d}:{seconds:02d}",
                 elapsed / self._timer_total if self._timer_total else 0,
                 self._timer_running,
+                closing=self._closing_in(),
             )
         except tk.TclError:
             self._focus_window = None
+
+    def _closing_in(self) -> bool:
+        """The last two minutes of a running focus block."""
+        return (self._timer_mode == "focus" and self._timer_running
+                and 0 < self._timer_remaining <= 120)
 
     def finish_session_early(self, interactive: bool = True) -> int | None:
         """Stop now and keep the minutes you actually did.
@@ -1423,8 +1439,10 @@ class CognitiveOffloadApp(tk.Tk):
         except StorageError as exc:
             messagebox.showerror("Save failed", str(exc))
         self.refresh_matrix()
+        human = humanize_date(when) if when else ""
+        spoken = f"for {human} ({when})" if human and human != when else f"for {when}"
         self.set_status(
-            (_batch_status("Booked", done, len(tasks), "task") + f" for {when}.") if when
+            (_batch_status("Booked", done, len(tasks), "task") + f" {spoken}.") if when
             else (_batch_status("Cleared the booking on", done, len(tasks), "task") + ".")
         )
 
@@ -1554,8 +1572,14 @@ class CognitiveOffloadApp(tk.Tk):
         # whole difficulty with time blindness.
         if self._timer_running and self._timer_remaining > 0:
             ends = time.localtime(time.time() + self._timer_remaining)
-            self.finish_var.set(("break ends " if self._timer_mode == "break" else "ends ")
-                                + time.strftime("%H:%M", ends))
+            line = (("break ends " if self._timer_mode == "break" else "ends ")
+                    + time.strftime("%H:%M", ends))
+            if self._closing_in():
+                # A soft landing: the transition costs less when it is
+                # announced, and a chosen stopping point is what makes the
+                # hand-off question answerable.
+                line += " · a good moment to find a stopping point"
+            self.finish_var.set(line)
         else:
             self.finish_var.set("")
         # A visible bar of time left is easier to feel than digits alone.
@@ -1863,7 +1887,8 @@ def _task_row(task: Task) -> Row:
             badges.append(Badge("ready", "ready"))
         if task.scheduled_for:
             badges.append(Badge(
-                "today" if task.is_due() else f"booked {task.scheduled_for}",
+                "today" if task.is_due()
+                else f"booked {humanize_date(task.scheduled_for)}",
                 "today" if task.is_due() else "booked",
             ))
         if task.estimate_minutes:
@@ -1892,7 +1917,8 @@ def _matrix_row(task) -> Row:
     if task.scheduled_for:
         # An overdue booking is a nudge, not a telling-off.
         badges.append(Badge(
-            "today" if task.is_due() else f"booked {task.scheduled_for}",
+            "today" if task.is_due()
+            else f"booked {humanize_date(task.scheduled_for)}",
             "today" if task.is_due() else "booked",
         ))
     if task.estimate_minutes:
