@@ -3,7 +3,9 @@
 The badge and subtitle logic used to be copy-pasted between the main list
 and the matrix quadrants, so any wording change had to be made twice and
 drift would mean the same task reading differently on the two tabs. Both
-builders now feed from the same helpers. UI-free: imports no tkinter.
+builders now feed from the same helpers. (Badge/Row come from widgets, so
+tkinter is imported transitively — but never a display: these functions
+build plain data and test headless.)
 """
 
 from __future__ import annotations

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import math
 import time
 import tkinter as tk
 from pathlib import Path
@@ -54,6 +53,7 @@ from .storage import (
 )
 from .rows import focus_caption, matrix_row, sort_label, task_row
 from .theme import apply_theme, style_text, tokens
+from .timer import FocusTimer
 from .undo import UndoStack
 from .widgets import FocusWindow
 
@@ -93,12 +93,7 @@ class CognitiveOffloadApp(tk.Tk):
         self._autosave_job = None
         self._parked_this_session: list[str] = []
         self._timer_job = None
-        self._timer_running = False
-        self._timer_total = self.config_store.focus_minutes * 60
-        self._timer_remaining = self._timer_total
-        self._timer_deadline = 0.0
-        self._timer_mode = "focus"  # or "break"
-        self._session_banked = False  # set once a block has been logged
+        self.timer = FocusTimer(self.config_store.focus_minutes)
         self._focus_task_id: str | None = None
         self._session_count = 0
         self._focus_window: FocusWindow | None = None
@@ -1228,8 +1223,7 @@ class CognitiveOffloadApp(tk.Tk):
 
     def _closing_in(self) -> bool:
         """The last two minutes of a running focus block."""
-        return (self._timer_mode == "focus" and self._timer_running
-                and 0 < self._timer_remaining <= 120)
+        return self.timer.closing_in
 
     def finish_session_early(self, interactive: bool = True) -> int | None:
         """Stop now and keep the minutes you actually did.
@@ -1243,18 +1237,13 @@ class CognitiveOffloadApp(tk.Tk):
         Returns the banked focus minutes, or None when nothing was logged
         (never started, already banked, or the block was a break).
         """
-        if self._session_banked or (
-            not self._timer_running and self._timer_remaining >= self._timer_total
-        ):
+        banked = self.timer.bank_early(self._minutes())
+        if banked is None:
             # Nothing left to bank: the block either already logged itself, or
             # never started. Logging here would invent minutes.
             return None
-        elapsed = max(1, round((self._timer_total - self._timer_remaining) / 60))
+        mode, elapsed = banked
         self._stop_ticking()
-        mode, self._timer_mode = self._timer_mode, "focus"
-        if mode == "break":
-            self._timer_total = self._minutes() * 60
-        self._timer_remaining = self._timer_total
         self.timer_button.config(text="Start")
         self._update_timer_label()
         if mode == "break":
@@ -1474,6 +1463,58 @@ class CognitiveOffloadApp(tk.Tk):
     # ------------------------------------------------------------------
     # timer
     # ------------------------------------------------------------------
+    # Delegating views onto the FocusTimer state machine. They exist as the
+    # documented test seam (the UI tests reach into the clock to fake time
+    # passing) and so long-standing internal reads keep working; new code
+    # should talk to self.timer directly.
+    @property
+    def _timer_running(self) -> bool:
+        return self.timer.running
+
+    @_timer_running.setter
+    def _timer_running(self, value: bool) -> None:
+        self.timer.running = bool(value)
+
+    @property
+    def _timer_total(self) -> int:
+        return self.timer.total
+
+    @_timer_total.setter
+    def _timer_total(self, value: int) -> None:
+        self.timer.total = value
+
+    @property
+    def _timer_remaining(self) -> int:
+        return self.timer.remaining
+
+    @_timer_remaining.setter
+    def _timer_remaining(self, value: int) -> None:
+        self.timer.remaining = value
+
+    @property
+    def _timer_mode(self) -> str:
+        return self.timer.mode
+
+    @_timer_mode.setter
+    def _timer_mode(self, value: str) -> None:
+        self.timer.mode = value
+
+    @property
+    def _timer_deadline(self) -> float:
+        return self.timer.deadline
+
+    @_timer_deadline.setter
+    def _timer_deadline(self, value: float) -> None:
+        self.timer.deadline = value
+
+    @property
+    def _session_banked(self) -> bool:
+        return self.timer.banked
+
+    @_session_banked.setter
+    def _session_banked(self, value: bool) -> None:
+        self.timer.banked = bool(value)
+
     def toggle_timer(self) -> None:
         if self._timer_running:
             self.pause_timer()
@@ -1481,38 +1522,23 @@ class CognitiveOffloadApp(tk.Tk):
             self.start_timer()
 
     def start_timer(self, minutes: int | None = None, mode: str = "focus") -> None:
-        if self._timer_running:
+        if minutes is not None and mode == "focus":
+            self._parked_this_session = []
+        if not self.timer.start(time.monotonic(), minutes=minutes, mode=mode,
+                                fallback_minutes=self._minutes()):
             return
-        if minutes is not None:
-            self._timer_mode = mode
-            self._timer_total = max(1, minutes) * 60
-            self._timer_remaining = self._timer_total
-            self._session_banked = False
-            if mode == "focus":
-                self._parked_this_session = []
-        elif self._timer_remaining <= 0 or self._timer_remaining > self._timer_total:
-            self._timer_total = self._minutes() * 60
-            self._timer_remaining = self._timer_total
-            # A fresh block, even though no minutes were passed: the banked
-            # flag belongs to the previous block, and leaving it set would
-            # make "Done early" refuse to log this one.
-            self._session_banked = False
-        # Track a wall-clock deadline so the countdown cannot drift.
-        self._timer_deadline = time.monotonic() + self._timer_remaining
-        self._timer_running = True
         self.timer_button.config(text="Pause")
-        if self._timer_mode == "break":
+        if self.timer.mode == "break":
             self.focus_task_var.set("Break — step away from the screen.")
         self._tick_timer()
         self.set_status(
-            "Break started." if self._timer_mode == "break"
-            else f"{self._timer_remaining // 60} minutes. Only the first step matters."
+            "Break started." if self.timer.mode == "break"
+            else f"{self.timer.remaining // 60} minutes. Only the first step matters."
         )
 
     def pause_timer(self) -> None:
-        if not self._timer_running:
+        if not self.timer.pause(time.monotonic()):
             return
-        self._timer_remaining = max(0, int(round(self._timer_deadline - time.monotonic())))
         self._stop_ticking()
         self.timer_button.config(text="Resume")
         self._update_timer_label()  # also syncs the pop-out's button and clock
@@ -1528,22 +1554,13 @@ class CognitiveOffloadApp(tk.Tk):
         self._stop_ticking()
         self._focus_task_id = None
         self.focus_task_var.set("Nothing picked yet")
-        self._timer_mode = "focus"
-        self._timer_total = self._minutes() * 60
-        self._timer_remaining = self._timer_total
-        self._session_banked = False
+        self.timer.reset(self._minutes())
         self.timer_button.config(text="Start")
         self._update_timer_label()
         self.set_status("Timer reset.")
 
     def on_timer_minutes_changed(self) -> None:
-        # A paused block also has _timer_running False, but it still holds
-        # elapsed minutes worth banking — nudging the spinbox must not wipe
-        # them. Only a timer that is genuinely idle follows the spinbox.
-        mid_block = 0 < self._timer_remaining < self._timer_total
-        if not self._timer_running and not mid_block:
-            self._timer_total = self._minutes() * 60
-            self._timer_remaining = self._timer_total
+        if self.timer.set_length_if_idle(self._minutes()):
             self._update_timer_label()
 
     def _minutes(self) -> int:
@@ -1563,29 +1580,22 @@ class CognitiveOffloadApp(tk.Tk):
             self._timer_job = None
 
     def _tick_timer(self) -> None:
-        if not self._timer_running:
+        if not self.timer.running:
             return
-        remaining = self._timer_deadline - time.monotonic()
-        self._timer_remaining = max(0, int(math.ceil(remaining)))
+        # allow_finish=False while a modal dialog holds the grab: finishing
+        # would put the end-of-session dialog on top of it and Tk would hand
+        # the grab back to nobody when it closed, leaving the "modal" editor
+        # open over a mutable main window. The clock holds at 00:00 and the
+        # block completes on the first tick after the dialog closes.
+        expired = self.timer.tick(time.monotonic(),
+                                  allow_finish=self.grab_current() is None)
         self._update_timer_label()
-        if remaining <= 0:
-            if self.grab_current() is not None:
-                # A modal dialog is open. Finishing now would put the
-                # end-of-session dialog on top of it and Tk would hand the
-                # grab back to nobody when it closed, leaving the "modal"
-                # editor open over a mutable main window. Hold at 00:00 and
-                # finish the moment the dialog closes.
-                self._timer_job = self.after(500, self._tick_timer)
-                return
-            mode = self._timer_mode
-            minutes = max(1, round(self._timer_total / 60))
-            self._session_banked = True
+        if expired:
+            minutes = self.timer.minutes_for_natural_finish()
             self._stop_ticking()
-            self._timer_remaining = 0
-            self._timer_mode = "focus"
             self.timer_button.config(text="Start")
             self._update_timer_label()
-            if mode == "break":
+            if expired == "break":
                 self._finish_break()
             else:
                 self._finish_session(minutes)
