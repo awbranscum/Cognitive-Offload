@@ -148,6 +148,10 @@ reinstall from python.org).
   step and the clock — for when the countdown needs to be visible over whatever
   you are actually working in. "Done early" banks the minutes you did do.
 - Finished sessions are logged to `sessions.json` and drawn as a 14-day strip.
+- Click the strip (or its summary) for **the week, in evidence**: one line per
+  day that had anything — sessions, minutes, and the tasks finished that day —
+  with days that had nothing simply left out. "I did nothing this week" is a
+  distortion, and the correction is not motivation; it is the record.
 
 **Look and feel**
 - The interface is a port of [shadcn/ui](https://ui.shadcn.com)'s design system:

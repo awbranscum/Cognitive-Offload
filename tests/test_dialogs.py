@@ -146,6 +146,44 @@ class DialogCollectTests(unittest.TestCase):
         self.assertFalse(dialog.collect()["clear_snooze"])
         dialog.destroy()
 
+    # -- the week in evidence ------------------------------------------
+    def test_the_week_review_lists_days_titles_and_totals(self):
+        from tkinter import ttk
+
+        from cognitive_offload.dialogs import WeekReviewDialog
+
+        days = [
+            {"label": "Tuesday", "sessions": 3, "minutes": 45,
+             "titles": ["Book the dentist"]},
+            {"label": "Today", "sessions": 0, "minutes": 0,
+             "titles": ["Water the plants"]},
+        ]
+        dialog = WeekReviewDialog(self.root, days, 3, 45)
+        texts = [w.cget("text") for w in dialog.body.winfo_children()
+                 if isinstance(w, ttk.Label)]
+        self.assertTrue(any("Tuesday · 3 sessions · 45 min" in t for t in texts))
+        self.assertTrue(any("✓ Book the dentist" in t for t in texts))
+        # A day with finished tasks but no sessions shows no "0 sessions".
+        self.assertTrue(any(t == "Today" for t in texts))
+        self.assertFalse(any("0 session" in t for t in texts))
+        self.assertTrue(any("3 sessions · 45 minutes across the week" in t
+                            for t in texts))
+        dialog.destroy()
+
+    def test_a_quiet_week_is_just_a_quiet_week(self):
+        from tkinter import ttk
+
+        from cognitive_offload.dialogs import WeekReviewDialog
+
+        dialog = WeekReviewDialog(self.root, [], 0, 0)
+        texts = " ".join(w.cget("text") for w in dialog.body.winfo_children()
+                         if isinstance(w, ttk.Label))
+        self.assertIn("quiet week", texts)
+        self.assertNotIn("0 session", texts)
+        for scold in ("nothing done", "missed", "only"):
+            self.assertNotIn(scold, texts.lower())
+        dialog.destroy()
+
     # -- the start picker ----------------------------------------------
     def test_the_picker_follows_its_content_height(self):
         from cognitive_offload.dialogs import StartHereDialog

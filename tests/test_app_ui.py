@@ -817,6 +817,31 @@ class AppSmokeTests(unittest.TestCase):
         self.assertTrue(self.app._autosave_blocked)
         self.assertEqual([t.text for t in self.app.tasks], ["ok"])
 
+    def test_show_week_groups_by_day_and_omits_empty_days(self):
+        from datetime import date, timedelta
+
+        from cognitive_offload.sessions import FocusSession
+
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        stale = (date.today() - timedelta(days=10)).isoformat()  # outside the week
+        self.app.session_log.sessions = [
+            FocusSession(minutes=15, started_at=f"{yesterday} 09:00:00"),
+            FocusSession(minutes=30, started_at=f"{yesterday} 11:00:00"),
+            FocusSession(minutes=99, started_at=f"{stale} 09:00:00"),
+        ]
+        self.capture("finished thing")
+        self.select(0)
+        self.app.toggle_selected_done()  # completed today
+        with mock.patch("cognitive_offload.app.WeekReviewDialog") as review:
+            self.app.show_week()
+        days, total_sessions, total_minutes = review.call_args.args[1:4]
+        self.assertEqual(total_sessions, 2)
+        self.assertEqual(total_minutes, 45)
+        self.assertEqual([d["label"] for d in days], ["Yesterday", "Today"])
+        self.assertEqual(days[0]["sessions"], 2)
+        self.assertEqual(days[1]["titles"], ["finished thing"])
+        self.assertEqual(days[1]["sessions"], 0)
+
     def test_a_vanished_matrix_folder_is_named_not_silent(self):
         import shutil as _shutil
 

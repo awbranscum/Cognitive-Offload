@@ -612,6 +612,52 @@ class SessionEndDialog(ModalDialog):
         self.destroy()
 
 
+class WeekReviewDialog(ModalDialog):
+    """The week, in evidence.
+
+    "I did nothing this week" is a distortion, and the correction is not
+    motivation — it is the record. One line per day that HAD anything;
+    days with nothing are simply omitted, never listed as zeros. It can
+    only ever say what happened.
+    """
+
+    def __init__(self, parent: tk.Misc, days: list, total_sessions: int,
+                 total_minutes: int):
+        super().__init__(parent, "This week", size=(480, None))
+        self.resizable(False, False)
+        ttk.Label(self.body, text="This week, in evidence",
+                  font=font(SIZE_LG, "bold")).pack(anchor="w")
+        if not days:
+            ttk.Label(
+                self.body,
+                text="A quiet week is just a quiet week — nothing here "
+                     "counts against you. The strip fills in as sessions "
+                     "happen.",
+                style="Muted.TLabel", wraplength=430, justify="left",
+            ).pack(anchor="w", pady=(6, 0))
+        for entry in days:
+            line = entry["label"]
+            if entry["sessions"]:
+                plural = "s" if entry["sessions"] != 1 else ""
+                line += (f" · {entry['sessions']} session{plural}"
+                         f" · {entry['minutes']} min")
+            ttk.Label(self.body, text=line, font=font(SIZE_BASE, "bold")).pack(
+                anchor="w", pady=(8, 0))
+            for title in entry["titles"]:
+                ttk.Label(self.body, text=f"   ✓ {title}", style="Muted.TLabel",
+                          wraplength=430, justify="left").pack(anchor="w")
+        if days:
+            plural = "s" if total_sessions != 1 else ""
+            ttk.Label(
+                self.body,
+                text=f"{total_sessions} session{plural} · {total_minutes} "
+                     f"minutes across the week.",
+                style="Muted.TLabel",
+            ).pack(anchor="w", pady=(12, 0))
+        ttk.Button(self.body, text="Close", style="Outline.TButton",
+                   command=self.cancel).pack(anchor="e", pady=(14, 0))
+
+
 class ShortcutsDialog(ModalDialog):
     """A cheat-sheet, so the shortcuts are actually discoverable."""
 

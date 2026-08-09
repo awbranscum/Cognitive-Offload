@@ -17,6 +17,7 @@ from .dialogs import (
     StartFocusDialog,
     StartHereDialog,
     TaskEditorDialog,
+    WeekReviewDialog,
 )
 from .main_tab import build_main_tab
 from .matrix_tab import build_matrix_tab
@@ -1411,6 +1412,35 @@ class CognitiveOffloadApp(tk.Tk):
                 "Today",
                 "Finished today:\n\n" + "\n".join(lines) + footer,
             )
+
+    def show_week(self) -> None:
+        """The last seven days, as evidence — only the days that had anything."""
+        from datetime import date, timedelta
+
+        days = []
+        total_sessions = 0
+        total_minutes = 0
+        today = date.today()
+        for offset in range(6, -1, -1):
+            day = today - timedelta(days=offset)
+            iso = day.isoformat()
+            sessions = self.session_log.on_day(iso)
+            titles = completed_titles_today(self.tasks, self.completed_log, on=iso)
+            if not sessions and not titles:
+                continue  # omitted, never listed as a zero
+            minutes = sum(s.minutes for s in sessions)
+            total_sessions += len(sessions)
+            total_minutes += minutes
+            if offset == 0:
+                label = "Today"
+            elif offset == 1:
+                label = "Yesterday"
+            else:
+                label = day.strftime("%A")
+            days.append({"label": label, "sessions": len(sessions),
+                         "minutes": minutes, "titles": titles})
+        with self._ask_over_focus():
+            WeekReviewDialog(self, days, total_sessions, total_minutes).show()
 
     def show_booked(self) -> None:
         due = due_tasks(self.tasks)

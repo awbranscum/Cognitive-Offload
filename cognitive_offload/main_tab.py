@@ -335,8 +335,14 @@ def _build_footer(app, root: ttk.Frame) -> None:
             side="left", padx=(0, 4))
 
     ttk.Label(footer, textvariable=app.status_var, style="Muted.TLabel").pack(side="right")
-    ttk.Label(footer, textvariable=app.momentum_var, style="Muted.TLabel").pack(
+    momentum_label = ttk.Label(footer, textvariable=app.momentum_var,
+                               style="Muted.TLabel", cursor="hand2")
+    momentum_label.bind("<Button-1>", lambda _e: app.show_week())
+    momentum_label.pack(
         side="right", padx=(0, 14))
     app.momentum_strip = MomentumStrip(footer, days=14, on_hover=app.on_momentum_hover,
                                        surface="background")
+    # The strip is the teaser; the click is the receipts.
+    app.momentum_strip.configure(cursor="hand2")
+    app.momentum_strip.bind("<Button-1>", lambda _e: app.show_week())
     app.momentum_strip.pack(side="right", padx=(0, 10))
