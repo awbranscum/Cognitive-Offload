@@ -173,7 +173,7 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
     ttk.Label(heading, text="Active stack", style="CardTitle.TLabel").pack(side="left")
     ttk.Label(heading, textvariable=app.counts_var, style="CardMuted.TLabel").pack(side="right")
     # Sits by the counts rather than in the button row, which runs out of width.
-    app.today_label = ttk.Label(heading, textvariable=app.today_var, style="CardMuted.TLabel",
+    app.today_label = ttk.Label(heading, textvariable=app.today_var, style="DoneToday.TLabel",
                                 cursor="hand2")
     app.today_label.pack(side="right", padx=(0, 12))
     app.today_label.bind("<Button-1>", lambda _e: app.show_today())

@@ -226,6 +226,13 @@ def apply_theme(root: tk.Misc, name: str = "light") -> Tokens:
                     font=font(SIZE_LG, "bold"))
     style.configure("Link.TLabel", background=t.background, foreground=t.muted_foreground,
                     font=font(SIZE_SM))
+    # The day's positive evidence — the non-shaming replacement for streaks —
+    # should not be typographically identical to the bookkeeping counts
+    # beside it. A quiet success tint, no scoreboard for what's missing.
+    style.configure("DoneToday.TLabel",
+                    background=t.badges["creative"][0],
+                    foreground=t.badges["creative"][1],
+                    padding=(8, 2), font=font(SIZE_SM, "bold"))
 
     _button_variants(style, t)
 
@@ -238,11 +245,21 @@ def apply_theme(root: tk.Misc, name: str = "light") -> Tokens:
                     padding=4, relief="flat",
                     selectbackground=t.selected, selectforeground=t.foreground)
     style.map("TCombobox",
-              fieldbackground=[("readonly", t.card)],
+              fieldbackground=[("disabled", t.muted), ("readonly", t.card)],
+              foreground=[("disabled", t.muted_foreground)],
               background=[("readonly", t.card)],
               bordercolor=[("focus", t.ring)])
     style.configure("TSpinbox", fieldbackground=t.card, foreground=t.foreground,
                     bordercolor=t.input, arrowcolor=t.muted_foreground, padding=4, relief="flat")
+    # The spinbox sets the session length — the one place a keyboard user
+    # must not lose the focus ring.
+    style.map("TSpinbox",
+              bordercolor=[("focus", t.ring)],
+              fieldbackground=[("disabled", t.muted)],
+              foreground=[("disabled", t.muted_foreground)])
+    style.map("TEntry",
+              fieldbackground=[("disabled", t.muted)],
+              foreground=[("disabled", t.muted_foreground)])
 
     for suffix, bg in (("TCheckbutton", t.background), ("Card.TCheckbutton", t.card)):
         style.configure(suffix, background=bg, foreground=t.foreground,
@@ -275,8 +292,10 @@ def apply_theme(root: tk.Misc, name: str = "light") -> Tokens:
     style.configure("TNotebook.Tab", background=t.muted, foreground=t.muted_foreground,
                     padding=(16, 8), borderwidth=0, font=font(SIZE_BASE, "bold"))
     style.map("TNotebook.Tab",
-              background=[("selected", t.card)],
-              foreground=[("selected", t.foreground)],
+              # Selected first — first matching state wins — then hover:
+              # the cheapest possible "this is clickable" signal.
+              background=[("selected", t.card), ("active", t.accent)],
+              foreground=[("selected", t.foreground), ("active", t.foreground)],
               expand=[("selected", (0, 0, 0, 0))])
 
     style.configure("TProgressbar", background=t.primary, troughcolor=t.muted,

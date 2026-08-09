@@ -286,8 +286,11 @@ class RowList(ttk.Frame):
         marker = row.marker or ("✓" if row.done else ("●" if row.flagged else "○"))
         cell["mark"].configure(
             text=marker, background=bg,
-            foreground=t.muted_foreground if row.done else (
-                t.destructive if row.flagged else t.border),
+            # The marker is the fastest pre-attentive read of row state; in
+            # t.border it sat at 1.4:1 — a reserved column of nothing. The
+            # glyph shape carries the open/done distinction.
+            foreground=t.destructive if row.flagged and not row.done
+            else t.muted_foreground,
         )
         cell["title"].configure(
             text=row.title, background=bg,

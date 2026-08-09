@@ -17,14 +17,22 @@ from .theme import SIZE_BASE, SIZE_LG, SIZE_SM, font, style_text, tokens
 
 
 class ModalDialog(tk.Toplevel):
-    def __init__(self, parent: tk.Misc, title: str, size: tuple[int, int] | None = None):
+    def __init__(self, parent: tk.Misc, title: str, size: tuple | None = None):
         super().__init__(parent)
         self.result = None
         self._parent = parent
         self.title(title)
         self.configure(background=tokens().background)
         self.transient(parent.winfo_toplevel())
-        if size:
+        self._fit_width = None
+        if size and size[1] is None:
+            # Width pinned, height to content (resolved in show(), once the
+            # subclass has built its body): a fixed height is always wrong
+            # for someone when the content varies — the warm-up ladder's
+            # length is per-config — leaving a dead band or a cut-off.
+            self.minsize(size[0], 1)
+            self._fit_width = size[0]
+        elif size:
             self.minsize(*size)
             self.geometry(f"{size[0]}x{size[1]}")
         self.body = ttk.Frame(self, padding=12)
@@ -58,6 +66,8 @@ class ModalDialog(tk.Toplevel):
     def show(self):
         """Centre, make modal, and block until closed. Returns ``self.result``."""
         self.update_idletasks()
+        if self._fit_width:
+            self.geometry(f"{self._fit_width}x{self.winfo_reqheight()}")
         self._center()
         try:
             self.wait_visibility()
@@ -262,7 +272,8 @@ class StartHereDialog(ModalDialog):
         controls = ttk.Frame(self.body)
         controls.pack(fill="x", pady=(10, 0))
         ttk.Button(controls, text="Show me others", style="Outline.TButton", command=self._cycle).pack(side="left")
-        ttk.Button(controls, text="Cancel", style="Ghost.TButton", command=self.cancel).pack(side="right")
+        ttk.Button(controls, text="Cancel", style="PageGhost.TButton",
+                   command=self.cancel).pack(side="right")
         ttk.Button(controls, text="Start on this", style="Default.TButton", command=self.ok).pack(
             side="right", padx=(0, 8)
         )
@@ -331,7 +342,7 @@ class StartFocusDialog(ModalDialog):
         show_warmup: bool = True,
         estimate_minutes: int = 0,
     ):
-        super().__init__(parent, "Start a focus session", size=(520, 460))
+        super().__init__(parent, "Start a focus session", size=(520, None))
 
         ttk.Label(self.body, text="Working on", style="Muted.TLabel").pack(anchor="w")
         ttk.Label(
@@ -484,7 +495,9 @@ class SessionEndDialog(ModalDialog):
         for label, value, style in (
             ("It's finished — mark it done", "done", "Default.TButton"),
             (f"Not yet — take {break_minutes} minutes", "break", "Outline.TButton"),
-            ("Not yet — keep going", "carry_on", "Ghost.TButton"),
+            # PageGhost, not Ghost: dialog bodies sit on the page background,
+            # and the card-surface ghost renders as a white patch there.
+            ("Not yet — keep going", "carry_on", "PageGhost.TButton"),
         ):
             button = ttk.Button(self.body, text=label, style=style,
                                 command=lambda v=value: self._choose(v))
@@ -570,7 +583,10 @@ class ShortcutsDialog(ModalDialog):
             grid.pack(fill="x")
             grid.columnconfigure(1, weight=1)
             for row, (keys, description) in enumerate(rows):
-                ttk.Label(grid, text=keys, style="Muted.TLabel", font=font(SIZE_SM, "bold")).grid(
+                # width pins every section's key column to the same edge —
+                # four differently-ragged columns scan measurably slower.
+                ttk.Label(grid, text=keys, style="Muted.TLabel",
+                          font=font(SIZE_SM, "bold"), width=24).grid(
                     row=row, column=0, sticky="w", padx=(0, 12)
                 )
                 ttk.Label(grid, text=description, style="Muted.TLabel").grid(
