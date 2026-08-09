@@ -90,11 +90,14 @@ def _build_top_row(app, root: ttk.Frame) -> None:
 
 def _build_capture_card(app, top: ttk.Frame) -> None:
     outer = card(top, "Quick capture", "Anything in your head — it does not have to be tidy.")
-    outer.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+    # "new", not "nsew": stretched to the focus card's height, the capture
+    # card was mostly a blank slab — dead space where the task list wants
+    # to be.
+    outer.grid(row=0, column=0, sticky="new", padx=(0, 10))
     body = outer.inner
 
     entry_row = ttk.Frame(body, style="Card.TFrame")
-    entry_row.pack(fill="x", pady=(12, 8))
+    entry_row.pack(fill="x", pady=(8, 6))
     entry_row.columnconfigure(0, weight=1)
     app.capture_entry = ttk.Entry(entry_row, font=font(theme.SIZE_LG))
     app.capture_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8), ipady=3)
@@ -118,7 +121,7 @@ def _build_focus_card(app, top: ttk.Frame) -> None:
         body, textvariable=app.focus_task_var, style="CardMuted.TLabel",
         anchor="center", justify="center", wraplength=300,
     )
-    app.focus_task_label.pack(fill="x", pady=(12, 0))
+    app.focus_task_label.pack(fill="x", pady=(6, 0))
 
     app.timer_label = ttk.Label(body, text="15:00", style="Timer.TLabel", anchor="center")
     app.timer_label.pack(fill="x")
@@ -126,7 +129,7 @@ def _build_focus_card(app, top: ttk.Frame) -> None:
     app.timer_progress = ttk.Progressbar(body, mode="determinate", maximum=1000)
     app.timer_progress.pack(fill="x", pady=(2, 2))
     ttk.Label(body, textvariable=app.finish_var, style="CardMuted.TLabel",
-              anchor="center").pack(fill="x", pady=(0, 10))
+              anchor="center").pack(fill="x", pady=(0, 6))
 
     controls = ttk.Frame(body, style="Card.TFrame")
     controls.pack(fill="x")
@@ -161,7 +164,9 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
     outer.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
     inner = outer.inner
     inner.columnconfigure(0, weight=1)
-    inner.rowconfigure(5, weight=1)
+    # The list flexes; when the window shrinks it is the chrome that should
+    # give way first, not the tasks.
+    inner.rowconfigure(4, weight=1, minsize=150)
 
     heading = ttk.Frame(inner, style="Card.TFrame")
     heading.grid(row=0, column=0, sticky="ew")
@@ -174,12 +179,18 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
     app.today_label.bind("<Button-1>", lambda _e: app.show_today())
 
     # Named without being asked: opening the app and being told what to start
-    # is one decision instead of two.
-    app.next_frame = ttk.Frame(inner, style="Card.TFrame")
+    # is one decision instead of two. The 1px border makes the app's single
+    # most important element read as one contained unit instead of floating
+    # loose between the counts and the search box. app.next_frame is the
+    # OUTER frame — refresh_next_up grid_remove()s it whole.
+    app.next_frame = tk.Frame(inner, background=tokens().border, highlightthickness=0)
     app.next_frame.grid(row=1, column=0, sticky="ew", pady=(10, 8))
-    app.next_frame.columnconfigure(0, weight=1)
+    next_inner = ttk.Frame(app.next_frame, style="Card.TFrame", padding=10)
+    next_inner.pack(fill="both", expand=True, padx=1, pady=1)
+    next_inner.columnconfigure(0, weight=1)
+    app.next_frame.inner = next_inner  # picked up by the theme toggle's border walk
 
-    next_text = ttk.Frame(app.next_frame, style="Card.TFrame")
+    next_text = ttk.Frame(next_inner, style="Card.TFrame")
     next_text.grid(row=0, column=0, sticky="ew")
     ttk.Label(next_text, text="NEXT UP", style="CardMuted.TLabel").pack(anchor="w")
     ttk.Label(next_text, textvariable=app.next_title_var, style="H2.TLabel",
@@ -187,7 +198,7 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
     ttk.Label(next_text, textvariable=app.next_step_var, style="CardMuted.TLabel",
               wraplength=380, justify="left").pack(anchor="w")
 
-    next_buttons = ttk.Frame(app.next_frame, style="Card.TFrame")
+    next_buttons = ttk.Frame(next_inner, style="Card.TFrame")
     next_buttons.grid(row=0, column=1, sticky="e", padx=(10, 0))
     ttk.Button(next_buttons, text="Start this", style="Default.TButton",
                command=app.start_next).pack(anchor="e")
@@ -215,40 +226,41 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
     app.due_label.pack(side="left", padx=(12, 0))
     app.due_label.bind("<Button-1>", lambda _e: app.show_booked())
 
-    search_row = ttk.Frame(inner, style="Card.TFrame")
-    search_row.grid(row=3, column=0, sticky="ew", pady=(0, 6))
-    search_row.columnconfigure(0, weight=1)
-    app.search_entry = ttk.Entry(search_row, textvariable=app.search_var)
-    app.search_entry.grid(row=0, column=0, sticky="ew")
+    # One row for search AND filters: two separate rows cost the task list
+    # a whole visible task, and the list is the point of this card.
+    filters = ttk.Frame(inner, style="Card.TFrame")
+    filters.grid(row=3, column=0, sticky="ew", pady=(0, 8))
+    filters.columnconfigure(0, weight=1)
+    app.search_entry = ttk.Entry(filters, textvariable=app.search_var)
+    app.search_entry.grid(row=0, column=0, sticky="ew", padx=(0, 4))
     app.search_entry.bind("<KeyRelease>", lambda _e: app.refresh_tasks())
     app.search_entry.bind("<Escape>", lambda _e: app.clear_search() or "break")
-    ttk.Button(search_row, text="Clear", style="SmGhost.TButton",
-               command=app.clear_search).grid(row=0, column=1, padx=(6, 0))
-    app.search_row = search_row
+    ttk.Button(filters, text="Clear", style="SmGhost.TButton",
+               command=app.clear_search).grid(row=0, column=1, padx=(0, 8))
 
-    filters = ttk.Frame(inner, style="Card.TFrame")
-    filters.grid(row=4, column=0, sticky="ew", pady=(0, 8))
     kind_combo = ttk.Combobox(
         filters, textvariable=app.kind_filter_var,
         values=[ALL_KINDS] + [label for key, label in KIND_LABELS.items() if key],
-        width=12, state="readonly",
+        width=10, state="readonly",
     )
-    kind_combo.pack(side="left", padx=(0, 6))
+    kind_combo.grid(row=0, column=2, padx=(0, 4))
     kind_combo.bind("<<ComboboxSelected>>", lambda _e: app.refresh_tasks())
 
     app.tag_filter_combo = ttk.Combobox(filters, textvariable=app.tag_filter_var,
-                                        width=9, state="readonly")
-    app.tag_filter_combo.pack(side="left", padx=(0, 6))
+                                        width=8, state="readonly")
+    app.tag_filter_combo.grid(row=0, column=3, padx=(0, 4))
     app.tag_filter_combo.bind("<<ComboboxSelected>>", lambda _e: app.refresh_tasks())
 
     sort_combo = ttk.Combobox(filters, textvariable=app.sort_var, values=list(SORT_ORDERS),
-                              width=10, state="readonly")
-    sort_combo.pack(side="left")
+                              width=9, state="readonly")
+    sort_combo.grid(row=0, column=4)
     sort_combo.bind("<<ComboboxSelected>>", lambda _e: app.refresh_tasks())
     ttk.Checkbutton(filters, text="Show done", variable=app.show_done_var,
-                    style="Card.TCheckbutton", command=app.refresh_tasks).pack(
-        side="left", padx=(8, 0))
+                    style="Card.TCheckbutton", command=app.refresh_tasks).grid(
+        row=0, column=5, padx=(8, 0))
+    # Both names survive the merge: calm mode and the tests reach for each.
     app.filter_row = filters
+    app.search_row = filters
 
     app.task_list = RowList(
         inner,
@@ -258,10 +270,10 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
         on_select=app.on_task_selection_changed,
         empty_text="Nothing here. Capture a thought above — or take the win and stop.",
     )
-    app.task_list.grid(row=5, column=0, sticky="nsew")
+    app.task_list.grid(row=4, column=0, sticky="nsew")
 
     toolbar = ttk.Frame(inner, style="Card.TFrame")
-    toolbar.grid(row=6, column=0, sticky="ew", pady=(8, 0))
+    toolbar.grid(row=5, column=0, sticky="ew", pady=(8, 0))
     for column in range(4):
         toolbar.columnconfigure(column, weight=1, uniform="tools")
     rows = [
