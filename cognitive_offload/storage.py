@@ -121,6 +121,8 @@ class Config:
         self.break_minutes = 5
         self.warmup_steps = list(DEFAULT_WARMUP_STEPS)
         self.show_warmup = True
+        # Open the always-on-top pop-out automatically when a session starts.
+        self.popout_on_start = False
         self.theme = "light"
         self.calm_mode = False
 
@@ -156,6 +158,7 @@ class Config:
             cleaned = [s.strip() for s in steps if isinstance(s, str) and s.strip()]
             self.warmup_steps = cleaned or list(DEFAULT_WARMUP_STEPS)
         self.show_warmup = bool(data.get("show_warmup", True))
+        self.popout_on_start = bool(data.get("popout_on_start", False))
         self.theme = "dark" if data.get("theme") == "dark" else "light"
         self.calm_mode = bool(data.get("calm_mode", False))
         return self
@@ -174,6 +177,7 @@ class Config:
                     "break_minutes": self.break_minutes,
                     "warmup_steps": list(self.warmup_steps),
                     "show_warmup": self.show_warmup,
+                    "popout_on_start": self.popout_on_start,
                     "theme": self.theme,
                     "calm_mode": self.calm_mode,
                 },

@@ -146,6 +146,59 @@ class DialogCollectTests(unittest.TestCase):
         self.assertFalse(dialog.collect()["clear_snooze"])
         dialog.destroy()
 
+    # -- the start dialog's rituals ------------------------------------
+    def test_untouched_ladder_collects_as_none(self):
+        from cognitive_offload.dialogs import StartFocusDialog
+
+        dialog = StartFocusDialog(self.root, warmup_steps=["a", "b", "c"])
+        result = dialog.collect()
+        self.assertIsNone(result["warmup_steps"])
+        self.assertTrue(result["show_warmup"])
+        self.assertFalse(result["popout"])
+        dialog.destroy()
+
+    def test_edited_ladder_collects_stripped_and_blankless(self):
+        from cognitive_offload.dialogs import StartFocusDialog
+
+        dialog = StartFocusDialog(self.root, warmup_steps=["a", "b", "c"])
+        dialog._edit_steps()
+        dialog._step_entries[0].delete(0, "end")
+        dialog._step_entries[0].insert(0, "  make tea  ")
+        dialog._step_entries[1].delete(0, "end")  # blank: dropped
+        self.assertEqual(dialog.collect()["warmup_steps"], ["make tea", "c"])
+        dialog.destroy()
+
+    def test_clearing_every_step_is_allowed(self):
+        from cognitive_offload.dialogs import StartFocusDialog
+
+        dialog = StartFocusDialog(self.root, warmup_steps=["a"])
+        dialog._edit_steps()
+        for entry in dialog._step_entries:
+            entry.delete(0, "end")
+        self.assertEqual(dialog.collect()["warmup_steps"], [])
+        dialog.destroy()
+
+    def test_the_popout_and_ladder_prefs_prefill_from_config(self):
+        from cognitive_offload.dialogs import StartFocusDialog
+
+        dialog = StartFocusDialog(self.root, warmup_steps=["a"],
+                                  show_warmup=False, popout=True)
+        result = dialog.collect()
+        self.assertFalse(result["show_warmup"])
+        self.assertTrue(result["popout"])
+        dialog.destroy()
+
+    def test_the_session_end_mentions_parked_thoughts(self):
+        from cognitive_offload.dialogs import SessionEndDialog
+
+        from tkinter import ttk
+
+        dialog = SessionEndDialog(self.root, "15 minutes", "a task", parked=2)
+        texts = [w.cget("text") for w in dialog.body.winfo_children()
+                 if isinstance(w, ttk.Label)]
+        self.assertTrue(any("2 thoughts parked" in t for t in texts))
+        dialog.destroy()
+
     # -- session end ---------------------------------------------------
     def test_closing_the_session_dialog_means_carry_on(self):
         from cognitive_offload.dialogs import SessionEndDialog

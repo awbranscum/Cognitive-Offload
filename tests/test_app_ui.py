@@ -748,6 +748,58 @@ class AppSmokeTests(unittest.TestCase):
         self.app.load_state()
         self.assertIn("broken", self.app.tasks[0].text)
 
+    # -- session rituals -----------------------------------------------
+    def test_ladder_edits_and_popout_preference_persist(self):
+        self.capture("ritual work")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "", "warmup_done": 0,
+                "warmup_steps": ["my own step"], "show_warmup": False,
+                "popout": True,
+            }
+            self.app.focus_on_selected()
+        self.assertEqual(self.app.config_store.warmup_steps, ["my own step"])
+        self.assertFalse(self.app.config_store.show_warmup)
+        self.assertTrue(self.app.config_store.popout_on_start)
+        # The pop-out opened without a second click.
+        self.assertIsNotNone(self.app._focus_window)
+        from cognitive_offload.storage import Config
+        reloaded = Config(self.app.config_store.path).load()
+        self.assertEqual(reloaded.warmup_steps, ["my own step"])
+        self.assertTrue(reloaded.popout_on_start)
+        self.app._focus_window.close()
+        self.app.pause_timer()
+
+    def test_parked_thoughts_reach_the_session_end_dialog(self):
+        self.capture("focus work")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "", "warmup_done": 0,
+            }
+            self.app.focus_on_selected()
+        self.app.park_thought("email Dana")
+        self.app.park_thought("buy milk")
+        self.app._timer_deadline -= 10_000
+        with mock.patch("cognitive_offload.app.SessionEndDialog") as ender, \
+                mock.patch("cognitive_offload.app.messagebox.askyesno",
+                           return_value=False):
+            ender.return_value.show.return_value = {"choice": "carry_on",
+                                                    "next_step": ""}
+            self.app._tick_timer()
+            self.assertEqual(ender.call_args.kwargs.get("parked"), 2)
+        # A fresh block starts with a clean slate.
+        self.app.start_timer(minutes=15)
+        with mock.patch("cognitive_offload.app.SessionEndDialog") as ender, \
+                mock.patch("cognitive_offload.app.messagebox.askyesno",
+                           return_value=False):
+            ender.return_value.show.return_value = {"choice": "carry_on",
+                                                    "next_step": ""}
+            self.app._timer_deadline -= 10_000
+            self.app._tick_timer()
+            self.assertEqual(ender.call_args.kwargs.get("parked"), 0)
+
     # -- soft landing / relative dates / snooze exit -------------------
     def test_the_last_two_minutes_announce_a_soft_landing(self):
         self.app.start_timer(minutes=15)

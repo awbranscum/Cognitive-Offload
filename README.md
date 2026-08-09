@@ -38,7 +38,9 @@ able to begin. The app is built around four things that help with that:
 - **A warm-up ladder** before each session: two or three small steps between
   whatever you were doing and the task, so starting isn't one big leap from high
   stimulation to a cold start. Ticking them is optional — they're a prompt, not a
-  gate.
+  gate. The steps are yours: "Edit steps…" in the start dialog rewrites them in
+  place (a fixed ladder habituates within days), and a checkbox folds the ladder
+  away — or brings it back — for good.
 - **Fifteen-minute sessions** with a visible bar, a break afterwards, and a
   fourteen-day strip of what you actually did. Short blocks close the loop often
   enough to build momentum.
@@ -64,7 +66,10 @@ written while it is still obvious. Blank is a fine answer. Pressing Enter there
 keeps the step and carries on — marking the task done is a deliberate click,
 never a keyboard accident.
 
-**Park it.** The pop-out has a one-line box: a thought that arrives mid-block
+**Park it.** The pop-out can open by itself when a session starts ("keep the
+timer floating over my work", remembered between runs — the person least likely
+to notice the timer is missing is the one who needed it). It has a one-line
+box: a thought that arrives mid-block
 ("email Dana about the invoice") goes to the scratchpad in two seconds without
 pausing the timer, opening the main window, or making you decide anything. It
 lands in the scratchpad rather than the task list on purpose — the list is a

@@ -136,6 +136,14 @@ class ConfigTests(TempDirTest):
         self.assertEqual(config.focus_minutes, 120)
         self.assertEqual(config.sort_order, "priority")
 
+    def test_popout_on_start_round_trips_and_defaults_off(self):
+        path = self.root / "cfg.json"
+        self.assertFalse(Config(path).load().popout_on_start)
+        config = Config(path)
+        config.popout_on_start = True
+        config.save()
+        self.assertTrue(Config(path).load().popout_on_start)
+
     def test_appearance_settings_round_trip(self):
         path = self.root / "cfg.json"
         config = Config(path)

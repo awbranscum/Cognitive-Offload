@@ -92,6 +92,7 @@ class CognitiveOffloadApp(tk.Tk):
         self._status_token = 0
         self._status_before_hover: str | None = None
         self._autosave_job = None
+        self._parked_this_session: list[str] = []
         self._timer_job = None
         self._timer_running = False
         self._timer_total = self.config_store.focus_minutes * 60
@@ -1076,6 +1077,7 @@ class CognitiveOffloadApp(tk.Tk):
                 warmup_steps=self.config_store.warmup_steps,
                 show_warmup=self.config_store.show_warmup,
                 estimate_minutes=task.estimate_minutes if task else 0,
+                popout=self.config_store.popout_on_start,
             ).show()
         if not result:
             return  # nothing torn down: the running block is still running
@@ -1098,6 +1100,16 @@ class CognitiveOffloadApp(tk.Tk):
             self.refresh_tasks()
             self.mark_dirty()
 
+        # The rituals stick: ladder edits, ladder visibility and the pop-out
+        # preference all persist for future sessions.
+        if result.get("warmup_steps") is not None:
+            self.config_store.warmup_steps = result["warmup_steps"]
+        if "show_warmup" in result:
+            self.config_store.show_warmup = bool(result["show_warmup"])
+        if "popout" in result:
+            self.config_store.popout_on_start = bool(result["popout"])
+        self._save_config()
+
         if result.get("warmup_done"):
             steps = result["warmup_done"]
             self.set_status(f"{steps} warm-up step{'s' if steps != 1 else ''} done. Starting.")
@@ -1106,6 +1118,10 @@ class CognitiveOffloadApp(tk.Tk):
         self.config_store.focus_minutes = result["minutes"]
         self.work_minutes.set(result["minutes"])
         self.start_timer(minutes=result["minutes"], mode="focus")
+        if result.get("popout"):
+            # Time blindness: the person least likely to notice the timer is
+            # missing is the one who needed it. No remembered click.
+            self.open_focus_window()
         if banked:
             # start_timer just overwrote the bank notice; the evidence of the
             # minutes already done should not vanish the moment they land.
@@ -1183,6 +1199,7 @@ class CognitiveOffloadApp(tk.Tk):
         right now.
         """
         self.append_scratchpad(text, stamped=True)
+        self._parked_this_session.append(text)
         self.set_status("Parked in the scratchpad.")
 
     def _forget_focus_window(self) -> None:
@@ -1305,11 +1322,13 @@ class CognitiveOffloadApp(tk.Tk):
         self.bell()
 
         next_step = ""
+        parked = len(self._parked_this_session)
         with self._ask_over_focus():
             if task is not None:
                 answer = SessionEndDialog(self, message, task.text,
                                           self.config_store.break_minutes,
-                                          first_step=task.first_step).show() or {}
+                                          first_step=task.first_step,
+                                          parked=parked).show() or {}
                 choice = answer.get("choice", "carry_on")
                 next_step = answer.get("next_step", "")
             else:
@@ -1347,6 +1366,10 @@ class CognitiveOffloadApp(tk.Tk):
             self.focus_task_var.set(
                 f"{minutes} min logged. Another round when you're ready."
             )
+        if parked:
+            # Attention is free now: put the parked lines on screen instead
+            # of relying on the user remembering to scroll a growing pad.
+            self.note_text.see(tk.END)
 
     def _finish_break(self) -> None:
         self.focus_task_var.set("Break over. One more small block?")
@@ -1463,6 +1486,8 @@ class CognitiveOffloadApp(tk.Tk):
             self._timer_total = max(1, minutes) * 60
             self._timer_remaining = self._timer_total
             self._session_banked = False
+            if mode == "focus":
+                self._parked_this_session = []
         elif self._timer_remaining <= 0 or self._timer_remaining > self._timer_total:
             self._timer_total = self._minutes() * 60
             self._timer_remaining = self._timer_total

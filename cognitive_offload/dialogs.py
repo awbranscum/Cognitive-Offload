@@ -341,6 +341,7 @@ class StartFocusDialog(ModalDialog):
         warmup_steps: list[str] | None = None,
         show_warmup: bool = True,
         estimate_minutes: int = 0,
+        popout: bool = False,
     ):
         super().__init__(parent, "Start a focus session", size=(520, None))
 
@@ -371,22 +372,21 @@ class StartFocusDialog(ModalDialog):
         ).pack(anchor="w", pady=(0, 12))
 
         self.warmup_vars: list[tk.BooleanVar] = []
+        self._steps = list(warmup_steps or [])
+        self._step_entries: list | None = None  # None = not editing
+        self.ladder_frame = ttk.Frame(self.body)
         if show_warmup and warmup_steps:
-            ttk.Label(self.body, text="Warm-up ladder", font=font(SIZE_BASE, "bold")).pack(
-                anchor="w"
-            )
-            ttk.Label(
-                self.body,
-                text="Step down towards the task instead of leaping at it. "
-                     "Tick what you've done — skipping them is fine too.",
-                style="Muted.TLabel",
-                wraplength=470,
-                justify="left",
-            ).pack(anchor="w", pady=(2, 6))
-            for step in warmup_steps:
-                var = tk.BooleanVar(value=False)
-                self.warmup_vars.append(var)
-                ttk.Checkbutton(self.body, text=step, variable=var).pack(anchor="w", pady=1)
+            self.ladder_frame.pack(fill="x")
+            self._build_ladder()
+
+        # The rituals belong to the user, and this dialog is where the itch
+        # occurs — not a hidden JSON file.
+        self.show_warmup_var = tk.BooleanVar(value=show_warmup)
+        ttk.Checkbutton(self.body, text="Show the warm-up ladder before sessions",
+                        variable=self.show_warmup_var).pack(anchor="w", pady=(10, 0))
+        self.popout_var = tk.BooleanVar(value=popout)
+        ttk.Checkbutton(self.body, text="Keep the timer floating over my work",
+                        variable=self.popout_var).pack(anchor="w", pady=(2, 0))
 
         length = ttk.Frame(self.body)
         length.pack(fill="x", pady=(14, 0))
@@ -401,15 +401,70 @@ class StartFocusDialog(ModalDialog):
         self.step_entry.focus_set()
         self.bind("<Return>", self.ok)
 
+    def _build_ladder(self) -> None:
+        heading = ttk.Frame(self.ladder_frame)
+        heading.pack(fill="x")
+        ttk.Label(heading, text="Warm-up ladder", font=font(SIZE_BASE, "bold")).pack(
+            side="left")
+        ttk.Button(heading, text="Edit steps…", style="SmPageGhost.TButton",
+                   command=self._edit_steps).pack(side="left", padx=(8, 0))
+        ttk.Label(
+            self.ladder_frame,
+            text="Step down towards the task instead of leaping at it. "
+                 "Tick what you've done — skipping them is fine too.",
+            style="Muted.TLabel",
+            wraplength=470,
+            justify="left",
+        ).pack(anchor="w", pady=(2, 6))
+        for step in self._steps:
+            var = tk.BooleanVar(value=False)
+            self.warmup_vars.append(var)
+            ttk.Checkbutton(self.ladder_frame, text=step, variable=var).pack(
+                anchor="w", pady=1)
+
+    def _edit_steps(self) -> None:
+        """Swap the ladder for prefilled entries: a fixed ladder habituates
+        within days, and steps tuned to the user's real downshift ritual
+        keep reading as themselves."""
+        if self._step_entries is not None:
+            return
+        for child in self.ladder_frame.winfo_children():
+            child.destroy()
+        self.warmup_vars = []
+        ttk.Label(self.ladder_frame, text="Warm-up ladder",
+                  font=font(SIZE_BASE, "bold")).pack(anchor="w")
+        ttk.Label(
+            self.ladder_frame,
+            text="Your own downshift, in your own words. Blank lines are "
+                 "dropped; the changes stick for future sessions.",
+            style="Muted.TLabel", wraplength=470, justify="left",
+        ).pack(anchor="w", pady=(2, 6))
+        self._step_entries = []
+        for index in range(max(3, len(self._steps))):
+            entry = ttk.Entry(self.ladder_frame)
+            entry.pack(fill="x", pady=1)
+            if index < len(self._steps):
+                entry.insert(0, self._steps[index])
+            self._step_entries.append(entry)
+        self.update_idletasks()
+        if self._fit_width:
+            self.geometry(f"{self._fit_width}x{self.winfo_reqheight()}")
+
     def collect(self):
         try:
             minutes = max(1, min(120, int(self.minutes_var.get())))
         except (tk.TclError, ValueError):
             minutes = 15
+        edited = None
+        if self._step_entries is not None:
+            edited = [e.get().strip() for e in self._step_entries if e.get().strip()]
         return {
             "minutes": minutes,
             "first_step": self.step_entry.get().strip(),
             "warmup_done": sum(1 for var in self.warmup_vars if var.get()),
+            "warmup_steps": edited,  # None = untouched
+            "show_warmup": bool(self.show_warmup_var.get()),
+            "popout": bool(self.popout_var.get()),
         }
 
 
@@ -471,13 +526,22 @@ class SessionEndDialog(ModalDialog):
     """
 
     def __init__(self, parent: tk.Misc, message: str, task_text: str, break_minutes: int = 5,
-                 first_step: str = ""):
+                 first_step: str = "", parked: int = 0):
         super().__init__(parent, "Session finished")
         self.resizable(False, False)
         ttk.Label(self.body, text=message, font=font(SIZE_LG, "bold"),
                   wraplength=380, justify="left").pack(anchor="w")
         ttk.Label(self.body, text=task_text, style="Muted.TLabel",
                   wraplength=380, justify="left").pack(anchor="w", pady=(6, 12))
+        if parked:
+            # The second half of Park-it's contract: the thought comes back.
+            # Session end is the transition moment the app already owns.
+            plural = "s" if parked != 1 else ""
+            ttk.Label(self.body,
+                      text=f"{parked} thought{plural} parked in the scratchpad "
+                           f"while you worked — safe there.",
+                      style="Muted.TLabel", wraplength=380,
+                      justify="left").pack(anchor="w", pady=(0, 12))
 
         # The hand-off. Right now you know what comes next; tomorrow you will
         # be looking at a first step you already did. Optional, and skipping
