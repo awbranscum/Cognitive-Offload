@@ -16,6 +16,10 @@ SORT_ORDERS: dict[str, str] = {
     "Completed": "completed",
 }
 DEFAULT_SORT = "priority"
+# The one set of valid sort keys. Config validation used to keep its own
+# literal copy; missing it when adding a sort order silently reset the
+# user's saved preference to "priority" on every launch.
+VALID_SORT_KEYS = frozenset(SORT_ORDERS.values())
 ALL_KINDS = "(any feel)"
 
 

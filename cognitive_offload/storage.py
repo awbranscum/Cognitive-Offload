@@ -149,7 +149,9 @@ class Config:
         self.matrix_db_path = _path_or(data.get("matrix_db_path"), DEFAULT_MATRIX_PATH)
         self.show_done = bool(data.get("show_done", True))
         order = data.get("sort_order")
-        self.sort_order = order if order in {"priority", "created", "alpha", "completed"} else "priority"
+        from .queries import DEFAULT_SORT, VALID_SORT_KEYS  # here to avoid an import cycle risk
+
+        self.sort_order = order if order in VALID_SORT_KEYS else DEFAULT_SORT
         self.autosave = bool(data.get("autosave", True))
         self.focus_minutes = _int_or(data.get("focus_minutes"), 15, 1, 120)
         self.break_minutes = _int_or(data.get("break_minutes"), 5, 1, 60)
@@ -293,8 +295,6 @@ class StateStore:
         self._backed_up = False
         self._suspect = False
 
-    def exists(self) -> bool:
-        return self.path.exists()
 
     @property
     def backup_path(self) -> Path:

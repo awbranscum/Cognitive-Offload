@@ -23,10 +23,10 @@ class TaskTests(unittest.TestCase):
 
     def test_marking_done_stamps_and_clears(self):
         task = Task(text="thing")
-        task.toggle_done()
+        task.set_done(True)
         self.assertTrue(task.done)
         self.assertTrue(task.completed_at)
-        task.toggle_done()
+        task.set_done(False)
         self.assertFalse(task.done)
         self.assertIsNone(task.completed_at)
 

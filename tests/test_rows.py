@@ -5,7 +5,7 @@ Imports tkinter but never opens a window, so these run headless.
 
 import unittest
 
-from cognitive_offload.app import _matrix_row, _task_row
+from cognitive_offload.rows import matrix_row as _matrix_row, task_row as _task_row
 from cognitive_offload.models import MatrixTask, Task, today_iso
 
 

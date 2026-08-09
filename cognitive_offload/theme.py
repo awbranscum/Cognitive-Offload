@@ -378,11 +378,6 @@ def style_text(widget: tk.Text, muted: bool = False) -> None:
     )
 
 
-def style_canvas(widget: tk.Canvas, on_card: bool = False) -> None:
-    t = _current
-    widget.configure(background=t.card if on_card else t.background,
-                     highlightthickness=0, borderwidth=0)
-
 
 def rounded_rect(canvas: tk.Canvas, x1, y1, x2, y2, radius, **kwargs):
     """A rounded rectangle as a smoothed polygon (Tk has no native one)."""

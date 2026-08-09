@@ -424,8 +424,6 @@ class RowList(ttk.Frame):
     def get(self, index: int) -> str:
         return self._rows[index].as_text() if 0 <= index < len(self._rows) else ""
 
-    def row(self, index: int) -> Row | None:
-        return self._rows[index] if 0 <= index < len(self._rows) else None
 
     def curselection(self) -> tuple:
         return tuple(sorted(i for i in self._selected if i < len(self._rows)))
@@ -464,8 +462,6 @@ class RowList(ttk.Frame):
         elif top + height > view_top + view_height:
             self.canvas.yview_moveto(max(0, (top + height - view_height) / total))
 
-    def focus_list(self) -> None:
-        self.canvas.focus_set()
 
     # -- scrolling -----------------------------------------------------
     def _on_inner_configure(self, _event=None) -> None:

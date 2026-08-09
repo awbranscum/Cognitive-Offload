@@ -235,6 +235,8 @@ cognitive_offload/
     sessions.py             the focus-session log and its day counts
     storage.py              config, atomic session file, matrix file store
     app.py                  the controller: commands, timer, autosave
+    rows.py                 how a task renders as a row (shared by both tabs)
+    undo.py                 the Ctrl+Z stack, UI-free
     main_tab.py             layout of the capture/tasks/scratchpad tab
     matrix_tab.py           layout of the matrix tab
     dialogs.py              modal dialogs (incl. the start picker + warm-up)

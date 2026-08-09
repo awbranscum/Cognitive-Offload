@@ -22,10 +22,9 @@ from .dialogs import (
 from .main_tab import build_main_tab
 from .matrix_tab import build_matrix_tab
 from .models import (
-    KIND_LABELS,
+    KIND_KEY_BY_LABEL,
     Task,
     humanize_date,
-    kind_label,
     now_stamp,
     parse_date_input,
 )
@@ -53,13 +52,13 @@ from .storage import (
     category_label,
     display_path,
 )
+from .rows import focus_caption, matrix_row, sort_label, task_row
 from .theme import apply_theme, style_text, tokens
-from .widgets import Badge, FocusWindow, Row
+from .undo import UndoStack
+from .widgets import FocusWindow
 
 ALL_TAGS = "(all)"
 AUTOSAVE_SECONDS = 30
-UNDO_LIMIT = 30
-
 # Said at the end of a session. Deliberately flat and factual: the point is
 # that the time is banked, not that you have been a good boy.
 DONE_MESSAGES = [
@@ -84,7 +83,7 @@ class CognitiveOffloadApp(tk.Tk):
         self.tasks: list[Task] = []
         self._visible: list[Task] = []
         self._matrix_cache: dict[str, list] = {key: [] for key in CATEGORY_KEYS}
-        self._undo_stack: list[tuple[str, list[Task]]] = []
+        self._undo_stack = UndoStack()
         self._dirty = False
         self._autosave_blocked = False
         self._autosave_complained = False
@@ -116,7 +115,7 @@ class CognitiveOffloadApp(tk.Tk):
         self.search_var = tk.StringVar()
         self.tag_filter_var = tk.StringVar(value=ALL_TAGS)
         self.kind_filter_var = tk.StringVar(value=ALL_KINDS)
-        self.sort_var = tk.StringVar(value=_sort_label(self.config_store.sort_order))
+        self.sort_var = tk.StringVar(value=sort_label(self.config_store.sort_order))
         self.show_done_var = tk.BooleanVar(value=self.config_store.show_done)
         self.status_var = tk.StringVar(value="Ready.")
         self.counts_var = tk.StringVar(value="")
@@ -295,7 +294,7 @@ class CognitiveOffloadApp(tk.Tk):
         # set_rows already restores the selection by row id, which is the same
         # matching this used to do by hand - once per selected row, each time
         # repainting every row.
-        self.task_list.set_rows([_task_row(t) for t in self._visible],
+        self.task_list.set_rows([task_row(t) for t in self._visible],
                                 keep_selection=keep_selection)
 
         open_count, done_count, flagged = counts(self.tasks)
@@ -394,7 +393,7 @@ class CognitiveOffloadApp(tk.Tk):
         label = self.kind_filter_var.get()
         if label in ("", ALL_KINDS):
             return None
-        return next((key for key, name in KIND_LABELS.items() if name == label and key), None)
+        return KIND_KEY_BY_LABEL.get(label) or None
 
     def clear_kind_filter(self) -> None:
         self.kind_filter_var.set(ALL_KINDS)
@@ -455,8 +454,7 @@ class CognitiveOffloadApp(tk.Tk):
     # undo
     # ------------------------------------------------------------------
     def push_undo(self, label: str) -> None:
-        self._undo_stack.append([label, [t.copy() for t in self.tasks], None])
-        del self._undo_stack[:-UNDO_LIMIT]
+        self._undo_stack.push(label, [t.copy() for t in self.tasks])
 
     def attach_undo(self, restore) -> None:
         """Give the pending undo entry a side effect to run as well.
@@ -465,23 +463,22 @@ class CognitiveOffloadApp(tk.Tk):
         restoring only the task list would leave the task in both places, or
         in neither.
         """
-        if self._undo_stack:
-            self._undo_stack[-1][2] = restore
+        self._undo_stack.attach(restore)
 
     def undo(self) -> None:
-        if not self._undo_stack:
+        entry = self._undo_stack.pop()
+        if entry is None:
             self.set_status("Nothing to undo.")
             return
-        label, snapshot, restore = self._undo_stack.pop()
-        self.tasks = snapshot
-        if restore is not None:
+        self.tasks = entry.snapshot
+        if entry.restore is not None:
             try:
-                restore()
+                entry.restore()
             except StorageError as exc:
                 messagebox.showerror("Undo failed", str(exc))
         self.refresh_tasks(keep_selection=False)
         self.mark_dirty()
-        self.set_status(f"Undid: {label}.")
+        self.set_status(f"Undid: {entry.label}.")
 
     # ------------------------------------------------------------------
     # capture / task commands
@@ -505,9 +502,6 @@ class CognitiveOffloadApp(tk.Tk):
         self.capture_entry.delete(0, tk.END)
         self._add_tasks([text], "Captured as task.")
 
-    def add_task_direct(self) -> None:
-        """Kept as an alias for quick capture: one obvious way to add a task."""
-        self.add_task_from_capture()
 
     def add_note_from_capture(self) -> None:
         text = self.capture_entry.get().strip()
@@ -741,7 +735,7 @@ class CognitiveOffloadApp(tk.Tk):
                 tasks = []
                 unreadable.append(f"{category_label(key)}: {exc}")
             self._matrix_cache[key] = tasks
-            self.matrix_lists[key].set_rows([_matrix_row(t) for t in tasks])
+            self.matrix_lists[key].set_rows([matrix_row(t) for t in tasks])
             self.matrix_count_labels[key].config(
                 text=f"{len(tasks)} task{'s' if len(tasks) != 1 else ''}"
             )
@@ -1112,7 +1106,7 @@ class CognitiveOffloadApp(tk.Tk):
             steps = result["warmup_done"]
             self.set_status(f"{steps} warm-up step{'s' if steps != 1 else ''} done. Starting.")
         self._focus_task_id = task.id if task else None
-        self.focus_task_var.set(_focus_caption(task, result["first_step"]))
+        self.focus_task_var.set(focus_caption(task, result["first_step"]))
         self.config_store.focus_minutes = result["minutes"]
         self.work_minutes.set(result["minutes"])
         # The rituals stick: ladder edits, ladder visibility, the pop-out
@@ -1786,6 +1780,19 @@ class CognitiveOffloadApp(tk.Tk):
         # writing it back over the previous session.
         self.state_store.set_path(Path(path))
         self._autosave_blocked = False
+        dropped = data.get("dropped", 0)
+        if dropped:
+            # Same consent rule as startup: an opened file with unreadable
+            # records must not be lossily rewritten by the next autosave.
+            self._autosave_blocked = True
+            plural = "s" if dropped != 1 else ""
+            messagebox.showwarning(
+                "Some records were unreadable",
+                f"{dropped} task record{plural} in {Path(path).name} couldn't "
+                f"be read and {'were' if dropped != 1 else 'was'} left out.\n\n"
+                "Auto-save is off so the file stays untouched for now. "
+                "Saving (Ctrl+S) accepts the loss.",
+            )
         self._apply_state(data)
         self.set_status(f"Working in {Path(path).name}")
 
@@ -1923,75 +1930,6 @@ def _batch_status(verb: str, done: int, total: int, noun: str) -> str:
     if done == total:
         return f"{verb} {done} {noun}{plural}"
     return f"{verb} {done} of {total} {noun}s — the rest failed"
-
-
-def _task_row(task: Task) -> Row:
-    """A task as a list row: title, first step underneath, badges alongside."""
-    badges = []
-    if task.done:
-        badges.append(Badge("done", "done"))
-    else:
-        if task.pinned:
-            badges.append(Badge("pinned", "pinned"))
-        if task.kind:
-            badges.append(Badge(kind_label(task.kind).split(" ")[0].lower(), task.kind))
-        if task.is_ready:
-            badges.append(Badge("ready", "ready"))
-        if task.scheduled_for:
-            badges.append(Badge(
-                "today" if task.is_due()
-                else f"booked {humanize_date(task.scheduled_for)}",
-                "today" if task.is_due() else "booked",
-            ))
-        if task.estimate_minutes:
-            badges.append(Badge(f"~{task.estimate_minutes} min", "estimate"))
-    badges.extend(Badge(f"#{tag}", "tag") for tag in task.tags)
-
-    if task.done and task.completed_at:
-        subtitle = f"done {task.completed_at}"
-    elif task.first_step:
-        subtitle = f"→ {task.first_step}"
-    elif task.description.strip():
-        subtitle = task.description.strip().splitlines()[0][:80]
-    else:
-        subtitle = ""
-
-    return Row(id=task.id, title=task.text, subtitle=subtitle, badges=badges,
-               done=task.done, flagged=bool(task.priority))
-
-
-def _matrix_row(task) -> Row:
-    badges = []
-    if task.kind:
-        badges.append(Badge(kind_label(task.kind).split(" ")[0].lower(), task.kind))
-    if task.is_ready:
-        badges.append(Badge("ready", "ready"))
-    if task.scheduled_for:
-        # An overdue booking is a nudge, not a telling-off.
-        badges.append(Badge(
-            "today" if task.is_due()
-            else f"booked {humanize_date(task.scheduled_for)}",
-            "today" if task.is_due() else "booked",
-        ))
-    if task.estimate_minutes:
-        badges.append(Badge(f"~{task.estimate_minutes} min", "estimate"))
-    subtitle = f"→ {task.first_step}" if task.first_step else (
-        task.content.strip().splitlines()[0][:80] if task.content.strip() else ""
-    )
-    return Row(id=task.id, title=task.title, subtitle=subtitle, badges=badges, marker="·")
-
-
-def _focus_caption(task: Task | None, first_step: str) -> str:
-    if task is None:
-        return f"Free focus — {first_step}" if first_step else "Free focus"
-    return f"{task.text}\n→ {first_step}" if first_step else task.text
-
-
-def _sort_label(order: str) -> str:
-    for label, key in SORT_ORDERS.items():
-        if key == order:
-            return label
-    return "Priority"
 
 
 def main() -> None:

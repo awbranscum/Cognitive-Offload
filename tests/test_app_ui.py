@@ -748,6 +748,34 @@ class AppSmokeTests(unittest.TestCase):
         self.app.load_state()
         self.assertIn("broken", self.app.tasks[0].text)
 
+    def test_typing_in_the_capture_box_never_triggers_task_shortcuts(self):
+        """The while-typing guard: capture must never fight your fingers."""
+        self.capture("precious task")
+        self.select(0)
+        self.app.capture_entry.focus_set()
+        # Keys that are destructive shortcuts when the list has focus.
+        for sequence in ("<Delete>", "<Control-p>", "<Control-t>", "<Control-Up>"):
+            self.app.capture_entry.event_generate(sequence)
+        self.app.update()
+        self.assertEqual([t.text for t in self.app.tasks], ["precious task"])
+        self.assertEqual(self.app.tasks[0].priority, 0)
+        self.assertFalse(self.app.tasks[0].pinned)
+
+    def test_opening_a_file_with_unreadable_records_warns_and_blocks(self):
+        import json as _json
+
+        outside = Path(self._tmp.name) / "damaged.json"
+        outside.write_text(
+            _json.dumps({"tasks": [{"text": "ok"}, "junk"], "scratchpad": ""}),
+            encoding="utf-8")
+        with mock.patch("cognitive_offload.app.filedialog.askopenfilename",
+                        return_value=str(outside)), \
+                mock.patch("cognitive_offload.app.messagebox.showwarning") as warn:
+            self.app.load_state_dialog()
+        warn.assert_called_once()
+        self.assertTrue(self.app._autosave_blocked)
+        self.assertEqual([t.text for t in self.app.tasks], ["ok"])
+
     def test_a_vanished_matrix_folder_is_named_not_silent(self):
         import shutil as _shutil
 

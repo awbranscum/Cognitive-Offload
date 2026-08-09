@@ -23,6 +23,9 @@ TASK_KINDS: dict[str, str] = {
 }
 KIND_UNSET = ""
 KIND_LABELS = {KIND_UNSET: "Unsorted", **TASK_KINDS}
+# The one label→key map. It existed three times (app, dialogs, main_tab);
+# adding a fifth kind meant touching files that never reference each other.
+KIND_KEY_BY_LABEL = {label: key for key, label in KIND_LABELS.items()}
 
 
 def now_stamp() -> str:
@@ -197,11 +200,6 @@ class Task:
         self.done = bool(done)
         self.completed_at = now_stamp() if self.done else None
 
-    def toggle_done(self) -> None:
-        self.set_done(not self.done)
-
-    def toggle_priority(self) -> None:
-        self.priority = 0 if self.priority else 1
 
     def add_tag(self, tag: str) -> bool:
         cleaned = tag.strip().lower()

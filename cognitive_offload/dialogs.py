@@ -10,7 +10,15 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from .models import KIND_UNSET, TASK_KINDS, Task, humanize_date, parse_date_input, today_iso
+from .models import (
+    KIND_KEY_BY_LABEL,
+    KIND_UNSET,
+    TASK_KINDS,
+    Task,
+    humanize_date,
+    parse_date_input,
+    today_iso,
+)
 from .queries import suggest_tasks
 from .storage import CATEGORIES, CATEGORY_KEYS
 from .theme import SIZE_BASE, SIZE_LG, SIZE_SM, font, style_text, tokens
@@ -209,7 +217,6 @@ class TaskEditorDialog(ModalDialog):
             )
             self.date_entry.focus_set()
             return None
-        label_to_key = {label: key for key, label in KIND_CHOICES}
         try:
             estimate = max(0, min(480, int(self.estimate_entry.get().strip() or 0)))
         except ValueError:
@@ -218,7 +225,7 @@ class TaskEditorDialog(ModalDialog):
             "title": title,
             "content": self.content_text.get("1.0", "end").strip(),
             "first_step": self.step_entry.get().strip(),
-            "kind": label_to_key.get(self.kind_var.get(), KIND_UNSET),
+            "kind": KIND_KEY_BY_LABEL.get(self.kind_var.get(), KIND_UNSET),
             "scheduled_for": scheduled,
             "estimate_minutes": estimate,
             "clear_snooze": bool(self.unsnooze_var and self.unsnooze_var.get()),

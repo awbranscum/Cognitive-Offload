@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from .models import DATE_FORMAT, TIMESTAMP_FORMAT, now_stamp, today_iso
+from .models import DATE_FORMAT, now_stamp, today_iso
 
 # Enough history for the momentum strip and a year of looking back, while
 # keeping the file small.
@@ -200,8 +200,3 @@ def _parse_day(value: str) -> date:
         return date.today()
 
 
-def parse_stamp(value: str) -> datetime | None:
-    try:
-        return datetime.strptime(value, TIMESTAMP_FORMAT)
-    except (TypeError, ValueError):
-        return None
