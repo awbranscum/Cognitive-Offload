@@ -165,8 +165,10 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
     inner = outer.inner
     inner.columnconfigure(0, weight=1)
     # The list flexes; when the window shrinks it is the chrome that should
-    # give way first, not the tasks.
-    inner.rowconfigure(4, weight=1, minsize=150)
+    # give way first, not the tasks. 130, not more: a running session adds
+    # two caption lines to the focus card, and the toolbar must still fit
+    # under the list at the default window height in exactly that state.
+    inner.rowconfigure(4, weight=1, minsize=130)
 
     heading = ttk.Frame(inner, style="Card.TFrame")
     heading.grid(row=0, column=0, sticky="ew")
@@ -184,7 +186,7 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
     # loose between the counts and the search box. app.next_frame is the
     # OUTER frame — refresh_next_up grid_remove()s it whole.
     app.next_frame = tk.Frame(inner, background=tokens().border, highlightthickness=0)
-    app.next_frame.grid(row=1, column=0, sticky="ew", pady=(10, 8))
+    app.next_frame.grid(row=1, column=0, sticky="ew", pady=(8, 6))
     next_inner = ttk.Frame(app.next_frame, style="Card.TFrame", padding=10)
     next_inner.pack(fill="both", expand=True, padx=1, pady=1)
     next_inner.columnconfigure(0, weight=1)
@@ -272,23 +274,24 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
     )
     app.task_list.grid(row=4, column=0, sticky="nsew")
 
+    # One row, not two: the second row was what clipped off the bottom of
+    # the card whenever a running session made the focus card taller.
     toolbar = ttk.Frame(inner, style="Card.TFrame")
     toolbar.grid(row=5, column=0, sticky="ew", pady=(8, 0))
-    for column in range(4):
-        toolbar.columnconfigure(column, weight=1, uniform="tools")
-    rows = [
-        [("Priority", app.toggle_selected_priority, "SmOutline.TButton"),
-         ("Tag", app.tag_selected, "SmOutline.TButton"),
-         ("Edit", app.edit_selected_details, "SmOutline.TButton"),
-         ("Pin to top", app.promote_selected, "SmGhost.TButton")],
-        [("To matrix", app.send_selected_to_matrix, "SmGhost.TButton"),
-         ("Delete", app.delete_selected, "SmDestructive.TButton"),
-         ("Clear completed", app.clear_completed, "SmGhost.TButton")],
+    buttons = [
+        ("Priority", app.toggle_selected_priority, "SmOutline.TButton"),
+        ("Tag", app.tag_selected, "SmOutline.TButton"),
+        ("Edit", app.edit_selected_details, "SmOutline.TButton"),
+        ("Pin", app.promote_selected, "SmGhost.TButton"),
+        ("To matrix", app.send_selected_to_matrix, "SmGhost.TButton"),
+        ("Delete", app.delete_selected, "SmDestructive.TButton"),
+        ("Clear done", app.clear_completed, "SmGhost.TButton"),
     ]
-    for row_index, row in enumerate(rows):
-        for column, (label, command, style) in enumerate(row):
-            ttk.Button(toolbar, text=label, style=style, command=command).grid(
-                row=row_index, column=column, sticky="ew", padx=(0, 4), pady=(0, 4))
+    for column, (label, command, style) in enumerate(buttons):
+        toolbar.columnconfigure(column, weight=1, uniform="tools")
+        ttk.Button(toolbar, text=label, style=style, command=command).grid(
+            row=0, column=column, sticky="ew",
+            padx=(0, 3) if column < len(buttons) - 1 else 0)
     app.task_toolbar = toolbar
 
 
