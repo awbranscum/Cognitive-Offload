@@ -10,6 +10,7 @@ and there is no streak to break. A quiet day is just a quiet day.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -97,10 +98,20 @@ class SessionLog:
         return self
 
     def _quarantine(self) -> None:
-        """Move an unreadable log aside so the next save cannot destroy it."""
-        spoiled = self.path.with_suffix(self.path.suffix + ".corrupt")
+        """Move an unreadable log aside so the next save cannot destroy it.
+
+        Timestamped: with a fixed name, the second corruption was left in
+        place and silently overwritten by the next finished session — the
+        exact loss the quarantine exists to prevent.
+        """
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        spoiled = self.path.with_name(f"{self.path.name}.corrupt-{stamp}")
+        counter = 0
+        while spoiled.exists():
+            counter += 1
+            spoiled = self.path.with_name(f"{self.path.name}.corrupt-{stamp}-{counter}")
         try:
-            if self.path.exists() and not spoiled.exists():
+            if self.path.exists():
                 self.path.replace(spoiled)
         except OSError:
             pass

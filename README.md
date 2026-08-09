@@ -207,7 +207,14 @@ Press `F1` in the app for the full keyboard-shortcut list.
 | Preferences | `~/.cognitive_offload_config.json` |
 
 A session file that is valid JSON but not a Cognitive Offload session is
-refused rather than loaded as empty — and left exactly where it is. An
+refused rather than loaded as empty — and left exactly where it is. The same
+goes for a file saved by a newer version of the app (loading it here would
+silently drop what the newer format added), and if individual task records
+can't be read, the app says how many, keeps auto-save off, and waits for an
+explicit Save as your consent before anything is overwritten. A matrix folder
+that disappears mid-run (unmounted drive, moved directory) is named in the
+status bar, and nothing is written until it returns — no silently forked
+fresh tree. An
 unreadable `data.json` is set aside under a timestamped `.corrupt-` name
 (never deleted, never overwritten) and the app offers to restore the `.bak`
 on the spot; declining starts fresh while the backup stays protected for the

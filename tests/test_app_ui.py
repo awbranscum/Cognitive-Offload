@@ -748,6 +748,22 @@ class AppSmokeTests(unittest.TestCase):
         self.app.load_state()
         self.assertIn("broken", self.app.tasks[0].text)
 
+    def test_a_vanished_matrix_folder_is_named_not_silent(self):
+        import shutil as _shutil
+
+        _shutil.rmtree(self.app.matrix.root)
+        self.app.refresh_matrix()
+        self.assertIn("missing", self.app.status_var.get())
+        with mock.patch("cognitive_offload.app.messagebox.showerror"):
+            before = sorted(Path(self.app.config_store.db_path).parent.rglob("*.task"))
+            self.app.matrix.root.parent  # no-op; keep flow obvious
+            try:
+                self.app.matrix.create("do_first", "into the void", "")
+            except Exception:
+                pass
+            after = sorted(Path(self.app.config_store.db_path).parent.rglob("*.task"))
+        self.assertEqual(before, after)  # nothing forked into a fresh tree
+
     # -- session rituals -----------------------------------------------
     def test_ladder_edits_and_popout_preference_persist(self):
         self.capture("ritual work")
@@ -1808,6 +1824,56 @@ class CorruptRecoveryTests(unittest.TestCase):
         spoiled = self._quarantined(db)
         self.assertEqual(len(spoiled), 1)
         self.assertEqual(spoiled[0].read_text(encoding="utf-8"), "{not json")
+
+    def test_unreadable_records_block_autosave_until_an_explicit_save(self):
+        from cognitive_offload.app import CognitiveOffloadApp
+        from cognitive_offload.storage import Config
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        config = Config(root / "config.json")
+        config.db_path = root / "db"
+        config.matrix_db_path = root / "matrix"
+        (root / "db").mkdir(parents=True)
+        (root / "db" / "data.json").write_text(
+            '{"tasks": [{"text": "good"}, "junk"], "scratchpad": ""}',
+            encoding="utf-8")
+        with mock.patch("cognitive_offload.app.messagebox.showwarning") as warn:
+            app = CognitiveOffloadApp(config=config)
+        app.withdraw()
+        self.addCleanup(app.destroy)
+        warn.assert_called_once()
+        self.assertIn("1 task record", warn.call_args.args[1])
+        self.assertEqual([t.text for t in app.tasks], ["good"])
+        self.assertTrue(app._autosave_blocked)
+        # Ctrl+S is the informed consent; autosave resumes after it.
+        self.assertTrue(app.save_state(silent=True))
+        self.assertFalse(app._autosave_blocked)
+
+    def test_a_future_version_session_is_refused_in_place(self):
+        from cognitive_offload.app import CognitiveOffloadApp
+        from cognitive_offload.storage import Config
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        config = Config(root / "config.json")
+        config.db_path = root / "db"
+        config.matrix_db_path = root / "matrix"
+        (root / "db").mkdir(parents=True)
+        original = '{"version": 99, "tasks": [{"text": "future"}], "scratchpad": ""}'
+        (root / "db" / "data.json").write_text(original, encoding="utf-8")
+        with mock.patch("cognitive_offload.app.messagebox.showerror"), \
+                mock.patch("cognitive_offload.app.messagebox.askyesno"):
+            app = CognitiveOffloadApp(config=config)
+        app.withdraw()
+        self.addCleanup(app.destroy)
+        self.assertTrue(app._autosave_blocked)
+        self.assertEqual(app.tasks, [])
+        self.assertEqual((root / "db" / "data.json").read_text(encoding="utf-8"),
+                         original)
+        self.assertEqual(sorted((root / "db").glob("data.json.corrupt-*")), [])
 
     def test_a_foreign_file_is_left_exactly_where_it_is(self):
         from cognitive_offload.app import CognitiveOffloadApp

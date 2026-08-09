@@ -725,6 +725,14 @@ class CognitiveOffloadApp(tk.Tk):
     # matrix
     # ------------------------------------------------------------------
     def refresh_matrix(self) -> None:
+        if not self.matrix.root.exists():
+            # Four silently empty quadrants read as catastrophic data loss;
+            # a moved or unmounted folder deserves its actual name.
+            self.hold_status(
+                f"Matrix folder is missing: {display_path(self.matrix.root)} "
+                "(moved or unmounted?). Showing empty quadrants; nothing "
+                "will be written until it is back."
+            )
         unreadable = []
         for index, key in enumerate(CATEGORY_KEYS):
             try:
@@ -1100,16 +1108,6 @@ class CognitiveOffloadApp(tk.Tk):
             self.refresh_tasks()
             self.mark_dirty()
 
-        # The rituals stick: ladder edits, ladder visibility and the pop-out
-        # preference all persist for future sessions.
-        if result.get("warmup_steps") is not None:
-            self.config_store.warmup_steps = result["warmup_steps"]
-        if "show_warmup" in result:
-            self.config_store.show_warmup = bool(result["show_warmup"])
-        if "popout" in result:
-            self.config_store.popout_on_start = bool(result["popout"])
-        self._save_config()
-
         if result.get("warmup_done"):
             steps = result["warmup_done"]
             self.set_status(f"{steps} warm-up step{'s' if steps != 1 else ''} done. Starting.")
@@ -1117,6 +1115,16 @@ class CognitiveOffloadApp(tk.Tk):
         self.focus_task_var.set(_focus_caption(task, result["first_step"]))
         self.config_store.focus_minutes = result["minutes"]
         self.work_minutes.set(result["minutes"])
+        # The rituals stick: ladder edits, ladder visibility, the pop-out
+        # preference and the session length all persist — after the minutes
+        # are in, so the saved default doesn't lag a session behind.
+        if result.get("warmup_steps") is not None:
+            self.config_store.warmup_steps = result["warmup_steps"]
+        if "show_warmup" in result:
+            self.config_store.show_warmup = bool(result["show_warmup"])
+        if "popout" in result:
+            self.config_store.popout_on_start = bool(result["popout"])
+        self._save_config()
         self.start_timer(minutes=result["minutes"], mode="focus")
         if result.get("popout"):
             # Time blindness: the person least likely to notice the timer is
@@ -1635,6 +1643,22 @@ class CognitiveOffloadApp(tk.Tk):
             if data is None:
                 return
         self._autosave_blocked = False
+        dropped = data.get("dropped", 0)
+        if dropped:
+            # The amputation must never become permanent silently: autosave
+            # stays off until an explicit Save — the user's informed consent
+            # to the loss — or a re-load that reads clean.
+            self._autosave_blocked = True
+            plural = "s" if dropped != 1 else ""
+            messagebox.showwarning(
+                "Some records were unreadable",
+                f"{dropped} task record{plural} in "
+                f"{self.state_store.path.name} couldn't be read and "
+                f"{'were' if dropped != 1 else 'was'} left out.\n\n"
+                "Auto-save is off so the file stays untouched for now. "
+                "Saving (Ctrl+S) accepts the loss; Export a copy first if "
+                "you want to look at the original.",
+            )
         self._apply_state(data)
         if not initial:
             self.set_status(f"Loaded {self.state_store.path}")
@@ -1733,6 +1757,9 @@ class CognitiveOffloadApp(tk.Tk):
             return False
         self._dirty = False
         self._autosave_complained = False  # a working save clears the warning
+        # An explicit, successful save is informed consent: whatever the
+        # block was protecting has now been overwritten deliberately.
+        self._autosave_blocked = False
         if not silent:
             self.set_status(f"Saved to {self.state_store.path}")
         return True

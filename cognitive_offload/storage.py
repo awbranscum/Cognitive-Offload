@@ -274,6 +274,12 @@ class NotASessionError(StorageError):
     renaming a file that belongs to something else is worse than refusing it."""
 
 
+class NewerSessionError(NotASessionError):
+    """Saved by a newer version of the app. Loading it would silently drop
+    whatever the newer format added — and the next autosave would make the
+    amputation permanent. Refusing is the only honest answer."""
+
+
 class StateStore:
     """Reads/writes the tasks + scratchpad document."""
 
@@ -314,6 +320,14 @@ class StateStore:
             raise NotASessionError(
                 f"{self.path} is JSON, but not a Cognitive Offload session "
                 f"(no tasks, notes or scratchpad in it)"
+            )
+        version = data.get("version")
+        if isinstance(version, int) and version > STATE_VERSION:
+            raise NewerSessionError(
+                f"{self.path} was saved by a newer version of Cognitive "
+                f"Offload (format {version}; this one reads up to "
+                f"{STATE_VERSION}). Open it with the newer version instead — "
+                f"loading it here would drop whatever the newer format added."
             )
         self._suspect = False
         return self.deserialize(data)
@@ -356,10 +370,14 @@ class StateStore:
     @staticmethod
     def deserialize(data: dict) -> dict:
         tasks: list[Task] = []
+        dropped = 0
         for record in data.get("tasks") or []:
             try:
                 task = Task.from_dict(record)
             except (ValueError, TypeError):
+                # Counted, not silent: the caller decides whether losing
+                # these on the next save needs the user's consent.
+                dropped += 1
                 continue
             if task.text:
                 tasks.append(task)
@@ -384,6 +402,7 @@ class StateStore:
             # Short by default: 15 minutes is the length you can agree to.
             "timer_minutes": _int_or(data.get("timer_minutes"), 15, 1, 240),
             "completed_log": finished[-COMPLETED_LOG_LIMIT:],
+            "dropped": dropped,
         }
 
     @staticmethod
@@ -496,6 +515,13 @@ class MatrixStore:
         return task
 
     def _new_path(self, category: str, task: MatrixTask) -> Path:
+        if not self.root.exists():
+            # Recreating the tree under a vanished root (unmounted drive,
+            # moved folder) forks the data: new files land in a fresh empty
+            # tree while the real one sits somewhere else.
+            raise StorageError(
+                f"The matrix folder is missing: {self.root} (moved or unmounted?)"
+            )
         folder = self.path_for(category)
         folder.mkdir(parents=True, exist_ok=True)
         return folder / f"{slugify(task.title)}-{task.id[:8]}.task"

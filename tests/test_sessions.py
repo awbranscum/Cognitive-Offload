@@ -120,15 +120,27 @@ class SessionLogTests(unittest.TestCase):
         self.assertEqual(self.log.total_minutes(days=7), 15)
         self.assertEqual(self.log.total_minutes(days=14), 75)
 
+    def test_a_second_corruption_gets_its_own_quarantine_file(self):
+        self.path.write_bytes(b"\xff garbage one")
+        self.log.load()
+        self.log.record(minutes=5)  # writes a fresh log
+        self.path.write_bytes(b"\xff garbage two")
+        SessionLog(self.path).load()
+        spoiled = sorted(self.path.parent.glob("sessions.json.corrupt-*"))
+        self.assertEqual(len(spoiled), 2)
+        contents = {p.read_bytes() for p in spoiled}
+        self.assertIn(b"\xff garbage one", contents)
+        self.assertIn(b"\xff garbage two", contents)
+
     def test_a_damaged_log_is_parked_not_overwritten(self):
         self.path.write_text("{{{ not json", encoding="utf-8")
         log = SessionLog(self.path).load()
         self.assertEqual(log.sessions, [])
-        spoiled = self.path.with_suffix(self.path.suffix + ".corrupt")
-        self.assertTrue(spoiled.exists())
-        self.assertIn("not json", spoiled.read_text(encoding="utf-8"))
+        spoiled = sorted(self.path.parent.glob("sessions.json.corrupt-*"))
+        self.assertEqual(len(spoiled), 1)
+        self.assertIn("not json", spoiled[0].read_text(encoding="utf-8"))
         log.record(minutes=15)  # tonight's first session must not destroy it
-        self.assertIn("not json", spoiled.read_text(encoding="utf-8"))
+        self.assertIn("not json", spoiled[0].read_text(encoding="utf-8"))
 
     def test_set_path_starts_a_fresh_log(self):
         self.log.record(minutes=15)

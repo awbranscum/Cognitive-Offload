@@ -214,6 +214,32 @@ class NotASessionFileTests(TempDirTest):
         with self.assertRaises(StorageError):
             StateStore(path).load()
 
+    def test_a_future_version_file_is_refused_and_untouched(self):
+        from cognitive_offload.storage import NewerSessionError
+
+        path = self.root / "data.json"
+        original = json.dumps({"version": 99, "tasks": [{"text": "from the future"}],
+                               "scratchpad": ""})
+        path.write_text(original, encoding="utf-8")
+        with self.assertRaises(NewerSessionError):
+            StateStore(path).load()
+        self.assertEqual(path.read_text(encoding="utf-8"), original)
+
+    def test_unreadable_records_are_counted_not_silent(self):
+        path = self.root / "data.json"
+        path.write_text(json.dumps({
+            "tasks": [{"text": "good"}, "junk", 42, {"text": "also good"}],
+            "scratchpad": "",
+        }), encoding="utf-8")
+        loaded = StateStore(path).load()
+        self.assertEqual([t.text for t in loaded["tasks"]], ["good", "also good"])
+        self.assertEqual(loaded["dropped"], 2)
+
+    def test_a_clean_file_reports_nothing_dropped(self):
+        store = StateStore(self.root / "data.json")
+        store.save([Task(text="fine")], "", 15)
+        self.assertEqual(store.load()["dropped"], 0)
+
     def test_a_foreign_file_is_refused_as_not_ours_never_corrupt(self):
         # NotASessionError is the "leave it alone" signal: the file is fine,
         # so the recovery flow must not quarantine or rename it.
@@ -316,6 +342,24 @@ class RecoveryTests(TempDirTest):
         store.load()
         store.save([Task(text="fine again")], "", 15)
         self.assertTrue(store.backup_path.exists())
+
+
+class VanishedMatrixFolderTests(TempDirTest):
+    def test_writing_into_a_missing_root_refuses_instead_of_forking(self):
+        import shutil as _shutil
+
+        store = MatrixStore(self.root / "matrix")
+        store.ensure()
+        store.create("do_first", "before the vanish", "")
+        _shutil.rmtree(self.root / "matrix")
+        with self.assertRaises(StorageError):
+            store.create("do_first", "after the vanish", "")
+        # No fresh tree was silently forked.
+        self.assertFalse((self.root / "matrix").exists())
+
+    def test_listing_a_missing_root_is_calmly_empty(self):
+        store = MatrixStore(self.root / "never-created")
+        self.assertEqual(store.list("do_first"), [])
 
 
 class MatrixUpdateRollbackTests(TempDirTest):
