@@ -304,7 +304,16 @@ class CognitiveOffloadApp(tk.Tk):
         finished = len(completed_titles_today(self.tasks, self.completed_log))
         # Only ever shown when there is something to show: "0 done today" is
         # the kind of scoreboard this app is meant not to keep.
-        self.today_var.set(f"{finished} done today →" if finished else "")
+        # Hide the whole pill, not just its text: the tinted DoneToday style
+        # paints its padded background even for an empty label, and an empty
+        # green box is a 0-done scoreboard in pill form.
+        if finished:
+            self.today_var.set(f"{finished} done today →")
+            if not self.today_label.winfo_manager():
+                self.today_label.pack(side="right", padx=(0, 12))
+        else:
+            self.today_var.set("")
+            self.today_label.pack_forget()
         self.refresh_due()
 
     def refresh_next_up(self) -> None:
@@ -1522,11 +1531,13 @@ class CognitiveOffloadApp(tk.Tk):
             self.start_timer()
 
     def start_timer(self, minutes: int | None = None, mode: str = "focus") -> None:
-        if minutes is not None and mode == "focus":
-            self._parked_this_session = []
         if not self.timer.start(time.monotonic(), minutes=minutes, mode=mode,
                                 fallback_minutes=self._minutes()):
             return
+        if minutes is not None and mode == "focus":
+            # Only after the machine accepted the start: a refused start
+            # must not clear the running block's parked thoughts.
+            self._parked_this_session = []
         self.timer_button.config(text="Pause")
         if self.timer.mode == "break":
             self.focus_task_var.set("Break — step away from the screen.")
@@ -1611,6 +1622,10 @@ class CognitiveOffloadApp(tk.Tk):
             ends = time.localtime(time.time() + self._timer_remaining)
             line = (("break ends " if self._timer_mode == "break" else "ends ")
                     + time.strftime("%H:%M", ends))
+            if time.localtime()[:3] != ends[:3]:
+                # A clock time you cannot place on a day is exactly the
+                # ambiguity this line exists to remove.
+                line += " tomorrow"
             if self._closing_in():
                 # A soft landing: the transition costs less when it is
                 # announced, and a chosen stopping point is what makes the

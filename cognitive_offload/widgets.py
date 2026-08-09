@@ -145,6 +145,7 @@ class RowList(ttk.Frame):
         self._rows: list[Row] = []
         self._pool: list[dict] = []
         self._selected: set[int] = set()
+        self._hovered: int | None = None
         self._anchor: int | None = None
         self._row_tag = f"rowlist{id(self)}"
 
@@ -353,7 +354,16 @@ class RowList(ttk.Frame):
 
     def _paint_selection(self) -> None:
         for index in range(len(self._rows)):
-            self._paint_row(index, self._selected_bg() if index in self._selected else self._bg())
+            if index in self._selected:
+                colour = self._selected_bg()
+            elif index == self._hovered:
+                # The pointer hasn't moved just because the list repainted:
+                # without this, every keystroke of a search dropped the
+                # hover highlight.
+                colour = self._hover_colour()
+            else:
+                colour = self._bg()
+            self._paint_row(index, colour)
 
     def _paint_row(self, index: int, colour: str) -> None:
         frame, widgets = self._row_widgets(index)
@@ -365,12 +375,20 @@ class RowList(ttk.Frame):
             except tk.TclError:
                 pass
 
-    def _hover(self, index: int, entering: bool) -> None:
-        if index in self._selected or index >= len(self._rows):
-            return
-        hover = tokens().hover if self._surface is None else _mix(
+    def _hover_colour(self) -> str:
+        return tokens().hover if self._surface is None else _mix(
             self._surface, tokens().foreground, 0.06)
-        self._paint_row(index, hover if entering else self._bg())
+
+    def _hover(self, index: int, entering: bool) -> None:
+        if index >= len(self._rows):
+            return
+        if entering:
+            self._hovered = index
+        elif self._hovered == index:
+            self._hovered = None
+        if index in self._selected:
+            return
+        self._paint_row(index, self._hover_colour() if entering else self._bg())
 
     def _click(self, index: int, _event=None, toggle: bool = False, extend: bool = False):
         self.canvas.focus_set()

@@ -748,6 +748,47 @@ class AppSmokeTests(unittest.TestCase):
         self.app.load_state()
         self.assertIn("broken", self.app.tasks[0].text)
 
+    def test_the_done_today_pill_is_gone_entirely_when_zero(self):
+        """An empty tinted pill is a 0-done scoreboard in disguise."""
+        self.capture("open thing")
+        self.assertEqual(self.app.today_label.winfo_manager(), "")
+        self.select(0)
+        self.app.toggle_selected_done()
+        self.assertEqual(self.app.today_label.winfo_manager(), "pack")
+        self.assertIn("1 done today", self.app.today_var.get())
+        self.app.undo()
+        self.assertEqual(self.app.today_label.winfo_manager(), "")
+
+    def test_the_ends_line_says_tomorrow_across_midnight(self):
+        self.app.start_timer(minutes=15)
+        # Pretend the block ends 26 hours out so the date rolls over.
+        with mock.patch.object(self.app.timer, "remaining", 26 * 3600):
+            self.app._update_timer_label()
+        self.assertIn("tomorrow", self.app.finish_var.get())
+        self.app._update_timer_label()  # back to a same-day block
+        self.assertNotIn("tomorrow", self.app.finish_var.get())
+        self.app.pause_timer()
+
+    def test_a_refused_start_keeps_the_running_blocks_parked_thoughts(self):
+        self.app.start_timer(minutes=15)
+        self.app.park_thought("mid-block thought")
+        self.app.start_timer(minutes=20)  # refused: already running
+        self.assertEqual(self.app._parked_this_session, ["mid-block thought"])
+        self.app.pause_timer()
+
+    def test_hover_survives_a_re_render(self):
+        self.capture("aaa")
+        self.capture("bbb")
+        listing = self.app.task_list
+        listing._hover(0, True)
+        hover_colour = listing._hover_colour()
+        self.app.refresh_tasks()
+        cell = listing._pool[0]
+        self.assertEqual(str(cell["frame"].cget("background")), hover_colour)
+        listing._hover(0, False)
+        self.app.refresh_tasks()
+        self.assertNotEqual(str(cell["frame"].cget("background")), hover_colour)
+
     def test_typing_in_the_capture_box_never_triggers_task_shortcuts(self):
         """The while-typing guard: capture must never fight your fingers."""
         self.capture("precious task")
