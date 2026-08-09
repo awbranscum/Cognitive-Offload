@@ -146,6 +146,22 @@ class DialogCollectTests(unittest.TestCase):
         self.assertFalse(dialog.collect()["clear_snooze"])
         dialog.destroy()
 
+    # -- the start picker ----------------------------------------------
+    def test_the_picker_follows_its_content_height(self):
+        from cognitive_offload.dialogs import StartHereDialog
+        from cognitive_offload.models import Task
+
+        tasks = [Task(text=f"t{n}", kind="admin") for n in range(5)]
+        dialog = StartHereDialog(self.root, tasks)
+        dialog.update_idletasks()
+        with_rows = dialog.winfo_reqheight()
+        dialog.kind_var.set("creative")  # no creative tasks: empty-state line
+        dialog._refresh()
+        dialog.update_idletasks()
+        self.assertLess(dialog.winfo_reqheight(), with_rows)
+        self.assertIn(f"x{dialog.winfo_reqheight()}", dialog.geometry())
+        dialog.destroy()
+
     # -- the start dialog's rituals ------------------------------------
     def test_untouched_ladder_collects_as_none(self):
         from cognitive_offload.dialogs import StartFocusDialog

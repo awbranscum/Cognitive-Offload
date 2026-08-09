@@ -245,7 +245,9 @@ class StartHereDialog(ModalDialog):
     """
 
     def __init__(self, parent: tk.Misc, tasks: list[Task], warm: set | None = None):
-        super().__init__(parent, "Where do I start?", size=(560, 460))
+        # Height to content: three suggestions or an empty-state line, never
+        # a fixed 460px with a dead band above the buttons.
+        super().__init__(parent, "Where do I start?", size=(560, None))
         self._tasks = tasks
         self._warm = warm
         self._offset = 0
@@ -304,19 +306,23 @@ class StartHereDialog(ModalDialog):
                 justify="left",
             ).pack(anchor="w", pady=6)
             self.choice_var.set("")
-            return
-
-        self.choice_var.set(self._suggestions[0].id)
-        for task in self._suggestions:
-            frame = ttk.Frame(self.choices)
-            frame.pack(fill="x", pady=4)
-            ttk.Radiobutton(
-                frame, text=task.text, value=task.id, variable=self.choice_var
-            ).pack(anchor="w")
-            detail = task.first_step or "No first step yet — you'll be asked for one."
-            ttk.Label(
-                frame, text=f"    → {detail}", style="Muted.TLabel", wraplength=490, justify="left"
-            ).pack(anchor="w")
+        else:
+            self.choice_var.set(self._suggestions[0].id)
+            for task in self._suggestions:
+                frame = ttk.Frame(self.choices)
+                frame.pack(fill="x", pady=4)
+                ttk.Radiobutton(
+                    frame, text=task.text, value=task.id, variable=self.choice_var
+                ).pack(anchor="w")
+                detail = task.first_step or "No first step yet — you'll be asked for one."
+                ttk.Label(
+                    frame, text=f"    → {detail}", style="Muted.TLabel",
+                    wraplength=490, justify="left",
+                ).pack(anchor="w")
+        # The choice list's length just changed; follow it.
+        self.update_idletasks()
+        if self._fit_width:
+            self.geometry(f"{self._fit_width}x{self.winfo_reqheight()}")
 
     def _cycle(self) -> None:
         self._offset += 3

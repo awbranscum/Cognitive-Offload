@@ -1,6 +1,6 @@
 """Cognitive Offload - a small second-brain desktop app (tasks, scratchpad, Eisenhower matrix)."""
 
-__version__ = "3.18.1"
+__version__ = "3.18.2"
 APP_TITLE = "Cognitive Offload"
 
 __all__ = ["__version__", "APP_TITLE"]
