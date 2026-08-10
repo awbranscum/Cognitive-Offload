@@ -5,6 +5,16 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.19.9 — The layout survives HiDPI screens
+- Window sizes, the minimum-size floor, dialog widths and text
+  wraplengths now scale with the screen's DPI. They were 96-DPI
+  physical constants while fonts scaled with the display — on a 2x
+  laptop panel the app opened at half its intended size with the text
+  twice as large: truncated buttons, colliding headings, and the
+  toolbar a full card-height below its card. One helper (theme.px)
+  carries every measured 96-DPI number to the actual screen, and
+  returns them unchanged at standard DPI.
+
 ## 3.19.8 — The pop-out keeps its promises on screen
 - The floating focus window grows to fit a long, wrapping task title
   instead of pushing Pause and the Park row off its bottom edge. It

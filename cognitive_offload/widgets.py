@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from tkinter import ttk
 
 from . import theme
-from .theme import RADIUS_PILL, font, rounded_rect, tokens
+from .theme import RADIUS_PILL, font, px, rounded_rect, tokens
 
 
 # Badge texts are a small closed set ("admin", "ready", "#work", dates), so
@@ -601,9 +601,9 @@ class FocusWindow(tk.Toplevel):
         self.time_var = tk.StringVar(value="00:00")
 
         ttk.Label(body, textvariable=self.task_var, style="Lead.TLabel",
-                  wraplength=280, justify="center", anchor="center").pack(fill="x")
+                  wraplength=px(self, 280), justify="center", anchor="center").pack(fill="x")
         ttk.Label(body, textvariable=self.step_var, style="CardMuted.TLabel",
-                  wraplength=280, justify="center", anchor="center").pack(fill="x", pady=(2, 6))
+                  wraplength=px(self, 280), justify="center", anchor="center").pack(fill="x", pady=(2, 6))
         self.time_label = ttk.Label(body, textvariable=self.time_var,
                                     style="Timer.TLabel", anchor="center")
         self.time_label.pack(fill="x")
@@ -635,11 +635,11 @@ class FocusWindow(tk.Toplevel):
                    command=self._park).grid(row=0, column=1)
         self.park_var = tk.StringVar(value=PARK_HINT)
         ttk.Label(body, textvariable=self.park_var, style="CardMuted.TLabel",
-                  anchor="center", wraplength=280, justify="center").pack(fill="x", pady=(4, 0))
+                  anchor="center", wraplength=px(self, 280), justify="center").pack(fill="x", pady=(4, 0))
 
         self.pause_button.focus_set()
         self.update_idletasks()
-        self.geometry(f"320x{max(210, self.winfo_reqheight())}")
+        self.geometry(f"{px(self, 320)}x{max(px(self, 210), self.winfo_reqheight())}")
 
     def restyle(self) -> None:
         """Follow a theme switch instead of being closed mid-session."""
@@ -673,9 +673,9 @@ class FocusWindow(tk.Toplevel):
         # The guard makes this every-tick call a no-op unless the text
         # actually changed the needed height.
         self.update_idletasks()
-        wanted = max(210, self.winfo_reqheight())
+        wanted = max(px(self, 210), self.winfo_reqheight())
         if wanted != self.winfo_height():
-            self.geometry(f"320x{wanted}")
+            self.geometry(f"{px(self, 320)}x{wanted}")
 
     def _pause(self):
         if self._on_pause:

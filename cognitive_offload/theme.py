@@ -149,6 +149,20 @@ _family: str = "Helvetica"
 SIZE_XS, SIZE_SM, SIZE_BASE, SIZE_LG, SIZE_XL, SIZE_2XL, SIZE_TIMER = 8, 9, 10, 12, 15, 19, 34
 
 
+def px(widget: tk.Misc, n: int) -> int:
+    """``n`` design pixels (laid out against a 96-DPI screen) converted to
+    this screen's pixels.
+
+    Fonts are sized in points, so Tk scales them with the display's DPI —
+    but every wraplength, window floor and fixed width in this app was a
+    96-DPI physical constant, which on a 2x laptop panel left windows half
+    their intended size with the text twice as large. At 96 DPI this
+    returns ``n`` unchanged; scaling below 96 DPI is clamped so budgets
+    never shrink beneath their measured minimums.
+    """
+    return round(n * max(1.0, widget.winfo_fpixels("1i") / 96))
+
+
 def tokens() -> Tokens:
     return _current
 

@@ -14,7 +14,7 @@ from tkinter import ttk
 from . import theme
 from .models import KIND_LABELS
 from .queries import ALL_KINDS, SORT_ORDERS
-from .theme import font, style_text, tokens
+from .theme import font, px, style_text, tokens
 from .widgets import MomentumStrip, RowList
 
 
@@ -42,7 +42,7 @@ def card(parent, title: str = "", description: str = "") -> tk.Frame:
         ttk.Label(inner, text=title, style="CardTitle.TLabel").pack(anchor="w")
     if description:
         ttk.Label(inner, text=description, style="CardMuted.TLabel",
-                  wraplength=440, justify="left").pack(anchor="w", pady=(1, 0))
+                  wraplength=px(inner, 440), justify="left").pack(anchor="w", pady=(1, 0))
     return outer
 
 
@@ -119,7 +119,7 @@ def _build_focus_card(app, top: ttk.Frame) -> None:
 
     app.focus_task_label = ttk.Label(
         body, textvariable=app.focus_task_var, style="CardMuted.TLabel",
-        anchor="center", justify="center", wraplength=300,
+        anchor="center", justify="center", wraplength=px(body, 300),
     )
     app.focus_task_label.pack(fill="x", pady=(6, 0))
 

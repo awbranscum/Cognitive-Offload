@@ -835,7 +835,20 @@ class AppSmokeTests(unittest.TestCase):
         self.app.pause_timer()
 
     def test_the_window_floor_is_a_size_the_app_works_at(self):
-        self.assertEqual((self.app.wm_minsize()), (1160, 790))
+        from cognitive_offload.theme import px
+        self.assertEqual(self.app.wm_minsize(),
+                         (px(self.app, 1160), px(self.app, 790)))
+
+    def test_px_carries_design_pixels_to_the_screens_dpi(self):
+        from cognitive_offload.theme import px
+        screen = mock.Mock()
+        screen.winfo_fpixels.return_value = 96.0
+        self.assertEqual(px(screen, 320), 320)   # identity at design DPI
+        screen.winfo_fpixels.return_value = 192.0
+        self.assertEqual(px(screen, 320), 640)   # doubles on a 2x panel
+        self.assertEqual(px(screen, 1160), 2320)
+        screen.winfo_fpixels.return_value = 72.0
+        self.assertEqual(px(screen, 320), 320)   # never shrinks below design
 
     def test_the_floor_state_still_shows_tasks_and_search(self):
         """At the app's own minimum, with a session running, the list and

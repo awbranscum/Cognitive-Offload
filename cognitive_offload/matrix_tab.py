@@ -6,7 +6,7 @@ from tkinter import ttk
 
 from .main_tab import card
 from .storage import CATEGORIES, CATEGORY_KEYS
-from .theme import tokens
+from .theme import px, tokens
 from .widgets import RowList
 
 # What each quadrant is actually for. Schedule gets the longest note on
@@ -84,7 +84,7 @@ def _build_quadrant(app, key: str) -> None:
     app.matrix_count_labels[key] = count
 
     ttk.Label(inner, text=QUADRANT_ADVICE[key], style="CardMuted.TLabel",
-              wraplength=800, justify="left").grid(
+              wraplength=px(inner, 800), justify="left").grid(
         row=1, column=0, columnspan=2, sticky="w", pady=(4, 12))
 
     buttons = ttk.Frame(inner, style="Card.TFrame")

@@ -21,7 +21,7 @@ from .models import (
 )
 from .queries import suggest_tasks
 from .storage import CATEGORIES, CATEGORY_KEYS
-from .theme import SIZE_BASE, SIZE_LG, SIZE_SM, font, style_text, tokens
+from .theme import SIZE_BASE, SIZE_LG, SIZE_SM, font, px, style_text, tokens
 
 
 class ModalDialog(tk.Toplevel):
@@ -33,6 +33,10 @@ class ModalDialog(tk.Toplevel):
         self.configure(background=tokens().background)
         self.transient(parent.winfo_toplevel())
         self._fit_width = None
+        if size:
+            # Sizes are designed against 96 DPI; px() carries them to
+            # HiDPI screens where the fonts inside have already grown.
+            size = (px(self, size[0]), size[1] if size[1] is None else px(self, size[1]))
         if size and size[1] is None:
             # Width pinned, height to content (resolved in show(), once the
             # subclass has built its body): a fixed height is always wrong
@@ -135,7 +139,7 @@ class TaskEditorDialog(ModalDialog):
             text="The two-minute physical action that starts it — \"open the doc\", "
                  "\"find Dana's email\". This is the part that gets you moving.",
             style="Muted.TLabel",
-            wraplength=470,
+            wraplength=px(self, 470),
             justify="left",
         ).pack(anchor="w", pady=(2, 10))
 
@@ -169,7 +173,7 @@ class TaskEditorDialog(ModalDialog):
             text="Dates can be \"today\", \"tomorrow\", a weekday like \"fri\", "
                  "or 2026-08-01. The minutes are a guess, and a guess is "
                  "plenty — nothing holds you to it.",
-            style="Muted.TLabel", wraplength=470, justify="left",
+            style="Muted.TLabel", wraplength=px(self, 470), justify="left",
         ).pack(anchor="w", pady=(2, 10))
 
         # The one exit from "Not today" besides waiting: visible only while
@@ -261,7 +265,7 @@ class StartHereDialog(ModalDialog):
             text="Pick the shape of the work, not the most important thing. "
                  "Starting anything beats picking perfectly.",
             style="Muted.TLabel",
-            wraplength=510,
+            wraplength=px(self, 510),
             justify="left",
         ).pack(anchor="w", pady=(2, 10))
 
@@ -302,7 +306,7 @@ class StartHereDialog(ModalDialog):
                 text="Nothing open in that shape. Try 'Anything', or capture "
                      "something new — an empty list is allowed.",
                 style="Muted.TLabel",
-                wraplength=510,
+                wraplength=px(self, 510),
                 justify="left",
             ).pack(anchor="w", pady=6)
             self.choice_var.set("")
@@ -317,7 +321,7 @@ class StartHereDialog(ModalDialog):
                 detail = task.first_step or "No first step yet — you'll be asked for one."
                 ttk.Label(
                     frame, text=f"    → {detail}", style="Muted.TLabel",
-                    wraplength=490, justify="left",
+                    wraplength=px(self, 490), justify="left",
                 ).pack(anchor="w")
         # The choice list's length just changed; follow it.
         self.update_idletasks()
@@ -363,7 +367,7 @@ class StartFocusDialog(ModalDialog):
             self.body,
             text=task_text or "Free focus (no task selected)",
             font=font(SIZE_LG, "bold"),
-            wraplength=470,
+            wraplength=px(self, 470),
             justify="left",
         ).pack(anchor="w", pady=(0, 2 if estimate_minutes else 12))
         if estimate_minutes:
@@ -426,7 +430,7 @@ class StartFocusDialog(ModalDialog):
             text="Step down towards the task instead of leaping at it. "
                  "Tick what you've done — skipping them is fine too.",
             style="Muted.TLabel",
-            wraplength=470,
+            wraplength=px(self, 470),
             justify="left",
         ).pack(anchor="w", pady=(2, 6))
         for step in self._steps:
@@ -450,7 +454,7 @@ class StartFocusDialog(ModalDialog):
             self.ladder_frame,
             text="Your own downshift, in your own words. Blank lines are "
                  "dropped; the changes stick for future sessions.",
-            style="Muted.TLabel", wraplength=470, justify="left",
+            style="Muted.TLabel", wraplength=px(self, 470), justify="left",
         ).pack(anchor="w", pady=(2, 6))
         self._step_entries = []
         for index in range(max(3, len(self._steps))):
@@ -511,14 +515,14 @@ class PromptDialog(ModalDialog):
                  hint: str = "", ok_text: str = "OK"):
         super().__init__(parent, title)
         self.resizable(False, False)
-        ttk.Label(self.body, text=prompt, wraplength=360, justify="left").pack(anchor="w")
+        ttk.Label(self.body, text=prompt, wraplength=px(self, 360), justify="left").pack(anchor="w")
         self.entry = ttk.Entry(self.body, width=42)
         self.entry.pack(fill="x", pady=(8, 0))
         self.entry.insert(0, initial)
         self.entry.select_range(0, "end")
         if hint:
             ttk.Label(self.body, text=hint, style="Muted.TLabel",
-                      wraplength=360, justify="left").pack(anchor="w", pady=(4, 0))
+                      wraplength=px(self, 360), justify="left").pack(anchor="w", pady=(4, 0))
         self.button_row(ok_text)
         self.entry.focus_set()
         self.bind("<Return>", self.ok)
@@ -543,9 +547,9 @@ class SessionEndDialog(ModalDialog):
         super().__init__(parent, "Session finished")
         self.resizable(False, False)
         ttk.Label(self.body, text=message, font=font(SIZE_LG, "bold"),
-                  wraplength=380, justify="left").pack(anchor="w")
+                  wraplength=px(self, 380), justify="left").pack(anchor="w")
         ttk.Label(self.body, text=task_text, style="Muted.TLabel",
-                  wraplength=380, justify="left").pack(anchor="w", pady=(6, 12))
+                  wraplength=px(self, 380), justify="left").pack(anchor="w", pady=(6, 12))
         if parked:
             # The second half of Park-it's contract: the thought comes back.
             # Session end is the transition moment the app already owns.
@@ -553,7 +557,7 @@ class SessionEndDialog(ModalDialog):
             ttk.Label(self.body,
                       text=f"{parked} thought{plural} parked in the scratchpad "
                            f"while you worked — safe there.",
-                      style="Muted.TLabel", wraplength=380,
+                      style="Muted.TLabel", wraplength=px(self, 380),
                       justify="left").pack(anchor="w", pady=(0, 12))
 
         # The hand-off. Right now you know what comes next; tomorrow you will
@@ -564,9 +568,9 @@ class SessionEndDialog(ModalDialog):
         self.next_entry.pack(fill="x", pady=(4, 2))
         if first_step:
             ttk.Label(self.body, text=f"was: {first_step}", style="Muted.TLabel",
-                      wraplength=380, justify="left").pack(anchor="w")
+                      wraplength=px(self, 380), justify="left").pack(anchor="w")
         ttk.Label(self.body, text="Leave it blank if you would rather not decide now.",
-                  style="Muted.TLabel", wraplength=380, justify="left").pack(
+                  style="Muted.TLabel", wraplength=px(self, 380), justify="left").pack(
             anchor="w", pady=(0, 14))
 
         for label, value, style in (
@@ -633,7 +637,7 @@ class WeekReviewDialog(ModalDialog):
                 text="A quiet week is just a quiet week — nothing here "
                      "counts against you. The strip fills in as sessions "
                      "happen.",
-                style="Muted.TLabel", wraplength=430, justify="left",
+                style="Muted.TLabel", wraplength=px(self, 430), justify="left",
             ).pack(anchor="w", pady=(6, 0))
         for entry in days:
             line = entry["label"]
@@ -645,7 +649,7 @@ class WeekReviewDialog(ModalDialog):
                 anchor="w", pady=(8, 0))
             for title in entry["titles"]:
                 ttk.Label(self.body, text=f"   ✓ {title}", style="Muted.TLabel",
-                          wraplength=430, justify="left").pack(anchor="w")
+                          wraplength=px(self, 430), justify="left").pack(anchor="w")
         if days:
             plural = "s" if total_sessions != 1 else ""
             ttk.Label(

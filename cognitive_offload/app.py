@@ -54,7 +54,7 @@ from .storage import (
     display_path,
 )
 from .rows import focus_caption, matrix_row, sort_label, task_row
-from .theme import apply_theme, style_text, tokens
+from .theme import apply_theme, px, style_text, tokens
 from .timer import FocusTimer
 from .undo import UndoStack
 from .widgets import FocusWindow
@@ -74,15 +74,17 @@ class CognitiveOffloadApp(tk.Tk):
     def __init__(self, config: Config | None = None):
         super().__init__()
         self.title(f"{APP_TITLE} {__version__}")
-        self.geometry("1240x880")
+        self.geometry(f"{px(self, 1240)}x{px(self, 880)}")
         # A minimum size is a declaration that the app works there — in the
         # worst legitimate state, not the demo state. Both numbers are
-        # measured, plus slack for platform font metrics: 790 fits a running
-        # session with a NEXT UP title and first step that each wrap to two
-        # lines (778 before the toolbar leaves the card); 1160 fits the
-        # single-row search-and-filter bar without clipping its last
-        # control (1140 is the break-even).
-        self.minsize(1160, 790)
+        # measured at 96 DPI, plus slack for platform font metrics: 790
+        # fits a running session with a NEXT UP title and first step that
+        # each wrap to two lines (778 before the toolbar leaves the card);
+        # 1160 fits the single-row search-and-filter bar without clipping
+        # its last control (1140 is the break-even). px() carries the same
+        # measurements to HiDPI screens, where fonts grow but these
+        # numbers otherwise would not.
+        self.minsize(px(self, 1160), px(self, 790))
 
         self.config_store = config or Config().load()
         self.state_store = StateStore(self.config_store.state_file)
