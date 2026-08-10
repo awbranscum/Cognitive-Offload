@@ -5,6 +5,17 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.19.5 — Controls that show their state
+- A checked checkbox is now visibly checked. The clam engine fills the
+  box with one colour and draws the tick in another; the theme mapped
+  the wrong option, so the tick was white on a white box and Calm mode,
+  "Show done" and every dialog checkbox looked permanently off. Both
+  themes verified.
+- Mid-session, "Not that one" counts the suggestions it can actually
+  reach (the in-focus task and snoozed tasks are not in the pool). With
+  only one reachable option it says so instead of silently doing
+  nothing.
+
 ## 3.19.4 — NEXT UP knows what you're doing
 - While a focus block is open (running, or paused partway), the NEXT UP
   box never suggests the task the block is on — "what should I start?"

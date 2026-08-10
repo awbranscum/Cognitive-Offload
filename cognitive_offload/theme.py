@@ -271,7 +271,12 @@ def apply_theme(root: tk.Misc, name: str = "light") -> Tokens:
             suffix,
             background=[("active", bg)],
             # Tick and indicator must move together, or the mark is drawn in
-            # the foreground colour on top of a same-coloured box.
+            # the foreground colour on top of a same-coloured box. On clam
+            # the box FILL is indicatorbackground — indicatorcolor is a
+            # different theme's option — so without the mapping below the
+            # tick was primary_foreground (white) on a card-white box and a
+            # checked checkbox was indistinguishable from an unchecked one.
+            indicatorbackground=[("selected", t.primary), ("disabled", t.muted)],
             indicatorcolor=[("selected", t.primary), ("disabled", t.muted)],
             indicatorforeground=[("selected", t.primary_foreground)],
             upperbordercolor=[("selected", t.primary)],

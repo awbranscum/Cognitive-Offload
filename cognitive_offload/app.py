@@ -36,6 +36,7 @@ from .queries import (
     completed_titles_today,
     counts,
     due_tasks,
+    rank_for_starting,
     split_lines,
     suggest_tasks,
     visible_tasks,
@@ -391,11 +392,18 @@ class CognitiveOffloadApp(tk.Tk):
 
     def skip_next(self) -> None:
         """Not that one. Walk to the next suggestion, wrapping around."""
-        open_count = sum(1 for t in self.tasks if not t.done)
-        if open_count <= 1:
-            self.set_status("That is the only thing open.")
+        # Count the pool the suggestion actually draws from — the same
+        # filters as suggest_tasks (done and snoozed drop out; mid-session
+        # the in-focus task is excluded). Counting raw open tasks
+        # overcounted and made the walk silently go nowhere.
+        excluded = self._focus_task_id if self.timer.open_block else None
+        pool = len(rank_for_starting([t for t in self.tasks if t.id != excluded]))
+        if pool <= 1:
+            self.set_status("That is the only thing open."
+                            if excluded is None else
+                            "That is the only thing open besides what you're on.")
             return
-        self._next_offset = (self._next_offset + 1) % open_count
+        self._next_offset = (self._next_offset + 1) % pool
         self.refresh_next_up()
 
     def _refresh_tag_choices(self) -> None:

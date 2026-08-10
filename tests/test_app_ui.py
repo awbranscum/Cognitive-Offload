@@ -12,6 +12,7 @@ from unittest import mock
 
 try:
     import tkinter as tk
+    from tkinter import ttk
 except ImportError:  # pragma: no cover - depends on the interpreter build
     tk = None
 
@@ -1168,6 +1169,48 @@ class AppSmokeTests(unittest.TestCase):
         # Reset closes the block; the task is suggestible again.
         self.app.reset_timer()
         self.assertEqual(self.app.next_title_var.get(), "the only task")
+
+    def test_not_that_one_says_so_when_the_session_leaves_one_option(self):
+        """Two open tasks, one in-session: the walk has nowhere to go and
+        must say so instead of silently doing nothing."""
+        self.capture("the alternative")
+        self.capture("in progress")
+        chosen = next(t for t in self.app.tasks if t.text == "in progress")
+        self.select(next(i for i, t in enumerate(self.app._visible)
+                         if t.id == chosen.id))
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "", "warmup_done": 0,
+            }
+            self.app.focus_on_selected()
+        self.assertEqual(self.app.next_title_var.get(), "the alternative")
+        self.app.skip_next()
+        self.assertEqual(self.app.next_title_var.get(), "the alternative")
+        self.assertIn("only thing open", self.app.status_var.get())
+        # A third task gives the walk somewhere to go again.
+        self.capture("a real alternative")
+        before = self.app.next_title_var.get()
+        self.app.skip_next()
+        after = self.app.next_title_var.get()
+        self.assertNotEqual(after, before)
+        self.assertIn(after, ("the alternative", "a real alternative"))
+        # And never the task the session is on.
+        self.assertNotEqual(after, "in progress")
+        self.app.pause_timer()
+
+    def test_a_checked_checkbox_is_visibly_different_from_unchecked(self):
+        """The clam engine fills the box with indicatorbackground; without
+        a selected mapping the tick was white on a white box."""
+        style = ttk.Style(self.app)
+        for name in ("TCheckbutton", "Card.TCheckbutton"):
+            mapping = dict()
+            spec = style.map(name, "indicatorbackground")
+            for entry in spec:
+                *states, colour = entry
+                mapping[tuple(states)] = colour
+            self.assertIn(("selected",), mapping, name)
+            resting = style.lookup(name, "indicatorbackground")
+            self.assertNotEqual(mapping[("selected",)], resting, name)
 
     # -- pinning -------------------------------------------------------
     def test_pinning_actually_reorders_the_visible_list(self):
