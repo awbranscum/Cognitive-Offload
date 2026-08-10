@@ -5,6 +5,20 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.19.3 — A minimum size that means it
+- The minimum window size (1160×790) is measured against the worst
+  legitimate state — a running session with a long, wrapping NEXT UP
+  title — instead of a size where controls quietly clipped off the cards.
+- Compact buttons hug their labels: ttk's hidden nine-character minimum
+  made "Pin" cost as much as "Clear done", which is what pushed the task
+  toolbar and the "Show done" filter off the card at small sizes.
+- "Not that one" and "Not today" sit side by side under "Start this" —
+  two escape hatches are peers, and the stack was a button-height too tall.
+- NEXT UP text wraps to the space it actually has instead of clipping
+  mid-word at a fixed width.
+- When exactly one tag badge would overflow, it is shown rather than
+  summarised — "+1" costs the same space as the badge it hides.
+
 ## 3.19.0 — The week, in evidence
 - Click the momentum strip (or its summary) for a week review: one line per
   day that had anything — sessions, minutes, and the tasks finished that

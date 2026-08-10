@@ -119,7 +119,10 @@ class BadgeStrip(tk.Canvas):
         height = 17
         shown = list(self._badges[:self.MAX_BADGES])
         overflow = len(self._badges) - len(shown)
-        if overflow > 0:
+        if overflow == 1:
+            # "+1" costs the same space as the badge it hides.
+            shown.append(self._badges[self.MAX_BADGES])
+        elif overflow > 1:
             shown.append(Badge(f"+{overflow}", "tag"))
         for badge in shown:
             fill, fg = palette.get(badge.variant, palette["tag"])

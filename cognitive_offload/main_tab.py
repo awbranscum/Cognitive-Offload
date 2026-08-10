@@ -149,7 +149,7 @@ def _build_focus_card(app, top: ttk.Frame) -> None:
 
 
 def _build_body(app, root: ttk.Frame) -> None:
-    body = ttk.Frame(root, padding=(16, 12, 16, 0))
+    body = ttk.Frame(root, padding=(16, 8, 16, 0))
     body.grid(row=2, column=0, sticky="nsew")
     body.columnconfigure(0, weight=3, uniform="cols")
     body.columnconfigure(1, weight=2, uniform="cols")
@@ -164,11 +164,13 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
     outer.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
     inner = outer.inner
     inner.columnconfigure(0, weight=1)
-    # The list flexes; when the window shrinks it is the chrome that should
-    # give way first, not the tasks. 130, not more: a running session adds
-    # two caption lines to the focus card, and the toolbar must still fit
-    # under the list at the default window height in exactly that state.
-    inner.rowconfigure(4, weight=1, minsize=130)
+    # The list flexes. The minsize only binds when the window is squeezed,
+    # and there it is a trade against the toolbar below: 55 keeps one task
+    # row AND the whole toolbar inside the card at the window's minimum
+    # size with a session running (the worst legitimate state). Grid does
+    # not shrink fixed rows — whatever exceeds the card is clipped, so the
+    # floor budget has to actually add up.
+    inner.rowconfigure(4, weight=1, minsize=55)
 
     heading = ttk.Frame(inner, style="Card.TFrame")
     heading.grid(row=0, column=0, sticky="ew")
@@ -187,7 +189,7 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
     # OUTER frame — refresh_next_up grid_remove()s it whole.
     app.next_frame = tk.Frame(inner, background=tokens().border, highlightthickness=0)
     app.next_frame.grid(row=1, column=0, sticky="ew", pady=(8, 6))
-    next_inner = ttk.Frame(app.next_frame, style="Card.TFrame", padding=10)
+    next_inner = ttk.Frame(app.next_frame, style="Card.TFrame", padding=8)
     next_inner.pack(fill="both", expand=True, padx=1, pady=1)
     next_inner.columnconfigure(0, weight=1)
     app.next_frame.inner = next_inner  # picked up by the theme toggle's border walk
@@ -195,26 +197,36 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
     next_text = ttk.Frame(next_inner, style="Card.TFrame")
     next_text.grid(row=0, column=0, sticky="ew")
     ttk.Label(next_text, text="NEXT UP", style="CardMuted.TLabel").pack(anchor="w")
-    ttk.Label(next_text, textvariable=app.next_title_var, style="H2.TLabel",
-              wraplength=380, justify="left").pack(anchor="w")
-    ttk.Label(next_text, textvariable=app.next_step_var, style="CardMuted.TLabel",
-              wraplength=380, justify="left").pack(anchor="w")
+    # Wraplength follows the column's real width: a fixed number wider
+    # than the column makes long titles clip mid-word instead of wrapping
+    # — at the window's minimum size the column is ~290px, not 380.
+    for var, style_name in ((app.next_title_var, "H2.TLabel"),
+                            (app.next_step_var, "CardMuted.TLabel")):
+        label = ttk.Label(next_text, textvariable=var, style=style_name,
+                          wraplength=380, justify="left")
+        label.pack(anchor="w", fill="x")
+        label.bind("<Configure>",
+                   lambda e: e.widget.configure(wraplength=max(120, e.width)))
 
     next_buttons = ttk.Frame(next_inner, style="Card.TFrame")
     next_buttons.grid(row=0, column=1, sticky="e", padx=(10, 0))
     ttk.Button(next_buttons, text="Start this", style="Default.TButton",
                command=app.start_next).pack(anchor="e")
-    ttk.Button(next_buttons, text="Not that one", style="SmGhost.TButton",
-               command=app.skip_next).pack(anchor="e", pady=(4, 0))
     # "Not that one" walks the list; "Not today" excuses the task until
     # tomorrow. The difference matters when the same dreaded task greets
-    # you at every launch.
-    ttk.Button(next_buttons, text="Not today", style="SmGhost.TButton",
-               command=app.snooze_next).pack(anchor="e", pady=(2, 0))
+    # you at every launch. Side by side, not stacked: the two escape
+    # hatches are peers, and a third button-height here is what pushed
+    # the toolbar out of the card at the window's minimum size.
+    declines = ttk.Frame(next_buttons, style="Card.TFrame")
+    declines.pack(anchor="e", pady=(4, 0))
+    ttk.Button(declines, text="Not that one", style="SmGhost.TButton",
+               command=app.skip_next).pack(side="left")
+    ttk.Button(declines, text="Not today", style="SmGhost.TButton",
+               command=app.snooze_next).pack(side="left", padx=(4, 0))
 
     # The way in when even that is too much of a decision.
     start_row = ttk.Frame(inner, style="Card.TFrame")
-    start_row.grid(row=2, column=0, sticky="ew", pady=(0, 10))
+    start_row.grid(row=2, column=0, sticky="ew", pady=(0, 8))
     ttk.Button(start_row, text="Where do I start?", style="Default.TButton",
                command=app.start_here).pack(side="left")
     ttk.Button(start_row, text="Focus on selected", style="Outline.TButton",
@@ -232,7 +244,9 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
     # a whole visible task, and the list is the point of this card.
     filters = ttk.Frame(inner, style="Card.TFrame")
     filters.grid(row=3, column=0, sticky="ew", pady=(0, 8))
-    filters.columnconfigure(0, weight=1)
+    # minsize: the entry flexes, but search must never collapse to nothing
+    # at narrow widths — it did, at the window's own minimum size.
+    filters.columnconfigure(0, weight=1, minsize=110)
     app.search_entry = ttk.Entry(filters, textvariable=app.search_var)
     app.search_entry.grid(row=0, column=0, sticky="ew", padx=(0, 4))
     app.search_entry.bind("<KeyRelease>", lambda _e: app.refresh_tasks())
@@ -287,8 +301,11 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
         ("Delete", app.delete_selected, "SmDestructive.TButton"),
         ("Clear done", app.clear_completed, "SmGhost.TButton"),
     ]
+    # No uniform group: it would force every column as wide as "Clear
+    # done", and seven of those don't fit the card at the window's
+    # minimum size. Each column floors at its own label instead.
     for column, (label, command, style) in enumerate(buttons):
-        toolbar.columnconfigure(column, weight=1, uniform="tools")
+        toolbar.columnconfigure(column, weight=1)
         ttk.Button(toolbar, text=label, style=style, command=command).grid(
             row=0, column=column, sticky="ew",
             padx=(0, 3) if column < len(buttons) - 1 else 0)

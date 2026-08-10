@@ -337,6 +337,11 @@ def _button_variants(style: ttk.Style, t: Tokens) -> None:
                 # outline variants would otherwise read as bare text.
                 relief="solid" if width else "flat",
                 font=font(size, "bold"), padding=padding,
+                # ttk's default is width=-9: every button at least nine
+                # characters wide, so "Pin" costs as much as "Clear done".
+                # Compact buttons hug their label — seven of them have to
+                # share one toolbar row at the window's minimum size.
+                width=0 if suffix == "Sm" else -9,
             )
             style.map(
                 full,

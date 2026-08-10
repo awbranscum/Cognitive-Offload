@@ -74,7 +74,14 @@ class CognitiveOffloadApp(tk.Tk):
         super().__init__()
         self.title(f"{APP_TITLE} {__version__}")
         self.geometry("1240x880")
-        self.minsize(1020, 700)
+        # A minimum size is a declaration that the app works there — in the
+        # worst legitimate state, not the demo state. Both numbers are
+        # measured, plus slack for platform font metrics: 790 fits a running
+        # session with a NEXT UP title and first step that each wrap to two
+        # lines (778 before the toolbar leaves the card); 1160 fits the
+        # single-row search-and-filter bar without clipping its last
+        # control (1140 is the break-even).
+        self.minsize(1160, 790)
 
         self.config_store = config or Config().load()
         self.state_store = StateStore(self.config_store.state_file)

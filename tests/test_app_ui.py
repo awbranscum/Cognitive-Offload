@@ -776,6 +776,71 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(self.app._parked_this_session, ["mid-block thought"])
         self.app.pause_timer()
 
+    def test_the_window_floor_is_a_size_the_app_works_at(self):
+        self.assertEqual((self.app.wm_minsize()), (1160, 790))
+
+    def test_the_floor_state_still_shows_tasks_and_search(self):
+        """At the app's own minimum, with a session running, the list and
+        the search entry must both still exist — they didn't."""
+        self.app.deiconify()  # withdrawn windows don't lay out
+        self.app.geometry("1160x790")
+        # The worst legitimate state, not the demo state: a title long
+        # enough to wrap in NEXT UP, plus a wrapping first step. Short
+        # titles made this test pass while real ones clipped the toolbar.
+        self.app.capture_entry.insert(0, "call the insurance company back "
+                                         "about the claim they rejected")
+        self.app.add_task_from_capture()
+        for n in range(3):
+            self.app.capture_entry.insert(0, f"task {n}")
+            self.app.add_task_from_capture()
+        self.select(0)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "warmup_done": 0,
+                "first_step": "a long first step written out in enough "
+                              "detail that the step line wraps as well",
+            }
+            self.app.focus_on_selected()
+        self.app.update()
+        self.assertGreater(self.app.task_list.winfo_height(), 50)  # ≥1 row visible
+        self.assertGreaterEqual(self.app.search_entry.winfo_width(), 100)
+        toolbar = self.app.task_toolbar
+        self.assertGreater(toolbar.winfo_height(), 10)
+        # Inside its PARENT, not just the window: Tk clips a child to the
+        # card, and winfo still reports the assigned position of the
+        # invisible part — measuring against the window passes while the
+        # toolbar is clipped to nothing (that was this test's first bug).
+        card = toolbar.master
+        toolbar_bottom = toolbar.winfo_rooty() + toolbar.winfo_height()
+        card_bottom = card.winfo_rooty() + card.winfo_height()
+        self.assertLessEqual(toolbar_bottom, card_bottom)
+        # Width too: ttk's default nine-character button minimum made the
+        # seven toolbar buttons request more than the card's width, so
+        # "To matrix" and "Clear done" clipped mid-word at the floor.
+        self.assertLessEqual(toolbar.winfo_reqwidth(), toolbar.winfo_width())
+        card_right = card.winfo_rootx() + card.winfo_width()
+        for button in toolbar.grid_slaves():
+            button_right = button.winfo_rootx() + button.winfo_width()
+            self.assertLessEqual(button_right, card_right, button.cget("text"))
+        # The filter row's last control ("Show done") clipped to "Sh" at
+        # the old floor — every filter control must end inside the card.
+        for control in self.app.filter_row.grid_slaves():
+            control_right = control.winfo_rootx() + control.winfo_width()
+            self.assertLessEqual(control_right, card_right, str(control))
+        self.app.pause_timer()
+
+    def test_exactly_one_extra_badge_is_shown_not_summarised(self):
+        self.capture("seven tags")
+        self.app.tasks[0].tags = [f"t{n}" for n in range(7)]
+        self.app.refresh_tasks()
+        self.app.update()
+        strip = self.app.task_list._pool[0]["badges"]
+        texts = [strip.itemcget(i, "text") for i in strip.find_all()
+                 if strip.type(i) == "text"]
+        self.assertEqual(len(texts), 7)
+        self.assertNotIn("+1", texts)
+        self.assertIn("#t6", texts)
+
     def test_a_tag_flood_cannot_hide_the_title(self):
         """15 tags used to squeeze the title label to zero width."""
         self.capture("the title that matters")
