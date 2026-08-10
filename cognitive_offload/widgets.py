@@ -667,6 +667,15 @@ class FocusWindow(tk.Toplevel):
                 pass
         self.progress["value"] = int(max(0.0, min(1.0, fraction)) * 1000)
         self.pause_button.configure(text="Pause" if running else "Resume")
+        # The __init__ re-fit ran while task_var was still empty; the real
+        # title lands here and may wrap to several lines, which used to
+        # push Pause and the Park row clean off the fixed-height window.
+        # The guard makes this every-tick call a no-op unless the text
+        # actually changed the needed height.
+        self.update_idletasks()
+        wanted = max(210, self.winfo_reqheight())
+        if wanted != self.winfo_height():
+            self.geometry(f"320x{wanted}")
 
     def _pause(self):
         if self._on_pause:

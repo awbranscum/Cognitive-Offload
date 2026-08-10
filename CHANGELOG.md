@@ -5,6 +5,13 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.19.8 — The pop-out keeps its promises on screen
+- The floating focus window grows to fit a long, wrapping task title
+  instead of pushing Pause and the Park row off its bottom edge. It
+  re-fits whenever its text actually changes height and holds still
+  otherwise — the two things it exists for (pausing, and parking an
+  intrusive thought) stay reachable mid-block.
+
 ## 3.19.7 — Keyboard focus you can see
 - Filled buttons draw their focus ring in the label colour, so keyboard
   focus is visible on the buttons that start things — "Where do I

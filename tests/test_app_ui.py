@@ -584,6 +584,56 @@ class AppSmokeTests(unittest.TestCase):
         self.assertIsNone(self.app._focus_window)
         self.app.pause_timer()
 
+    def test_focus_window_grows_to_keep_its_controls_when_the_title_wraps(self):
+        """A four-line title used to push Pause and the Park row clean off
+        the fixed-height window — the re-fit only ran while the title was
+        still empty."""
+        self.capture("call the insurance company back about the rejected "
+                     "claim, ask for a supervisor, and get the appeal "
+                     "deadline in writing this time")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "warmup_done": 0,
+                "first_step": "find the claim number in the shared folder",
+            }
+            self.app.focus_on_selected()
+        self.app.open_focus_window()
+        window = self.app._focus_window
+        window.deiconify()  # withdrawn windows don't lay out
+        self.app._tick_timer()
+        window.update()
+        # The window IS the clipping parent here: everything must end
+        # above its bottom edge.
+        bottom = window.winfo_rooty() + window.winfo_height()
+        for control in (window.pause_button, window.park_entry):
+            control_bottom = control.winfo_rooty() + control.winfo_height()
+            self.assertLessEqual(control_bottom, bottom, str(control))
+        window.close()
+        self.app.pause_timer()
+
+    def test_focus_window_height_is_stable_across_ticks(self):
+        """The every-tick re-fit must be a no-op when nothing changed."""
+        self.capture("short")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "", "warmup_done": 0,
+            }
+            self.app.focus_on_selected()
+        self.app.open_focus_window()
+        window = self.app._focus_window
+        window.deiconify()
+        self.app._tick_timer()
+        window.update()
+        first = window.winfo_height()
+        for _ in range(5):
+            self.app._tick_timer()
+            window.update()
+        self.assertEqual(window.winfo_height(), first)
+        window.close()
+        self.app.pause_timer()
+
     def test_finishing_early_banks_the_minutes_actually_done(self):
         self.capture("something")
         self.select(0)
