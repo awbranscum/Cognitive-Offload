@@ -135,6 +135,25 @@ class FocusTimerTests(unittest.TestCase):
         self.assertEqual(timer.elapsed, 300)
         self.assertAlmostEqual(timer.fraction, 0.5)
 
+    def test_open_block_tracks_the_whole_block_lifecycle(self):
+        timer = FocusTimer()
+        self.assertFalse(timer.open_block)   # idle: nothing underway
+        timer.start(0.0, minutes=10)
+        self.assertTrue(timer.open_block)    # running
+        timer.pause(300.0)
+        self.assertTrue(timer.open_block)    # paused partway: still open
+        timer.start(400.0)                   # resume
+        timer.tick(10_000.0)
+        self.assertFalse(timer.open_block)   # expired naturally: over
+        timer.start(20_000.0, minutes=10)
+        timer.tick(20_300.0)
+        timer.pause(20_300.0)
+        timer.bank_early(15)
+        self.assertFalse(timer.open_block)   # banked early: over
+        timer.start(30_000.0, minutes=10)
+        timer.reset(15)
+        self.assertFalse(timer.open_block)   # reset: over
+
 
 if __name__ == "__main__":
     unittest.main()

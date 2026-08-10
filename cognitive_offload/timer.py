@@ -126,6 +126,13 @@ class FocusTimer:
     def minutes_for_natural_finish(self) -> int:
         return max(1, round(self.total / 60))
 
+    @property
+    def open_block(self) -> bool:
+        """A block is underway — running, or paused partway with minutes
+        on the clock. Expired (remaining 0) and banked (remaining reset
+        to total) blocks are over."""
+        return self.running or 0 < self.remaining < self.total
+
     # -- read-only views -----------------------------------------------
     @property
     def elapsed(self) -> int:

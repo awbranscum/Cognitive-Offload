@@ -220,6 +220,26 @@ class StartingTests(unittest.TestCase):
         self.assertEqual(len(suggest_tasks([make("only one")], limit=3)), 1)
         self.assertEqual(suggest_tasks([], limit=3), [])
 
+    def test_excluded_task_is_never_suggested_at_any_offset(self):
+        tasks = [make(f"task {i}") for i in range(4)]
+        focused = tasks[0].id
+        for offset in range(8):
+            texts = [t.text for t in
+                     suggest_tasks(tasks, limit=3, offset=offset, exclude=focused)]
+            self.assertNotIn("task 0", texts, f"offset {offset}")
+
+    def test_excluding_the_only_task_leaves_nothing_to_suggest(self):
+        only = make("the one in progress")
+        self.assertEqual(suggest_tasks([only], limit=1, exclude=only.id), [])
+
+    def test_offset_walk_still_cycles_through_the_rest(self):
+        tasks = [make(f"task {i}") for i in range(4)]
+        seen = set()
+        for offset in range(3):
+            for t in suggest_tasks(tasks, limit=1, offset=offset, exclude=tasks[0].id):
+                seen.add(t.text)
+        self.assertEqual(seen, {"task 1", "task 2", "task 3"})
+
     def test_due_tasks_are_open_scheduled_and_soonest_first(self):
         late = make("late")
         late.scheduled_for = "2020-01-01"

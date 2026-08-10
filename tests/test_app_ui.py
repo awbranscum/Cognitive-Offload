@@ -1127,6 +1127,48 @@ class AppSmokeTests(unittest.TestCase):
         self.app.refresh_next_up()
         self.assertEqual(self.app.next_title_var.get(), "worked on recently")
 
+    def test_next_up_never_pitches_the_task_you_are_focusing_on(self):
+        """Mid-session, "what should I start?" is not the thing in progress."""
+        self.capture("second string")
+        self.capture("the main event")
+        main = next(t for t in self.app.tasks if t.text == "the main event")
+        main.priority = 1
+        self.app.refresh_tasks()
+        self.assertEqual(self.app.next_title_var.get(), "the main event")
+        self.select(next(i for i, t in enumerate(self.app._visible)
+                         if t.id == main.id))
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "", "warmup_done": 0,
+            }
+            self.app.focus_on_selected()
+        self.assertEqual(self.app.next_title_var.get(), "second string")
+        # Paused partway is still an open block — resuming is the plan.
+        # (Partway matters: a block paused inside its first second reads
+        # remaining == total, which the whole app — bank_early included —
+        # treats as "never really started".)
+        self.app._timer_deadline -= 300
+        self.app._tick_timer()
+        self.app.pause_timer()
+        self.app.refresh_next_up()
+        self.assertEqual(self.app.next_title_var.get(), "second string")
+        self.app.reset_timer()
+
+    def test_with_nothing_else_to_suggest_the_box_goes_quiet_mid_session(self):
+        self.capture("the only task")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "", "warmup_done": 0,
+            }
+            self.app.focus_on_selected()
+        # Nothing else to offer: quiet, not a pitch to switch tasks.
+        self.assertEqual(self.app.next_title_var.get(), "")
+        self.assertEqual(self.app.next_frame.grid_info(), {})
+        # Reset closes the block; the task is suggestible again.
+        self.app.reset_timer()
+        self.assertEqual(self.app.next_title_var.get(), "the only task")
+
     # -- pinning -------------------------------------------------------
     def test_pinning_actually_reorders_the_visible_list(self):
         """The old 'move to top' reordered a list the sort immediately re-sorted."""

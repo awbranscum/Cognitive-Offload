@@ -5,6 +5,14 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.19.4 — NEXT UP knows what you're doing
+- While a focus block is open (running, or paused partway), the NEXT UP
+  box never suggests the task the block is on — "what should I start?"
+  is not answered by the thing already underway. With nothing else to
+  offer it goes quiet instead of pitching a mid-focus task switch, and
+  the moment the block ends the task is suggestible again ("another
+  round when you're ready" and the box may rightly agree).
+
 ## 3.19.3 — A minimum size that means it
 - The minimum window size (1160×790) is measured against the worst
   legitimate state — a running session with a long, wrapping NEXT UP

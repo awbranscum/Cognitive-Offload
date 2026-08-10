@@ -180,8 +180,16 @@ def suggest_tasks(
     offset: int = 0,
     on: str | None = None,
     warm: set | None = None,
+    exclude: str | None = None,
 ) -> list[Task]:
-    """A short shortlist. Long lists are the thing that causes the freeze."""
+    """A short shortlist. Long lists are the thing that causes the freeze.
+
+    ``exclude`` drops one task id before ranking — the one a focus block
+    is already open on. "What should I start?" is never answered by the
+    thing you are already doing.
+    """
+    if exclude:
+        tasks = [t for t in tasks if t.id != exclude]
     ranked = rank_for_starting(tasks, kind, on, warm)
     if not ranked:
         return []

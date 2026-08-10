@@ -331,8 +331,15 @@ class CognitiveOffloadApp(tk.Tk):
         one decision and two. "Where do I start?" is still there for when the
         answer needs to match how you feel; this is the default.
         """
+        # While a block is open on a task (running, or paused partway),
+        # the box either names a different task or — if there is nothing
+        # else — hides, rather than pitching the session you are already
+        # in. Once the block ends the task is suggestible again: "another
+        # round when you're ready" and the suggestion may rightly agree.
+        exclude = self._focus_task_id if self.timer.open_block else None
         suggestions = suggest_tasks(self.tasks, limit=1, offset=self._next_offset,
-                                    warm=self.session_log.recent_task_ids())
+                                    warm=self.session_log.recent_task_ids(),
+                                    exclude=exclude)
         if not suggestions:
             self._next_task_id = None
             self.next_title_var.set("")
@@ -1265,6 +1272,7 @@ class CognitiveOffloadApp(tk.Tk):
         self._update_timer_label()
         if mode == "break":
             self.set_status("Break ended.")
+            self.refresh_next_up()  # the break block just closed
             return None
         if interactive:
             self._finish_session(elapsed)
@@ -1378,6 +1386,9 @@ class CognitiveOffloadApp(tk.Tk):
             # Attention is free now: put the parked lines on screen instead
             # of relying on the user remembering to scroll a growing pad.
             self.note_text.see(tk.END)
+        # The block is over (or a break block began): either way the
+        # suggestion box's exclusion just changed.
+        self.refresh_next_up()
 
     def _finish_break(self) -> None:
         self.focus_task_var.set("Break over. One more small block?")
@@ -1385,6 +1396,7 @@ class CognitiveOffloadApp(tk.Tk):
         self.bell()
         task = self._focus_task()
         self._focus_task_id = None  # the block it belonged to is over
+        self.refresh_next_up()
         with self._ask_over_focus():
             again = messagebox.askyesno("Break over", "Start another focus session?")
         if again:
@@ -1578,6 +1590,10 @@ class CognitiveOffloadApp(tk.Tk):
         self.timer_button.config(text="Pause")
         if self.timer.mode == "break":
             self.focus_task_var.set("Break — step away from the screen.")
+        # A block just opened: the suggestion box stops pitching the task
+        # the block is on (every start path funnels through here — the
+        # dialog flow sets _focus_task_id before calling).
+        self.refresh_next_up()
         self._tick_timer()
         self.set_status(
             "Break started." if self.timer.mode == "break"
@@ -1605,6 +1621,7 @@ class CognitiveOffloadApp(tk.Tk):
         self.timer.reset(self._minutes())
         self.timer_button.config(text="Start")
         self._update_timer_label()
+        self.refresh_next_up()
         self.set_status("Timer reset.")
 
     def on_timer_minutes_changed(self) -> None:
