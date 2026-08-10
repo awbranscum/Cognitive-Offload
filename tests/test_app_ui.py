@@ -1254,6 +1254,19 @@ class AppSmokeTests(unittest.TestCase):
         if log_path.exists():
             self.assertEqual(json.loads(log_path.read_text())["sessions"], [])
 
+    def test_the_primary_button_focus_ring_contrasts_with_its_fill(self):
+        """t.ring is the primary fill's own hex in the light theme, so an
+        inherited focus ring was invisible exactly on the buttons that
+        start things."""
+        style = ttk.Style(self.app)
+        for _ in range(2):  # light, then dark
+            for name in ("Default.TButton", "SmDefault.TButton"):
+                ring = style.lookup(name, "focuscolor")
+                fill = style.lookup(name, "background")
+                self.assertTrue(ring, name)
+                self.assertNotEqual(ring, fill, name)
+            self.app.toggle_theme()
+
     def test_a_checked_checkbox_is_visibly_different_from_unchecked(self):
         """The clam engine fills the box with indicatorbackground; without
         a selected mapping the tick was white on a white box."""

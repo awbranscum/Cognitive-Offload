@@ -330,7 +330,7 @@ def _button_variants(style: ttk.Style, t: Tokens) -> None:
     """The shadcn button variants, each in a default and a compact size."""
 
     def variant(name: str, bg: str, fg: str, hover_bg: str, hover_fg: str,
-                border: str, width: int = 0) -> None:
+                border: str, width: int = 0, focus: str | None = None) -> None:
         for suffix, padding, size in (("", (14, 8), SIZE_BASE), ("Sm", (10, 5), SIZE_SM)):
             full = f"{suffix}{name}" if suffix else name
             style.configure(
@@ -342,6 +342,11 @@ def _button_variants(style: ttk.Style, t: Tokens) -> None:
                 # outline variants would otherwise read as bare text.
                 relief="solid" if width else "flat",
                 font=font(size, "bold"), padding=padding,
+                # The focus ring must contrast with THIS variant's fill.
+                # The inherited ring is t.ring — the same hex as the
+                # primary fill in the light theme, so keyboard focus on
+                # the app's most important buttons was invisible.
+                focuscolor=focus or t.ring,
                 # ttk's default is width=-9: every button at least nine
                 # characters wide, so "Pin" costs as much as "Clear done".
                 # Compact buttons hug their label — seven of them have to
@@ -358,7 +363,8 @@ def _button_variants(style: ttk.Style, t: Tokens) -> None:
 
     variant("TButton", t.secondary, t.secondary_foreground, t.accent, t.accent_foreground, t.border)
     variant("Default.TButton", t.primary, t.primary_foreground,
-            t.foreground, t.primary_foreground, t.primary)
+            t.foreground, t.primary_foreground, t.primary,
+            focus=t.primary_foreground)
     variant("Secondary.TButton", t.secondary, t.secondary_foreground,
             t.accent, t.accent_foreground, t.border)
     variant("Outline.TButton", t.card, t.foreground, t.accent, t.accent_foreground, t.border, 1)

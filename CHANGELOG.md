@@ -5,6 +5,14 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.19.7 — Keyboard focus you can see
+- Filled buttons draw their focus ring in the label colour, so keyboard
+  focus is visible on the buttons that start things — "Where do I
+  start?", "Start this", "Add task", the timer's Start. The inherited
+  ring colour was the primary fill's own hex in the light theme, making
+  focus on those buttons literally invisible. Outline and ghost buttons
+  already showed theirs; the task list's focused border already worked.
+
 ## 3.19.6 — Closing the lid still counts
 - Quitting mid-focus-block banks the elapsed minutes silently before the
   window goes. The momentum strip, week review and estimate calibration
