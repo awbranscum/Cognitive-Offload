@@ -5,6 +5,14 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.19.6 — Closing the lid still counts
+- Quitting mid-focus-block banks the elapsed minutes silently before the
+  window goes. The momentum strip, week review and estimate calibration
+  keep the time; closing without ceremony is a normal end of day, not a
+  forfeit. Breaks and never-started blocks record nothing, and a
+  cancelled quit ("save failed — stay?") keeps its block running and
+  unbanked.
+
 ## 3.19.5 — Controls that show their state
 - A checked checkbox is now visibly checked. The clam engine fills the
   box with one colour and draws the tick in another; the theme mapped

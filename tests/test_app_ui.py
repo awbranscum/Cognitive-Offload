@@ -5,6 +5,7 @@ still runs on a headless box without X.
 """
 
 import contextlib
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -44,7 +45,13 @@ class AppSmokeTests(unittest.TestCase):
 
         self.app = CognitiveOffloadApp(config=config)
         self.app.withdraw()
-        self.addCleanup(self.app.destroy)
+        self.addCleanup(self._destroy_app)
+
+    def _destroy_app(self):
+        try:
+            self.app.destroy()
+        except tk.TclError:
+            pass  # on_close tests already tore the window down
 
     # -- helpers -------------------------------------------------------
     def capture(self, text):
@@ -1197,6 +1204,55 @@ class AppSmokeTests(unittest.TestCase):
         # And never the task the session is on.
         self.assertNotEqual(after, "in progress")
         self.app.pause_timer()
+
+    def test_closing_the_app_mid_block_keeps_the_minutes(self):
+        """Closing the lid without ceremony must not erase the evidence."""
+        self.capture("long report")
+        self.select(0)
+        task_id = self.app.tasks[0].id
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 25, "first_step": "", "warmup_done": 0,
+            }
+            self.app.focus_on_selected()
+        self.app._timer_deadline -= 18 * 60
+        self.app._tick_timer()
+        log_path = self.app.session_log.path
+        self.app.on_close()
+        data = json.loads(log_path.read_text())
+        self.assertEqual(len(data["sessions"]), 1)
+        self.assertEqual(data["sessions"][0]["minutes"], 18)
+        self.assertEqual(data["sessions"][0]["task_id"], task_id)
+
+    def test_a_cancelled_quit_keeps_the_block_running_and_unbanked(self):
+        self.capture("long report")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 25, "first_step": "", "warmup_done": 0,
+            }
+            self.app.focus_on_selected()
+        self.app._timer_deadline -= 5 * 60
+        self.app._tick_timer()
+        log_path = self.app.session_log.path
+        self.app._dirty = True
+        with mock.patch.object(self.app, "save_state", return_value=False), \
+             mock.patch("cognitive_offload.app.messagebox.askyesnocancel",
+                        return_value=None):
+            self.app.on_close()
+        self.assertTrue(self.app.winfo_exists())  # still here
+        self.assertTrue(self.app.timer.open_block)  # block untouched
+        self.assertFalse(log_path.exists())  # nothing banked
+        self.app.pause_timer()
+
+    def test_closing_during_a_break_records_no_focus_minutes(self):
+        self.app.start_timer(minutes=5, mode="break")
+        self.app._timer_deadline -= 3 * 60
+        self.app._tick_timer()
+        log_path = self.app.session_log.path
+        self.app.on_close()
+        if log_path.exists():
+            self.assertEqual(json.loads(log_path.read_text())["sessions"], [])
 
     def test_a_checked_checkbox_is_visibly_different_from_unchecked(self):
         """The clam engine fills the box with indicatorbackground; without

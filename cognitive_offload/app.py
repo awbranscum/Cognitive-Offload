@@ -1998,6 +1998,13 @@ class CognitiveOffloadApp(tk.Tk):
                 return
             if choice and not self.export_state():
                 return  # no copy was written; don't quit on a failed rescue
+        # Past every cancel point, so a cancelled quit keeps its running
+        # block. Bank an open focus block's minutes silently: closing the
+        # lid mid-block without ceremony is a normal end of day, and the
+        # evidence of the time must not depend on doing it properly.
+        # (No-ops for breaks and never-started blocks; writes to the
+        # session log's own file, separate from the state just saved.)
+        self.finish_session_early(interactive=False)
         self._save_config()
         self._instance_lock.release()
         self._stop_ticking()
