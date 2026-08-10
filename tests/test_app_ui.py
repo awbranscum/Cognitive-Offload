@@ -776,6 +776,23 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(self.app._parked_this_session, ["mid-block thought"])
         self.app.pause_timer()
 
+    def test_a_tag_flood_cannot_hide_the_title(self):
+        """15 tags used to squeeze the title label to zero width."""
+        self.capture("the title that matters")
+        self.app.tasks[0].tags = [f"tag{n}" for n in range(15)]
+        self.app.refresh_tasks()
+        self.app.update()
+        cell = self.app.task_list._pool[0]
+        # The badge strip drew a capped set plus one overflow pill...
+        texts = [cell["badges"].itemcget(item, "text")
+                 for item in cell["badges"].find_all()
+                 if cell["badges"].type(item) == "text"]
+        self.assertEqual(len(texts), self.app.task_list._pool[0]["badges"].MAX_BADGES + 1)
+        self.assertEqual(texts[-1], "+9")
+        # ...and the title still has real width on screen.
+        self.assertGreater(cell["title"].winfo_width(), 60)
+        self.assertIn("the title that matters", self.visible_texts()[0])
+
     def test_hover_survives_a_re_render(self):
         self.capture("aaa")
         self.capture("bbb")

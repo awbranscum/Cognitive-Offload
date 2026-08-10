@@ -70,6 +70,10 @@ class BadgeStrip(tk.Canvas):
     """
 
     PAD_X, PAD_Y, GAP = 7, 3, 5
+    # The title is the row; badges are garnish. Past this many, the rest
+    # collapse into one quiet "+k" pill instead of squeezing the title to
+    # nothing (a 15-tag task used to render as tags and no title at all).
+    MAX_BADGES = 6
 
     def __init__(self, master, badges: list[Badge], background: str, **kwargs):
         self._badges = badges
@@ -113,7 +117,11 @@ class BadgeStrip(tk.Canvas):
         palette = tokens().badges
         x = 0
         height = 17
-        for badge in self._badges:
+        shown = list(self._badges[:self.MAX_BADGES])
+        overflow = len(self._badges) - len(shown)
+        if overflow > 0:
+            shown.append(Badge(f"+{overflow}", "tag"))
+        for badge in shown:
             fill, fg = palette.get(badge.variant, palette["tag"])
             width = self._text_width(badge.text) + 2 * self.PAD_X
             rounded_rect(self, x, 1, x + width, height, RADIUS_PILL, fill=fill, outline="")
