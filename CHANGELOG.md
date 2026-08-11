@@ -5,6 +5,11 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.19.12 — F1 under test
+- One smoke test: the keyboard-shortcuts dialog was the only dialog no
+  flow test ever constructed, so a constructor regression would have
+  broken F1 unnoticed. Tests only.
+
 ## 3.19.11 — The rescue paths are pinned
 - Tests only, no behavior changes: the first measured coverage run
   (89% overall) showed the two deepest data-safety flows had never

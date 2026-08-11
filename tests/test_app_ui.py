@@ -205,6 +205,16 @@ class AppSmokeTests(unittest.TestCase):
             self.app.clear_completed()
         self.assertEqual([t.text for t in self.app.tasks], ["keep"])
 
+    def test_the_f1_help_dialog_constructs(self):
+        """The only dialog no flow test builds — a style or font
+        regression in its constructor would break F1 unnoticed."""
+        from cognitive_offload.dialogs import ShortcutsDialog
+        dialog = ShortcutsDialog(self.app)
+        try:
+            self.assertGreater(len(dialog.body.winfo_children()), 4)
+        finally:
+            dialog.destroy()
+
     def test_change_folder_migrates_the_lock_and_the_logs(self):
         new = Path(self._tmp.name) / "elsewhere"
         new.mkdir()
