@@ -5,6 +5,15 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.19.10 — The README tells the truth
+- The README claimed the suite "runs under xvfb-run in CI" while the
+  repository had no CI at all; a GitHub Actions workflow now exists, so
+  the sentence is true instead of deleted. It runs the full suite under
+  a virtual display on every push and pull request.
+- Documented three shipped promises: quitting mid-session banks the
+  minutes, layouts scale with screen DPI, and the keyboard focus ring
+  is visible on the filled primary buttons.
+
 ## 3.19.9 — The layout survives HiDPI screens
 - Window sizes, the minimum-size floor, dialog widths and text
   wraplengths now scale with the screen's DPI. They were 96-DPI

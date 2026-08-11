@@ -163,7 +163,13 @@ reinstall from python.org).
   Dark is not decoration: a bright white slab at 11pm is its own barrier.
 - Colour choices are checked, not eyeballed: body text meets WCAG 4.5:1 and
   focus rings meet 3:1 in both themes, the keyboard focus ring is visible on
-  the task list, and there are no unstyled Tk dialogs or dropdowns left.
+  the task list and on the filled primary buttons (drawn in the label colour,
+  so it contrasts with the fill by construction), and there are no unstyled
+  Tk dialogs or dropdowns left.
+- Window sizes, the minimum window size, dialog widths and text wrap widths
+  all scale with the screen's DPI, so a HiDPI laptop panel gets the same
+  layout as a standard display instead of a half-sized window with
+  double-sized text.
 - Tasks are rows, not lines of text — title, the first step underneath, and
   colour-coded badges for feel, readiness, bookings and tags. The row widgets
   are pooled and refilled rather than rebuilt, so a 300-task list re-renders in
@@ -186,6 +192,10 @@ reinstall from python.org).
   fails (disk full, folder on a paused sync drive), the app says so once,
   calmly, instead of failing silently for hours — and quitting with a broken
   save offers to write a copy somewhere else first.
+- Quitting mid-session keeps the minutes: closing the window during a focus
+  block banks the elapsed time to the session log before the app goes, so
+  closing the laptop lid without ceremony is a normal end of day, not a
+  forfeit. Breaks and blocks that never started record nothing.
 - A second copy of the app opening the same session folder is caught by a
   lock file and asked before it can silently overwrite the first copy's
   saves. (After a crash, answering "open anyway" takes over cleanly.)
@@ -264,4 +274,5 @@ The suite covers the model, filtering/sorting/start-ranking, the session log
 and the storage layer. It also
 drives the real widgets end to end (capture, edit, filter, matrix moves,
 save/load, undo); those tests skip themselves automatically when no display is
-available, and run under `xvfb-run` in CI.
+available. The GitHub Actions workflow in `.github/workflows/tests.yml` runs
+the whole suite under `xvfb-run` on every push and pull request.
