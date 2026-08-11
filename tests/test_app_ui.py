@@ -205,6 +205,77 @@ class AppSmokeTests(unittest.TestCase):
             self.app.clear_completed()
         self.assertEqual([t.text for t in self.app.tasks], ["keep"])
 
+    def test_change_folder_migrates_the_lock_and_the_logs(self):
+        new = Path(self._tmp.name) / "elsewhere"
+        new.mkdir()
+        old_db = self.app.config_store.db_path
+        old_lock = self.app._instance_lock
+        with mock.patch("cognitive_offload.app.filedialog.askdirectory",
+                        return_value=str(new)):
+            self.app.change_db_folder()
+        self.assertEqual(self.app.config_store.db_path, new)
+        self.assertTrue((new / ".lock").exists())        # new folder held
+        self.assertFalse((old_db / ".lock").exists())    # old one released
+        self.assertIsNot(self.app._instance_lock, old_lock)
+        self.assertTrue(str(self.app.session_log.path).startswith(str(new)))
+
+    def test_change_folder_backs_off_when_the_new_folder_is_contested(self):
+        new = Path(self._tmp.name) / "occupied"
+        new.mkdir()
+        old_db = self.app.config_store.db_path
+        with mock.patch("cognitive_offload.app.filedialog.askdirectory",
+                        return_value=str(new)), \
+             mock.patch.object(self.app, "_claim_instance_lock",
+                               return_value=False):
+            self.app.change_db_folder()
+        self.assertEqual(self.app.config_store.db_path, old_db)
+        self.assertTrue((old_db / ".lock").exists())  # still ours
+        self.assertIn("Kept the current session folder",
+                      self.app.status_var.get())
+
+    def _matrix_dialog_result(self, **overrides):
+        result = {"title": "From the dialog", "content": "body text",
+                  "first_step": "open it", "kind": "admin",
+                  "scheduled_for": "", "estimate_minutes": 0}
+        result.update(overrides)
+        return result
+
+    def test_matrix_add_carries_every_dialog_field(self):
+        with mock.patch("cognitive_offload.app.TaskEditorDialog") as editor:
+            editor.return_value.show.return_value = self._matrix_dialog_result(
+                scheduled_for="2026-09-01")
+            self.app.add_matrix_task("do_first")
+        [task] = self.app.matrix.list("do_first")
+        self.assertEqual(task.title, "From the dialog")
+        self.assertEqual(task.first_step, "open it")
+        self.assertEqual(task.kind, "admin")
+        self.assertEqual(task.scheduled_for, "2026-09-01")
+        self.assertEqual(self.app.matrix_lists["do_first"].size(), 1)
+
+    def test_matrix_edit_round_trips_the_fields(self):
+        self.app.matrix.create("do_first", "Old title")
+        self.app.refresh_matrix()
+        self.app.matrix_lists["do_first"].selection_set(0)
+        with mock.patch("cognitive_offload.app.TaskEditorDialog") as editor:
+            editor.return_value.show.return_value = self._matrix_dialog_result(
+                title="New title", estimate_minutes=45)
+            self.app.edit_matrix_task("do_first")
+        [task] = self.app.matrix.list("do_first")
+        self.assertEqual(task.title, "New title")
+        self.assertEqual(task.estimate_minutes, 45)
+        self.assertEqual(task.kind, "admin")
+
+    def test_matrix_add_save_failure_reports_and_stays_clean(self):
+        from cognitive_offload.storage import StorageError
+        with mock.patch("cognitive_offload.app.TaskEditorDialog") as editor, \
+             mock.patch.object(self.app.matrix, "create",
+                               side_effect=StorageError("folder gone")), \
+             mock.patch("cognitive_offload.app.messagebox.showerror") as err:
+            editor.return_value.show.return_value = self._matrix_dialog_result()
+            self.app.add_matrix_task("do_first")
+        err.assert_called_once()
+        self.assertEqual(self.app.matrix.list("do_first"), [])
+
     def test_send_to_matrix_then_back_again(self):
         self.capture("triage me")
         self.select(0)
@@ -2209,6 +2280,19 @@ class CorruptRecoveryTests(unittest.TestCase):
         self.assertEqual((db / "data.json.bak").read_text(encoding="utf-8"),
                          self.GOOD_SESSION)
         self.assertEqual(len(self._quarantined(db)), 1)
+
+    def test_a_corrupt_backup_blocks_autosave_and_loses_nothing(self):
+        """The deepest branch: data.json AND the .bak are unreadable."""
+        app, db = self._make_app(backup="{the bak is broken too", restore=True)
+        self.assertTrue(app._autosave_blocked)
+        self.assertEqual(app.tasks, [])
+        spoiled = self._quarantined(db)
+        self.assertEqual(len(spoiled), 1)
+        self.assertEqual(spoiled[0].read_text(encoding="utf-8"), "{not json")
+        # restore_backup copies, never moves: the bak survives on disk
+        # exactly as it was, for the user to inspect.
+        self.assertEqual((db / "data.json.bak").read_text(encoding="utf-8"),
+                         "{the bak is broken too")
 
     def test_no_backup_starts_fresh_with_the_bad_file_kept(self):
         app, db = self._make_app(backup=None)

@@ -5,6 +5,16 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.19.11 — The rescue paths are pinned
+- Tests only, no behavior changes: the first measured coverage run
+  (89% overall) showed the two deepest data-safety flows had never
+  been executed by a test. Now pinned: changing the session folder
+  migrates the lock and the logs (and backs off when the new folder is
+  already claimed), and the double-failure path — data.json AND its
+  backup both unreadable — blocks auto-save while preserving every
+  file on disk. The matrix add/edit dialogs are covered too, including
+  the save-failure path. app.py coverage 81% → 85%.
+
 ## 3.19.10 — The README tells the truth
 - The README claimed the suite "runs under xvfb-run in CI" while the
   repository had no CI at all; a GitHub Actions workflow now exists, so
