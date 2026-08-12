@@ -713,13 +713,22 @@ class CognitiveOffloadApp(tk.Tk):
     def send_scratch_line_to_tasks(self) -> None:
         try:
             raw = self.note_text.get("sel.first", "sel.last")
+            span = ("sel.first", "sel.last")
         except tk.TclError:
             raw = self.note_text.get("insert linestart", "insert lineend")
+            span = ("insert linestart", "insert lineend +1c")  # eat the newline
         lines = split_lines(raw)
         if not lines:
             self.set_status("Nothing on that line to turn into a task.")
             return
-        self._add_tasks(lines, "Sent {count} line(s) to the task list.")
+        previous = self.scratchpad_text()
+        if self._add_tasks(lines, "Sent {count} line(s) to the task list."):
+            # A move, as the arrow on the button says: the line leaves the
+            # pad — it is a commitment now, not a maybe — and Ctrl+Z brings
+            # the pad and the list back together. Copying-but-saying-"sent"
+            # also let the same line become a task twice.
+            self.attach_undo(lambda text=previous: self.set_scratchpad(text))
+            self.note_text.delete(*span)
 
     def brain_dump_into_tasks(self) -> None:
         lines = split_lines(self.scratchpad_text())
@@ -730,7 +739,12 @@ class CognitiveOffloadApp(tk.Tk):
             "Brain dump", f"Create {len(lines)} tasks from the scratchpad?"
         ):
             return
-        self._add_tasks(lines, "Moved {count} line(s) into tasks.")
+        previous = self.scratchpad_text()
+        if self._add_tasks(lines, "Moved {count} line(s) into tasks."):
+            # "Moved" now means moved: every non-blank line became a task,
+            # so the pad empties instead of inviting a duplicate dump.
+            self.attach_undo(lambda text=previous: self.set_scratchpad(text))
+            self.set_scratchpad("")
 
     def clear_notes(self) -> None:
         if not self.scratchpad_text().strip():

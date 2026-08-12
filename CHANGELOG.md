@@ -5,6 +5,14 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.19.13 — "Moved" means moved
+- "Line → task" and "All → tasks" now actually move: the converted
+  lines leave the scratchpad, matching the arrows on the buttons and
+  the "Sent/Moved" status text that always claimed they did. A repeated
+  brain dump no longer duplicates every task, and the pad stays what it
+  is for — the things you haven't decided about yet. Ctrl+Z reverses
+  the whole move, pad and list together.
+
 ## 3.19.12 — F1 under test
 - One smoke test: the keyboard-shortcuts dialog was the only dialog no
   flow test ever constructed, so a constructor regression would have

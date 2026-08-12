@@ -196,6 +196,41 @@ class AppSmokeTests(unittest.TestCase):
             self.app.brain_dump_into_tasks()
         self.assertEqual([t.text for t in self.app.tasks], ["third", "second", "first"])
 
+    def test_brain_dump_moves_the_lines_out_of_the_pad(self):
+        """"Moved 3 line(s)" now means moved — a second dump used to
+        create every task again."""
+        self.app.note_text.insert("1.0", "- first\n- second\n- third\n")
+        self.app.brain_dump_into_tasks()
+        self.assertEqual(self.app.scratchpad_text().strip(), "")
+        self.app.brain_dump_into_tasks()  # nothing left to dump
+        self.assertEqual(len(self.app.tasks), 3)  # no duplicates
+
+    def test_line_to_task_takes_only_its_line_with_it(self):
+        self.app.note_text.insert("1.0", "keep me\ntake me\nkeep me too\n")
+        self.app.note_text.mark_set("insert", "2.0")
+        self.app.send_scratch_line_to_tasks()
+        self.assertEqual([t.text for t in self.app.tasks], ["take me"])
+        pad = self.app.scratchpad_text()
+        self.assertNotIn("take me", pad)
+        self.assertIn("keep me", pad)
+        self.assertIn("keep me too", pad)
+
+    def test_undo_reverses_the_whole_move_pad_and_list_together(self):
+        self.app.note_text.insert("1.0", "- one\n- two\n")
+        before = self.app.scratchpad_text()
+        self.app.brain_dump_into_tasks()
+        self.assertEqual(len(self.app.tasks), 2)
+        self.app.undo()
+        self.assertEqual(self.app.tasks, [])
+        self.assertEqual(self.app.scratchpad_text(), before)
+        # and the same for a single line
+        self.app.note_text.mark_set("insert", "1.0")
+        self.app.send_scratch_line_to_tasks()
+        self.assertEqual(len(self.app.tasks), 1)
+        self.app.undo()
+        self.assertEqual(self.app.tasks, [])
+        self.assertEqual(self.app.scratchpad_text(), before)
+
     def test_clear_completed_removes_only_finished_tasks(self):
         self.capture("keep")
         self.capture("drop")
