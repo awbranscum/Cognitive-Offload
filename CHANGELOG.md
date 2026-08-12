@@ -5,6 +5,12 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.19.14 — No version left unwritten
+- Backfilled the missing 3.19.1–3.19.2 entries: the six-badge cap that
+  keeps a tag flood from squeezing a task's title to nothing had
+  shipped with no changelog trace beyond a later refinement note.
+  Every shipped version now has an entry.
+
 ## 3.19.13 — "Moved" means moved
 - "Line → task" and "All → tasks" now actually move: the converted
   lines leave the scratchpad, matching the arrows on the buttons and
@@ -102,6 +108,13 @@ scolds.
   mid-word at a fixed width.
 - When exactly one tag badge would overflow, it is shown rather than
   summarised — "+1" costs the same space as the badge it hides.
+
+## 3.19.1–3.19.2 — The title survives a tag flood
+- 3.19.2: a task's badges cap at six, with the rest folded into one
+  quiet "+k" pill — a 15-tag task used to render as tags and no title
+  at all, on both the task list and the matrix rows. The title is the
+  row; badges are garnish.
+- 3.19.1: this changelog was introduced.
 
 ## 3.19.0 — The week, in evidence
 - Click the momentum strip (or its summary) for a week review: one line per
