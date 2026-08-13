@@ -9,7 +9,9 @@ scolds.
 - Backfilled the missing 3.19.1–3.19.2 entries: the six-badge cap that
   keeps a tag flood from squeezing a task's title to nothing had
   shipped with no changelog trace beyond a later refinement note.
-  Every shipped version now has an entry.
+  Every version since this changelog began (3.5.x) now has an entry;
+  versions 2.0.0–3.4.0 predate it and are summarised in "Before the
+  loop" at the bottom — the git history is the full record there.
 
 ## 3.19.13 — "Moved" means moved
 - "Line → task" and "All → tasks" now actually move: the converted
@@ -225,7 +227,7 @@ scolds.
   done by accident); "Done early" works on every block; the minutes
   spinbox can't wipe a paused block.
 
-## Before the loop (the branch's foundation)
+## Before the loop (versions 2.0.0–3.4.0, the branch's foundation)
 - Restructured into a tested package; fixed the original data-loss and
   selection bugs.
 - Built the app around task initiation: first steps, "feels like"
