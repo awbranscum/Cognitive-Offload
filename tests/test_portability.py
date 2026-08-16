@@ -30,6 +30,7 @@ PORTABLE = [
     "viewmodels",  # what a row shows, with no opinion on drawing
     "rows",        # which badges and wording a task has earned
     "presenter",   # what each screen says, with nothing to say it on
+    "ports",       # what the app needs from the platform underneath it
 ]
 
 # The face: allowed — indeed expected — to need tkinter.

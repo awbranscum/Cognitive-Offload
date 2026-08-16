@@ -5,6 +5,54 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.23.0 — a crash no longer costs you a question at the next launch
+- **The app opens.** If it crashed, was force-quit, or the battery ran
+  out, the next launch used to stop and ask: *"Another copy looks open
+  with this session folder… open here anyway?"* — before the window
+  appeared. That is a decision at the exact moment the app promises to
+  take a thought off your hands, and it is a decision nobody can
+  actually make: you cannot know whether the process that wrote a pid
+  two days ago is still alive. Now you are only asked when a second copy
+  really is running.
+
+  The lock file's *existence* no longer decides anything. Ownership is
+  an operating-system lock held on the open handle, which the kernel
+  drops when the holding process dies, however it dies. So a crash
+  leaves nothing to ask about, while the case the guard exists for —
+  two copies autosaving the same file and silently overwriting each
+  other every thirty seconds — is refused exactly as before. There is a
+  regression test that starts a real second process, confirms it blocks,
+  `SIGKILL`s it so no cleanup can possibly run, and asserts the next
+  launch opens anyway.
+
+  Deliberately *not* done by checking whether the recorded pid is alive:
+  on Windows `os.kill(pid, 0)` terminates the target process. Nor by
+  `fcntl.lockf`, whose locks belong to the process rather than the open
+  file, so a second copy inside one process would take it and the guard
+  would quietly stop guarding. On a filesystem that cannot lock at all —
+  network and synced folders often cannot — it falls back to the old,
+  careful behaviour and asks, because there the guess is all there is.
+
+- **Where the files live is now something the platform says, not
+  something the code assumes.** A new `ports` module describes a
+  platform as `Locations` — data directory, matrix directory, config
+  file, and a home used only to shorten a path for display. `storage.py`
+  takes one instead of computing four paths from `Path.home()` at import
+  time. `desktop_locations()` reproduces the existing layout exactly, so
+  an install finds its files precisely where it left them; a test pins
+  that, and another pins the unchanged `~/.cognitive_offload/data.json`
+  label. `app_private_locations()` is the other shape: everything under
+  one directory, no dotfiles, no assumption that a home folder exists —
+  which is what Android hands an app, and what a portable install wants.
+
+  `ports` joins the portability guard: ten of the sixteen modules the
+  guard covers now need no display at all.
+
+444 tests pass, up from 431: 13 new, 430 untouched, and one rewritten.
+That one asserted an unreadable lock file blocked startup on its own —
+it encoded the rule this release replaces, so it now pins the refusal
+where it belongs, against a copy that really is running.
+
 ## 3.22.0 — what the app says, decided without a screen to say it on
 Groundwork for running this on a phone. Nothing on screen changes; where
 the words come from does.

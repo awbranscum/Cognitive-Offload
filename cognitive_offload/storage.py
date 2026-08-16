@@ -6,6 +6,7 @@ UI decides how to report them.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
@@ -16,12 +17,17 @@ import time
 from pathlib import Path
 
 from .models import MatrixTask, Note, Task, now_stamp
+from .ports import Locations, desktop_locations
 
 STATE_VERSION = 2
 
-DEFAULT_DB_PATH = Path.home() / ".cognitive_offload"
-DEFAULT_MATRIX_PATH = Path.home() / "MatrixTasks"
-CONFIG_PATH = Path.home() / ".cognitive_offload_config.json"
+# The desktop layout, resolved once at import exactly as it always was. Code
+# that wants to be told where to write takes a Locations instead; these remain
+# so that every existing caller keeps finding the same files.
+DEFAULT_LOCATIONS = desktop_locations()
+DEFAULT_DB_PATH = DEFAULT_LOCATIONS.data_dir
+DEFAULT_MATRIX_PATH = DEFAULT_LOCATIONS.matrix_dir
+CONFIG_PATH = DEFAULT_LOCATIONS.config_file
 
 STATE_FILENAME = "data.json"
 SESSIONS_FILENAME = "sessions.json"
@@ -49,10 +55,15 @@ class StorageError(Exception):
     """Raised when data cannot be read from or written to disk."""
 
 
-def display_path(path, limit: int = 58) -> str:
-    """Shorten a path for a label: ``~`` for home, an ellipsis for the rest."""
+def display_path(path, limit: int = 58, home=None) -> str:
+    """Shorten a path for a label: ``~`` for home, an ellipsis for the rest.
+
+    ``home`` defaults to the running user's, which is what every current caller
+    wants; a platform whose files live somewhere else passes its own so the
+    label still shortens instead of showing an absolute path nobody recognises.
+    """
     text = str(path)
-    home = str(Path.home())
+    home = str(home if home is not None else Path.home())
     if text.startswith(home):
         text = "~" + text[len(home):]
     if len(text) > limit:
@@ -109,10 +120,13 @@ def read_json(path: Path):
 class Config:
     """User preferences, stored next to the home directory."""
 
-    def __init__(self, path: Path = CONFIG_PATH):
-        self.path = Path(path)
-        self.db_path = DEFAULT_DB_PATH
-        self.matrix_db_path = DEFAULT_MATRIX_PATH
+    def __init__(self, path: Path | None = None, locations: Locations | None = None):
+        # A platform describes itself once, here; everything below reads its
+        # answer rather than asking the operating system a second time.
+        self.locations = locations or DEFAULT_LOCATIONS
+        self.path = Path(path) if path is not None else self.locations.config_file
+        self.db_path = self.locations.data_dir
+        self.matrix_db_path = self.locations.matrix_dir
         self.show_done = True
         self.sort_order = "priority"
         self.autosave = True
@@ -145,8 +159,9 @@ class Config:
             return self
         if not isinstance(data, dict):
             return self
-        self.db_path = _path_or(data.get("db_path"), DEFAULT_DB_PATH)
-        self.matrix_db_path = _path_or(data.get("matrix_db_path"), DEFAULT_MATRIX_PATH)
+        self.db_path = _path_or(data.get("db_path"), self.locations.data_dir)
+        self.matrix_db_path = _path_or(data.get("matrix_db_path"),
+                                       self.locations.matrix_dir)
         self.show_done = bool(data.get("show_done", True))
         order = data.get("sort_order")
         from .queries import DEFAULT_SORT, VALID_SORT_KEYS  # here to avoid an import cycle risk
@@ -201,6 +216,45 @@ def _int_or(value, fallback: int, low: int, high: int) -> int:
         return fallback
 
 
+try:  # POSIX
+    import fcntl as _fcntl
+except ImportError:  # pragma: no cover - exercised on Windows
+    _fcntl = None
+try:  # Windows
+    import msvcrt as _msvcrt
+except ImportError:  # pragma: no cover - exercised off Windows
+    _msvcrt = None
+
+# Errors that mean "somebody else holds this", as opposed to "this filesystem
+# does not do locking". Anything else is treated as the latter, because
+# refusing to start over an unexpected errno would be the worse failure.
+_BUSY_ERRNOS = frozenset({errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK})
+
+
+def _take_lock(fd: int) -> bool | None:
+    """Try to take an exclusive OS lock: True ours, False taken, None can't.
+
+    ``flock`` is deliberate. POSIX record locks (``fcntl.lockf``) are owned by
+    the *process*, so a second lock inside one process succeeds and the guard
+    quietly stops guarding — including in this app's own tests. ``flock`` is
+    owned by the open file, which is the behaviour wanted here.
+    """
+    if _fcntl is not None:
+        try:
+            _fcntl.flock(fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+            return True
+        except OSError as exc:
+            return False if exc.errno in _BUSY_ERRNOS else None
+    if _msvcrt is not None:  # pragma: no cover - Windows only
+        try:
+            os.lseek(fd, 0, os.SEEK_SET)
+            _msvcrt.locking(fd, _msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError as exc:
+            return False if exc.errno in _BUSY_ERRNOS else None
+    return None  # pragma: no cover - neither module exists
+
+
 class InstanceLock:
     """Guards a session folder against a second running copy.
 
@@ -215,6 +269,10 @@ class InstanceLock:
     def __init__(self, folder: Path):
         self.path = Path(folder) / ".lock"
         self.owned = False
+        # Held open for as long as this copy runs: the operating system lock
+        # lives on the open file, not on the file's existence, so letting the
+        # handle close would hand the lock straight back.
+        self._fd: int | None = None
 
     def _stamp(self) -> dict:
         return {
@@ -223,27 +281,72 @@ class InstanceLock:
             "started": now_stamp(),
         }
 
+    def _write_stamp(self, fd: int) -> None:
+        try:
+            os.lseek(fd, 0, os.SEEK_SET)
+            os.truncate(fd, 0)
+            os.write(fd, json.dumps(self._stamp()).encode("utf-8"))
+        except OSError:
+            pass
+
     def acquire(self) -> bool:
-        """Take the lock. False when another copy seems to hold it."""
+        """Take the lock. False only when another copy is genuinely running.
+
+        A lock file left behind by a crash used to be indistinguishable from a
+        copy that is running right now, so the next launch opened with a
+        question — at exactly the moment the app promises to take a thought
+        off your hands. Worse, it was a question nobody can answer: you cannot
+        know whether the process that wrote a pid two days ago is alive.
+
+        So the file's existence no longer decides anything. Ownership is an
+        operating-system lock held on the open handle, which the kernel drops
+        when the holding process dies, however it dies. A running second copy
+        is still refused; a crashed one leaves nothing to ask about.
+        """
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_RDWR)
         except FileExistsError:
-            return False
+            return self._claim_existing()
         except OSError:
             # An unwritable folder will fail loudly at the first save; a
             # second refusal here would just be in the way.
             return True
+        # Nobody had the file at all. Take the OS lock if this platform offers
+        # one, but do not refuse to start if it does not.
+        _take_lock(fd)
+        self._fd = fd
+        self._write_stamp(fd)
+        self.owned = True
+        return True
+
+    def _claim_existing(self) -> bool:
+        """The file is already there. Is anyone actually behind it?"""
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                json.dump(self._stamp(), fh)
+            fd = os.open(self.path, os.O_RDWR)
         except OSError:
-            pass
+            return False
+        held = _take_lock(fd)
+        if held is not True:
+            # Either a live copy holds it, or this filesystem cannot tell us
+            # (network and synced folders often cannot). Both fall back to the
+            # old, careful answer: assume the other copy is real and ask.
+            os.close(fd)
+            return False
+        # The lock was free, so whoever wrote this file is gone. Claiming it
+        # silently is the whole point: there is no question worth asking.
+        self._fd = fd
+        self._write_stamp(fd)
         self.owned = True
         return True
 
     def takeover(self) -> None:
-        """The user says the other copy is gone: claim the lock anyway."""
+        """The user says the other copy is gone: claim the lock anyway.
+
+        Only reachable now when the OS lock could not answer the question —
+        a genuinely running copy, or a filesystem that cannot lock. The
+        override stays because the second case is real.
+        """
         try:
             self.path.write_text(json.dumps(self._stamp()), encoding="utf-8")
         except OSError:
@@ -268,7 +371,18 @@ class InstanceLock:
             self.path.unlink()
         except OSError:
             pass
+        self._close()
         self.owned = False
+
+    def _close(self) -> None:
+        """Drop the handle, and with it the OS lock."""
+        if self._fd is None:
+            return
+        try:
+            os.close(self._fd)
+        except OSError:
+            pass
+        self._fd = None
 
 
 class NotASessionError(StorageError):
