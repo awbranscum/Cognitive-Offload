@@ -1932,6 +1932,48 @@ class AppSmokeTests(unittest.TestCase):
                         return_value=True):
             self.app.delete_matrix_tasks(category)
 
+    def test_every_matrix_command_registers_an_undo(self):
+        """The README promises this; this is the fact behind the promise.
+
+        Prose cannot be pinned the way strings can, so pin the property it
+        describes instead. A sixth matrix command added without undo would
+        make the README's safety claim wrong again, silently — that is
+        exactly how it went wrong the first time — and this notices.
+        """
+        editor = {"title": "t", "content": "", "first_step": "",
+                  "kind": "", "scheduled_for": ""}
+        depth = lambda: len(self.app._undo_stack._entries)  # noqa: E731
+
+        def run(label, command, **patches):
+            self.app.matrix.create("do_first", f"seed for {label}", "")
+            self.app.refresh_matrix()
+            self._matrix_select("do_first", 0)
+            before = depth()
+            with contextlib.ExitStack() as stack:
+                for target, value in patches.items():
+                    patched = stack.enter_context(
+                        mock.patch(f"cognitive_offload.app.{target}"))
+                    if target == "messagebox":
+                        patched.askyesno.return_value = value
+                    else:
+                        patched.return_value.show.return_value = value
+                command()
+            self.assertEqual(depth(), before + 1,
+                             f"{label} left the undo stack untouched")
+            self.assertIsNotNone(self.app._undo_stack._entries[-1].restore,
+                                 f"{label} pushed an entry that undoes nothing")
+
+        run("add", lambda: self.app.add_matrix_task("do_first"),
+            TaskEditorDialog=editor)
+        run("edit", lambda: self.app.edit_matrix_task("do_first"),
+            TaskEditorDialog=editor)
+        run("move", lambda: self.app.move_matrix_tasks("do_first"),
+            QuadrantDialog="eliminate")
+        run("book", lambda: self.app.book_matrix_time("do_first"),
+            PromptDialog="tomorrow")
+        run("delete", lambda: self.app.delete_matrix_tasks("do_first"),
+            messagebox=True)
+
     def test_deleting_one_matrix_task_no_longer_asks(self):
         """The guard's only justification went away when undo arrived.
 

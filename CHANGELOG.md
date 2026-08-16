@@ -5,6 +5,56 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.29.0 — the README stops promising the wrong things
+Two of the README's safety claims had gone out of date, in the two
+places where being wrong actually costs something.
+
+- **It told you to answer a question that no longer appears.** "(After a
+  crash, answering 'open anyway' takes over cleanly.)" — since 3.23.0 a
+  crashed copy is taken over *without asking*, so that instruction
+  describes an impossible action. It also said the second copy is
+  "caught by a lock file", when the whole point of that release was that
+  the file existing decides nothing: the lock is held by the operating
+  system on an open handle. Both corrected, including when you *are*
+  still asked — a copy genuinely running, or a folder that cannot answer
+  the question at all.
+
+- **It undersold what Ctrl+Z covers.** The README described undo as
+  reaching only the moves between the two tabs. Since 3.24.0 the
+  matrix's own five commands — add, edit, move, book a time, delete —
+  are undoable too. A reader would have concluded that deleting a matrix
+  task is unrecoverable and been more careful than the app requires,
+  which is the opposite of the reassurance 3.24.0 exists to give, and it
+  matters more now that 3.28.0 stopped asking before a single delete.
+
+  Prose cannot be pinned the way strings can, so the *property* it
+  describes is pinned instead: a test drives all five matrix commands
+  and fails if any of them stops registering an undo. A sixth command
+  added without one would make the README wrong again silently — which
+  is exactly how it went wrong the first time.
+
+- **The status bar joined the wording net, which had never watched it.**
+  Seventy-three status messages, none of them covered. That is where
+  most of what this app says is actually said — every command reports
+  there — and both of the last two releases' wording defects lived in
+  it and had to be found by hand. The snapshot goes from 136 strings to
+  **214**.
+
+  Doing it properly needed the extractor to read sentences that are
+  *assembled* rather than written out: `_batch_status(…) + "."` says
+  words, and `a if cond else b` says two different things, so a
+  conditional inside a concatenation is now distributed into the
+  separate sentences it really is rather than mashed into one
+  unreadable blob.
+
+- **One of those newly-watched strings was wrong.** Deleting a matrix
+  task reported "Deleted 1 matrix task Ctrl+Z undoes it." — a run-on,
+  because `_batch_status` deliberately leaves its sentence unfinished
+  for each caller to close and this one forgot. The task list one line
+  away has always said "Deleted 1 task. Ctrl+Z undoes it."
+
+484 tests pass, up from 483. One new, no existing test changed.
+
 ## 3.28.0 — switching no longer claims to throw your minutes away
 - **"Drop it" was never true, and it was the worst possible thing to
   say.** Starting a block while one is already running asked: *"You are

@@ -196,12 +196,18 @@ reinstall from python.org).
   block banks the elapsed time to the session log before the app goes, so
   closing the laptop lid without ceremony is a normal end of day, not a
   forfeit. Breaks and blocks that never started record nothing.
-- A second copy of the app opening the same session folder is caught by a
-  lock file and asked before it can silently overwrite the first copy's
-  saves. (After a crash, answering "open anyway" takes over cleanly.)
-- `Ctrl+Z` reaches across the task list and the matrix: undoing a "to matrix"
-  move deletes the file it created, and undoing the reverse writes it back, so
-  a task is never left in both places or neither.
+- A second copy of the app opening the same session folder is caught before it
+  can silently overwrite the first copy's saves. The lock is held by the
+  operating system on an open handle rather than being a file that merely
+  exists, so a copy that crashed or was force-closed leaves nothing behind to
+  ask about — the next launch takes the folder over without a question. You
+  are asked only when a copy really is running, or when the folder cannot
+  answer the question at all (network and synced folders often cannot).
+- `Ctrl+Z` reaches across the task list and the matrix. Adding, editing,
+  moving, booking a time for and deleting a matrix task are all undoable, just
+  as they are in the list. So are the moves between the two: undoing a "to
+  matrix" move deletes the file it created, and undoing the reverse writes it
+  back, so a task is never left in both places or neither.
 - The `.bak` is written once per run, so it still holds the session as you
   opened it rather than being overwritten by an autosave 30 seconds later.
 - Writes are atomic (temp file + rename) and the previous version is kept as

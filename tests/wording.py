@@ -1,4 +1,4 @@
-"""Read every user-visible modal string out of the source.
+"""Read every user-visible string out of the source.
 
 The wording *is* the product. A refactor that moves a question from one module
 to another is supposed to carry its words across untouched, and the only way to
@@ -50,10 +50,50 @@ def _flatten(node) -> str | None:
             else _interpolation(v)
             for v in node.values)
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        left, right = _flatten(node.left), _flatten(node.right)
+        left, right = _joined(node.left), _joined(node.right)
         if left is not None and right is not None:
             return left + right
     return None
+
+
+def _joined(node) -> str | None:
+    """One side of a concatenation.
+
+    A sentence assembled from a helper — ``_batch_status(...) + "."`` — still
+    says words, and the words are in the arguments, so a call gets rendered
+    here. Only here: a bare ``PromptDialog(...).show()`` assigned to a name
+    says nothing itself, and rendering it would duplicate the dialog's own
+    labels as an unreadable blob.
+    """
+    plain = _flatten(node)
+    if plain is not None:
+        return plain
+    if isinstance(node, ast.Call):
+        rendered = _interpolation(node)
+        if any(ch.isalpha() for ch in rendered):
+            return rendered
+    return None
+
+
+def _texts(node, in_concat: bool = False) -> list[str]:
+    """One entry per thing this expression can actually say.
+
+    ``a if cond else b`` is two different sentences, and squashing them into
+    one blob makes both unreadable — which is worse than not watching them,
+    because an unreadable diff is one nobody checks. A conditional nested
+    inside a concatenation is distributed rather than blobbed, so
+    ``status(x) + "." + (" Ctrl+Z undoes it." if done else "")`` becomes the
+    two sentences it really is.
+    """
+    if isinstance(node, ast.IfExp):
+        return [t for branch in (node.body, node.orelse)
+                for t in _texts(branch, in_concat)]
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        lefts = _texts(node.left, in_concat=True)
+        rights = _texts(node.right, in_concat=True)
+        return [left + right for left in lefts for right in rights]
+    text = _joined(node) if in_concat else _flatten(node)
+    return [text] if text else []
 
 
 def _owners(tree: ast.AST) -> dict[int, str]:
@@ -85,14 +125,16 @@ def _entries_for(path: Path) -> list[str]:
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Assign, ast.AnnAssign)):
             continue
-        text = _flatten(node.value) if node.value is not None else None
-        if not text or " " not in text.strip():
-            continue  # identifiers, style names and sort keys are not wording
+        if node.value is None:
+            continue
         targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-        for target in targets:
-            if isinstance(target, ast.Name):
-                where = owner.get(id(node), "<module>")
-                found.append(f"{path.name} | {target.id}= | {where} | {text}")
+        for text in _texts(node.value):
+            if " " not in text.strip():
+                continue  # identifiers, style names and sort keys are not wording
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    where = owner.get(id(node), "<module>")
+                    found.append(f"{path.name} | {target.id}= | {where} | {text}")
 
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -100,6 +142,17 @@ def _entries_for(path: Path) -> list[str]:
         where = owner.get(id(node), "<module>")
 
         func = node.func
+        # The status bar. Most of what this app says is said here — every
+        # command reports to it — and it was invisible to this net until two
+        # separate wording defects had to be found in it by hand.
+        if isinstance(func, ast.Attribute) and \
+                func.attr in ("set_status", "hold_status"):
+            for arg in node.args:
+                for text in _texts(arg):
+                    if text.strip():
+                        found.append(f"{path.name} | status | {where} | {text}")
+            continue
+
         # messagebox.askyesno("Title", "Body") / filedialog.askdirectory(title=…)
         if isinstance(func, ast.Attribute) and \
                 getattr(func.value, "id", None) in ("messagebox", "filedialog"):
@@ -138,7 +191,8 @@ def snapshot() -> str:
     # escaped blob is worse than reviewing a marker.
     flattened = sorted(e.replace("\n", "\\n") for e in entries)
     header = (
-        "# Every user-visible modal string, extracted from the source.\n"
+        "# Every user-visible string, extracted from the source:\n"
+        "# dialogs, labels, and the status bar.\n"
         "# One entry per line: file | kind | enclosing function | text\n"
         "# Interpolations collapse to {}. Newlines are written \\n.\n"
         "#\n"

@@ -899,8 +899,12 @@ class CognitiveOffloadApp(tk.Tk):
             self._undo_matrix_change("delete from the matrix", before,
                                      [t.id for t in tasks])
         self.refresh_matrix()
+        # _batch_status deliberately leaves the sentence unfinished so each
+        # caller can add its own tail; this one forgot the full stop and read
+        # "Deleted 1 matrix task Ctrl+Z undoes it." right beside a task list
+        # that gets it right.
         self.set_status(_batch_status("Deleted", done, len(tasks), "matrix task")
-                        + (" Ctrl+Z undoes it." if done else ""))
+                        + "." + (" Ctrl+Z undoes it." if done else ""))
 
     def move_matrix_tasks(self, category: str) -> None:
         tasks = self._selected_matrix_tasks(category)

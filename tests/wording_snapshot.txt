@@ -1,4 +1,5 @@
-# Every user-visible modal string, extracted from the source.
+# Every user-visible string, extracted from the source:
+# dialogs, labels, and the status bar.
 # One entry per line: file | kind | enclosing function | text
 # Interpolations collapse to {}. Newlines are written \n.
 #
@@ -17,6 +18,9 @@ app.py | finished= | _finish_session | {} min, and it's finished. Nice.
 app.py | hint= | book_matrix_time | today / tomorrow / a weekday / 2026-08-01 — blank clears it
 app.py | hint= | tag_selected | Lower-cased automatically.
 app.py | intro= | _recover_state | {}\n\nThe unreadable file was set aside as {}, so nothing is lost.
+app.py | line= | _update_timer_label | break ends {%H:%M}
+app.py | line= | _update_timer_label | ends {%H:%M}
+app.py | line= | append_scratchpad | [{}] {}
 app.py | messagebox.askyesno | _finish_break | Break over
 app.py | messagebox.askyesno | _finish_break | Start another focus session?
 app.py | messagebox.askyesno | _finish_session | Session finished
@@ -71,11 +75,84 @@ app.py | messagebox.showwarning | load_state | Some records were unreadable
 app.py | messagebox.showwarning | load_state | {} task record{} in {} couldn't be read and {were was} left out.\n\nAuto-save is off so the file stays untouched for now. Saving (Ctrl+S) accepts the loss; Export a copy first if you want to look at the original.
 app.py | messagebox.showwarning | load_state_dialog | Some records were unreadable
 app.py | messagebox.showwarning | load_state_dialog | {} task record{} in {} couldn't be read and {were was} left out.\n\nAuto-save is off so the file stays untouched for now. Saving (Ctrl+S) accepts the loss.
+app.py | name= | begin_focus |  on "{}"
+app.py | name= | begin_focus | the current block
 app.py | note= | _bank_session |  (couldn't write the session log — the day strip may forget this one)
 app.py | ok_text= | book_matrix_time | Book
 app.py | ok_text= | tag_selected | Add
 app.py | question= | begin_focus | A break is running.\n\nEnd it and start a session now?
 app.py | question= | begin_focus | You are {} minute{s} into {}.\n\nThose minutes are kept, not lost — starting something else banks them.\n\nStart something else instead?
+app.py | spoken= | book_matrix_time | for {}
+app.py | spoken= | book_matrix_time | for {} ({})
+app.py | status | _autosave | Auto-saved.
+app.py | status | _autosave | Couldn't auto-save — disk full, or the folder unavailable? Your work is only in this window for now: try Save, or Export a copy somewhere safe.
+app.py | status | _finish_break | Break finished.
+app.py | status | _recover_state | Started fresh. The unreadable file is kept as {}.
+app.py | status | _require_selection | Select a task first to {}.
+app.py | status | add_matrix_task | Added to {}.
+app.py | status | add_note_from_capture | Captured in scratchpad.
+app.py | status | apply_calm_mode | Calm mode off.
+app.py | status | apply_calm_mode | Calm mode on — the extras are hidden, not gone.
+app.py | status | begin_focus | {} min banked{}. Only the first step matters.
+app.py | status | begin_focus | {} warm-up step{s} done. Starting.
+app.py | status | book_matrix_time | Select a task to book a time for.
+app.py | status | book_matrix_time | {Booked task} {}.
+app.py | status | book_matrix_time | {Cleared the booking on task}.
+app.py | status | brain_dump_into_tasks | The scratchpad is empty.
+app.py | status | change_db_folder | Kept the current session folder.
+app.py | status | change_db_folder | Session folder: {}
+app.py | status | change_matrix_db_folder | Matrix folder: {}
+app.py | status | clear_completed | Cleared {completed task}.
+app.py | status | clear_completed | No completed tasks to clear.
+app.py | status | clear_notes | Scratchpad cleared.
+app.py | status | copy_matrix_to_tasks | Copied {task} to the main list.
+app.py | status | copy_matrix_to_tasks | {} is empty.
+app.py | status | copy_session_path | Copied path: {}
+app.py | status | delete_matrix_tasks | Select a task to delete.
+app.py | status | delete_matrix_tasks | {Deleted matrix task}. Ctrl+Z undoes it.
+app.py | status | delete_selected | Deleted {task}. Ctrl+Z undoes it.
+app.py | status | edit_matrix_task | Matrix task updated.
+app.py | status | edit_matrix_task | Select exactly one task to edit.
+app.py | status | edit_selected_details | Select exactly one task to edit.
+app.py | status | edit_selected_details | Task updated.
+app.py | status | export_state | Exported to {}
+app.py | status | finish_session_early | Break ended.
+app.py | status | focus_matrix_task | Select a task to start.
+app.py | status | focus_on_selected | Pick one task to focus on — one at a time is the point.
+app.py | status | load_state | Loaded {task}.
+app.py | status | load_state | Loaded {}
+app.py | status | load_state_dialog | Working in {}
+app.py | status | matrix_to_tasks | Moved {task} to the main list.
+app.py | status | matrix_to_tasks | Select a task to send to the task list.
+app.py | status | move_matrix_tasks | Select a task to move.
+app.py | status | move_matrix_tasks | {Moved task} to {}.
+app.py | status | on_task_selection_changed | {} tasks selected.
+app.py | status | park_thought | Parked in the scratchpad.
+app.py | status | pause_timer | Paused. Pick it up whenever.
+app.py | status | promote_selected | Pinned {task} to the top.
+app.py | status | promote_selected | Pinned {task} — pinned tasks sit at the top under Priority sort.
+app.py | status | promote_selected | Unpinned {task}.
+app.py | status | refresh_matrix | Matrix folder is missing: {} (moved or unmounted?). Showing empty quadrants; nothing will be written until it is back.
+app.py | status | reset_timer | Timer reset.
+app.py | status | save_state | Saved to {}
+app.py | status | send_scratch_line_to_tasks | Nothing on that line to turn into a task.
+app.py | status | send_selected_to_matrix | Moved {task} to {}.
+app.py | status | send_selected_to_matrix | Moved {} of {task} to {}.
+app.py | status | set_theme | {} theme.
+app.py | status | show_booked | Booked for today: {}
+app.py | status | show_booked | Booked in Schedule: {}
+app.py | status | skip_next | That is the only thing open besides what you're on.
+app.py | status | skip_next | That is the only thing open.
+app.py | status | snooze_next | Okay — it will come back tomorrow.
+app.py | status | start_here | Nothing open. That is a fine place to be.
+app.py | status | start_next | Nothing open. That is a fine place to be.
+app.py | status | start_timer | Break started.
+app.py | status | start_timer | {} minutes. Only the first step matters.
+app.py | status | tag_selected | Tagged {task} with '{}'.
+app.py | status | toggle_selected_done | Marked {task} {}.
+app.py | status | toggle_selected_priority | {Flagged Unflagged} {task}.
+app.py | status | undo | Nothing to undo.
+app.py | status | undo | Undid: {}.
 app.py | text= | _build_ui |   Cognitive Offload  
 app.py | text= | _build_ui |   Eisenhower Matrix  
 app.py | text= | _tick_timer | Start
@@ -97,6 +174,8 @@ dialogs.py | dialog-title | __init__ | Session finished
 dialogs.py | dialog-title | __init__ | Start a focus session
 dialogs.py | dialog-title | __init__ | This week
 dialogs.py | dialog-title | __init__ | Where do I start?
+dialogs.py | heading= | __init__ | Move task to:
+dialogs.py | heading= | __init__ | Move {} tasks to:
 dialogs.py | messagebox.showwarning | collect | Date not understood
 dialogs.py | messagebox.showwarning | collect | The title cannot be empty.
 dialogs.py | messagebox.showwarning | collect | Title required
