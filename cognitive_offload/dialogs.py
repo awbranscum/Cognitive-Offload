@@ -640,14 +640,14 @@ class WeekReviewDialog(ModalDialog):
                 style="Muted.TLabel", wraplength=px(self, 430), justify="left",
             ).pack(anchor="w", pady=(6, 0))
         for entry in days:
-            line = entry["label"]
-            if entry["sessions"]:
-                plural = "s" if entry["sessions"] != 1 else ""
-                line += (f" · {entry['sessions']} session{plural}"
-                         f" · {entry['minutes']} min")
+            line = entry.label
+            if entry.sessions:
+                plural = "s" if entry.sessions != 1 else ""
+                line += (f" · {entry.sessions} session{plural}"
+                         f" · {entry.minutes} min")
             ttk.Label(self.body, text=line, font=font(SIZE_BASE, "bold")).pack(
                 anchor="w", pady=(8, 0))
-            for title in entry["titles"]:
+            for title in entry.titles:
                 ttk.Label(self.body, text=f"   ✓ {title}", style="Muted.TLabel",
                           wraplength=px(self, 430), justify="left").pack(anchor="w")
         if days:

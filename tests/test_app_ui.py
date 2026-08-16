@@ -1106,10 +1106,10 @@ class AppSmokeTests(unittest.TestCase):
         days, total_sessions, total_minutes = review.call_args.args[1:4]
         self.assertEqual(total_sessions, 2)
         self.assertEqual(total_minutes, 45)
-        self.assertEqual([d["label"] for d in days], ["Yesterday", "Today"])
-        self.assertEqual(days[0]["sessions"], 2)
-        self.assertEqual(days[1]["titles"], ["finished thing"])
-        self.assertEqual(days[1]["sessions"], 0)
+        self.assertEqual([d.label for d in days], ["Yesterday", "Today"])
+        self.assertEqual(days[0].sessions, 2)
+        self.assertEqual(days[1].titles, ["finished thing"])
+        self.assertEqual(days[1].sessions, 0)
 
     def test_a_vanished_matrix_folder_is_named_not_silent(self):
         import shutil as _shutil

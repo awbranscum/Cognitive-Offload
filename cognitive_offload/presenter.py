@@ -1,0 +1,217 @@
+"""What the app says, decided without a screen to say it on.
+
+Every function here takes plain data and returns a plain description of what
+should appear. Nothing in this module knows whether the thing displaying it is
+a desktop window, a phone, or a test. The tkinter controller reads its widget
+variables, hands the values over, and writes the answers back into widgets — it
+makes no decisions of its own in between.
+
+That split is the point. The rules that make this app what it is live here: a
+day with nothing finished shows no counter rather than a zero, the banner and
+the click behind it are computed once so they cannot disagree, an empty week is
+omitted instead of listed. A second front-end reuses all of it unchanged, and
+cannot accidentally reimplement it differently.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import date, timedelta
+
+from .models import today_iso
+from .queries import (
+    DEFAULT_SORT,
+    completed_titles_today,
+    counts,
+    scheduled_today,
+    suggest_tasks,
+    visible_tasks,
+)
+from .rows import task_row
+from .viewmodels import Row
+
+
+@dataclass
+class TaskListView:
+    """The task list and the line of counters under it."""
+
+    visible: list = field(default_factory=list)
+    rows: list[Row] = field(default_factory=list)
+    summary: str = ""
+    done_today: int = 0
+    done_today_text: str = ""
+
+
+@dataclass
+class NextUpView:
+    """The one task the app names without being asked."""
+
+    task_id: str
+    title: str
+    step: str
+
+
+@dataclass
+class DueView:
+    """Today's bookings: the banner text, and the tasks it is counting."""
+
+    total: int = 0
+    text: str = ""
+    tasks: list = field(default_factory=list)
+    scheduled: list = field(default_factory=list)
+
+
+@dataclass
+class TodayView:
+    """What you finished today. Empty ``body`` means: say nothing at all."""
+
+    titles: list = field(default_factory=list)
+    sessions: int = 0
+    minutes: int = 0
+    body: str = ""
+
+
+@dataclass
+class WeekDay:
+    label: str
+    sessions: int
+    minutes: int
+    titles: list = field(default_factory=list)
+
+
+@dataclass
+class WeekView:
+    days: list = field(default_factory=list)
+    total_sessions: int = 0
+    total_minutes: int = 0
+
+
+def task_list_view(
+    tasks: list,
+    *,
+    search: str = "",
+    tag: str | None = None,
+    order: str = DEFAULT_SORT,
+    show_done: bool = True,
+    kind: str | None = None,
+    completed_log: list | None = None,
+) -> TaskListView:
+    """The visible rows, plus the counters that describe what was left out."""
+    visible = visible_tasks(
+        tasks, search=search, tag=tag, order=order, show_done=show_done, kind=kind
+    )
+    open_count, done_count, flagged = counts(tasks)
+    summary = f"{open_count} open · {done_count} done"
+    if flagged:
+        summary += f" · {flagged} flagged"
+    hidden = len(tasks) - len(visible)
+    if hidden > 0:
+        summary += f" · {hidden} hidden"
+
+    finished = len(completed_titles_today(tasks, completed_log))
+    # A day with nothing finished says nothing. "0 done today" is the kind of
+    # scoreboard this app exists not to keep, so the empty string here is a
+    # decision, not a missing value — the caller hides the pill on it.
+    return TaskListView(
+        visible=visible,
+        rows=[task_row(t) for t in visible],
+        summary=summary,
+        done_today=finished,
+        done_today_text=f"{finished} done today →" if finished else "",
+    )
+
+
+def next_up_view(
+    tasks: list,
+    *,
+    offset: int = 0,
+    warm: set | None = None,
+    exclude: str | None = None,
+) -> NextUpView | None:
+    """The next thing to start, or ``None`` when there is nothing to name."""
+    suggestions = suggest_tasks(
+        tasks, limit=1, offset=offset, warm=warm, exclude=exclude
+    )
+    if not suggestions:
+        return None
+    task = suggestions[0]
+    return NextUpView(
+        task_id=task.id,
+        title=task.text,
+        step=f"→ {task.first_step}" if task.first_step
+        else "no first step yet — you'll be asked",
+    )
+
+
+def due_view(tasks: list, scheduled: list | None = None,
+             on: str | None = None) -> DueView:
+    """Today's bookings, counted once.
+
+    The banner and the click behind it used to compute this separately, and
+    drifted: the banner counted bookings for today while the click selected the
+    oldest overdue task, so the most confident gesture in the feature landed on
+    something from two months ago. One function means they cannot disagree
+    again.
+    """
+    day = on or today_iso()
+    due = scheduled_today(tasks, on=day)
+    booked = [t for t in (scheduled or []) if t.scheduled_for == day]
+    total = len(due) + len(booked)
+    return DueView(
+        total=total,
+        text=f"{total} booked for today →" if total else "",
+        tasks=due,
+        scheduled=booked,
+    )
+
+
+def today_view(tasks: list, completed_log: list | None = None,
+               session_log=None, on: str | None = None) -> TodayView:
+    """What you finished today, plus the minutes you focused."""
+    day = on or today_iso()
+    titles = completed_titles_today(tasks, completed_log, on=day)
+    sessions = len(session_log.on_day(day)) if session_log is not None else 0
+    minutes = (sum(s.minutes for s in session_log.on_day(day))
+               if session_log is not None else 0)
+    if not titles:
+        return TodayView(titles=[], sessions=sessions, minutes=minutes, body="")
+    footer = ""
+    if sessions:
+        footer = (f"\n\nPlus {sessions} focus session"
+                  f"{'s' if sessions != 1 else ''} — {minutes} minutes.")
+    body = "Finished today:\n\n" + "\n".join(f"·  {t}" for t in titles) + footer
+    return TodayView(titles=titles, sessions=sessions, minutes=minutes, body=body)
+
+
+def week_view(tasks: list, completed_log: list | None = None,
+              session_log=None, today: date | None = None) -> WeekView:
+    """The last seven days as evidence — only the days that had something.
+
+    A day you did nothing is skipped rather than listed with a zero beside it.
+    A week review that reads as a row of noughts is a week review nobody opens
+    twice.
+    """
+    today = today or date.today()
+    days: list[WeekDay] = []
+    total_sessions = 0
+    total_minutes = 0
+    for offset in range(6, -1, -1):
+        day = today - timedelta(days=offset)
+        iso = day.isoformat()
+        sessions = session_log.on_day(iso) if session_log is not None else []
+        titles = completed_titles_today(tasks, completed_log, on=iso)
+        if not sessions and not titles:
+            continue
+        minutes = sum(s.minutes for s in sessions)
+        total_sessions += len(sessions)
+        total_minutes += minutes
+        if offset == 0:
+            label = "Today"
+        elif offset == 1:
+            label = "Yesterday"
+        else:
+            label = day.strftime("%A")
+        days.append(WeekDay(label=label, sessions=len(sessions),
+                            minutes=minutes, titles=titles))
+    return WeekView(days=days, total_sessions=total_sessions,
+                    total_minutes=total_minutes)

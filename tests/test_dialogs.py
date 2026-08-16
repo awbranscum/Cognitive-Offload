@@ -151,12 +151,13 @@ class DialogCollectTests(unittest.TestCase):
         from tkinter import ttk
 
         from cognitive_offload.dialogs import WeekReviewDialog
+        from cognitive_offload.presenter import WeekDay
 
         days = [
-            {"label": "Tuesday", "sessions": 3, "minutes": 45,
-             "titles": ["Book the dentist"]},
-            {"label": "Today", "sessions": 0, "minutes": 0,
-             "titles": ["Water the plants"]},
+            WeekDay(label="Tuesday", sessions=3, minutes=45,
+                    titles=["Book the dentist"]),
+            WeekDay(label="Today", sessions=0, minutes=0,
+                    titles=["Water the plants"]),
         ]
         dialog = WeekReviewDialog(self.root, days, 3, 45)
         texts = [w.cget("text") for w in dialog.body.winfo_children()

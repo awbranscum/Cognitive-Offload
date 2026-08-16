@@ -29,6 +29,7 @@ PORTABLE = [
     "undo",        # the undo stack
     "viewmodels",  # what a row shows, with no opinion on drawing
     "rows",        # which badges and wording a task has earned
+    "presenter",   # what each screen says, with nothing to say it on
 ]
 
 # The face: allowed — indeed expected — to need tkinter.

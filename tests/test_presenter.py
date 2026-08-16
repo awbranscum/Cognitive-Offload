@@ -1,0 +1,217 @@
+"""The app's wording and counting, tested without a window.
+
+Everything here used to live inside methods that also called ``.grid()``,
+which meant the only way to check "does a day with nothing finished show a
+zero?" was to build a Tk window and read a label. These are the same rules,
+now testable in milliseconds and reusable by a front-end that has no ttk.
+"""
+
+import unittest
+from datetime import date, timedelta
+
+from cognitive_offload import presenter
+from cognitive_offload.models import Task, today_iso
+from cognitive_offload.sessions import FocusSession, SessionLog
+
+
+def make(text, **kwargs):
+    return Task(text=text, **kwargs)
+
+
+def log_with(*sessions):
+    log = SessionLog.__new__(SessionLog)
+    log.sessions = list(sessions)
+    return log
+
+
+def stamp(day, clock="09:00:00"):
+    return f"{day} {clock}"
+
+
+class TaskListViewTests(unittest.TestCase):
+    def test_counts_open_done_and_flagged(self):
+        tasks = [make("a"), make("b", priority=1), make("c")]
+        tasks[2].set_done(True)
+        view = presenter.task_list_view(tasks)
+        self.assertEqual(view.summary, "2 open · 1 done · 1 flagged")
+
+    def test_hidden_tasks_are_counted_so_the_list_never_lies(self):
+        tasks = [make("shown"), make("gone")]
+        tasks[1].set_done(True)
+        view = presenter.task_list_view(tasks, show_done=False)
+        self.assertIn("1 hidden", view.summary)
+        self.assertEqual([r.title for r in view.rows], ["shown"])
+
+    def test_a_day_with_nothing_finished_says_nothing(self):
+        """Not "0 done today" — the app keeps no scoreboard to lose."""
+        view = presenter.task_list_view([make("still open")])
+        self.assertEqual(view.done_today, 0)
+        self.assertEqual(view.done_today_text, "")
+
+    def test_finishing_something_earns_the_pill(self):
+        task = make("done thing")
+        task.set_done(True)
+        view = presenter.task_list_view([task])
+        self.assertEqual(view.done_today_text, "1 done today →")
+
+    def test_rows_line_up_with_the_tasks_behind_them(self):
+        tasks = [make("first"), make("second")]
+        view = presenter.task_list_view(tasks, order="created")
+        self.assertEqual([r.id for r in view.rows], [t.id for t in view.visible])
+
+    def test_a_cleared_away_task_still_counts_as_finished_today(self):
+        log = [{"text": "tidied up", "completed_at": f"{today_iso()} 10:00:00"}]
+        view = presenter.task_list_view([], completed_log=log)
+        self.assertEqual(view.done_today_text, "1 done today →")
+
+
+class NextUpViewTests(unittest.TestCase):
+    def test_nothing_to_suggest_is_none_not_an_empty_card(self):
+        self.assertIsNone(presenter.next_up_view([]))
+
+    def test_a_task_without_a_first_step_promises_to_ask(self):
+        view = presenter.next_up_view([make("vague thing")])
+        self.assertEqual(view.title, "vague thing")
+        self.assertIn("you'll be asked", view.step)
+
+    def test_a_first_step_is_shown_as_the_arrow_line(self):
+        view = presenter.next_up_view([make("call", first_step="find the number")])
+        self.assertEqual(view.step, "→ find the number")
+
+    def test_the_open_block_task_is_never_suggested_back(self):
+        here = make("in progress")
+        there = make("something else")
+        view = presenter.next_up_view([here, there], exclude=here.id)
+        self.assertEqual(view.task_id, there.id)
+
+    def test_excluding_the_only_task_leaves_nothing_to_name(self):
+        only = make("the one thing")
+        self.assertIsNone(presenter.next_up_view([only], exclude=only.id))
+
+
+class DueViewTests(unittest.TestCase):
+    def test_a_booking_for_today_is_counted(self):
+        view = presenter.due_view([make("dentist", scheduled_for=today_iso())])
+        self.assertEqual(view.total, 1)
+        self.assertEqual(view.text, "1 booked for today →")
+
+    def test_a_missed_booking_is_not_called_today(self):
+        """It keeps its place in the list; it stops claiming to be today."""
+        stale = (date.today() - timedelta(days=40)).isoformat()
+        view = presenter.due_view([make("old", scheduled_for=stale)])
+        self.assertEqual(view.total, 0)
+        self.assertEqual(view.text, "")
+
+    def test_nothing_booked_shows_no_banner(self):
+        self.assertEqual(presenter.due_view([make("unscheduled")]).text, "")
+
+    def test_the_banner_and_the_click_see_the_same_tasks(self):
+        """The count and the task the click lands on come from one call.
+
+        These were computed separately once, and drifted: the banner counted
+        today's bookings while the click selected the oldest overdue task.
+        """
+        stale = (date.today() - timedelta(days=40)).isoformat()
+        old = make("two months ago", scheduled_for=stale)
+        now = make("today's booking", scheduled_for=today_iso())
+        view = presenter.due_view([old, now])
+        self.assertEqual(view.total, len(view.tasks) + len(view.scheduled))
+        self.assertEqual(view.tasks[0].text, "today's booking")
+
+    def test_scheduled_matrix_tasks_join_the_count(self):
+        class Booked:
+            scheduled_for = today_iso()
+
+        view = presenter.due_view([make("task", scheduled_for=today_iso())],
+                                  [Booked()])
+        self.assertEqual(view.total, 2)
+        self.assertEqual(view.text, "2 booked for today →")
+
+
+class TodayViewTests(unittest.TestCase):
+    def test_an_empty_day_has_no_body_to_show(self):
+        view = presenter.today_view([make("still open")])
+        self.assertEqual(view.body, "")
+
+    def test_finished_titles_are_listed(self):
+        task = make("book the dentist")
+        task.set_done(True)
+        view = presenter.today_view([task])
+        self.assertIn("·  book the dentist", view.body)
+
+    def test_sessions_are_added_as_a_footer_when_there_were_any(self):
+        task = make("thing")
+        task.set_done(True)
+        log = log_with(FocusSession(minutes=25, started_at=stamp(today_iso())))
+        view = presenter.today_view([task], session_log=log)
+        self.assertIn("Plus 1 focus session — 25 minutes.", view.body)
+
+    def test_no_sessions_means_no_zero_session_footer(self):
+        task = make("thing")
+        task.set_done(True)
+        view = presenter.today_view([task], session_log=log_with())
+        self.assertNotIn("Plus", view.body)
+        self.assertNotIn("0 focus", view.body)
+
+
+class WeekViewTests(unittest.TestCase):
+    def setUp(self):
+        self.today = date.today()
+        self.yesterday = self.today - timedelta(days=1)
+
+    def test_days_with_nothing_are_omitted_never_listed_as_zeros(self):
+        log = log_with(
+            FocusSession(minutes=15, started_at=stamp(self.yesterday.isoformat())))
+        view = presenter.week_view([], session_log=log, today=self.today)
+        self.assertEqual([d.label for d in view.days], ["Yesterday"])
+
+    def test_the_two_nearest_days_are_named_not_dated(self):
+        log = log_with(
+            FocusSession(minutes=15, started_at=stamp(self.yesterday.isoformat())),
+            FocusSession(minutes=30, started_at=stamp(self.today.isoformat())),
+        )
+        view = presenter.week_view([], session_log=log, today=self.today)
+        self.assertEqual([d.label for d in view.days], ["Yesterday", "Today"])
+
+    def test_older_days_use_their_weekday_name(self):
+        older = self.today - timedelta(days=3)
+        log = log_with(
+            FocusSession(minutes=15, started_at=stamp(older.isoformat())))
+        view = presenter.week_view([], session_log=log, today=self.today)
+        self.assertEqual([d.label for d in view.days], [older.strftime("%A")])
+
+    def test_anything_older_than_a_week_is_outside_the_window(self):
+        stale = self.today - timedelta(days=10)
+        log = log_with(
+            FocusSession(minutes=99, started_at=stamp(stale.isoformat())))
+        view = presenter.week_view([], session_log=log, today=self.today)
+        self.assertEqual(view.days, [])
+        self.assertEqual(view.total_minutes, 0)
+
+    def test_totals_add_up_across_the_week(self):
+        log = log_with(
+            FocusSession(minutes=15, started_at=stamp(self.yesterday.isoformat())),
+            FocusSession(minutes=30, started_at=stamp(self.yesterday.isoformat(),
+                                                      "11:00:00")),
+        )
+        view = presenter.week_view([], session_log=log, today=self.today)
+        self.assertEqual(view.total_sessions, 2)
+        self.assertEqual(view.total_minutes, 45)
+
+    def test_a_day_can_earn_its_line_with_finished_tasks_alone(self):
+        task = make("finished thing")
+        task.set_done(True)
+        view = presenter.week_view([task], session_log=log_with(),
+                                   today=self.today)
+        self.assertEqual([d.label for d in view.days], ["Today"])
+        self.assertEqual(view.days[0].sessions, 0)
+        self.assertEqual(view.days[0].titles, ["finished thing"])
+
+    def test_a_quiet_week_is_empty_not_seven_zeros(self):
+        view = presenter.week_view([], session_log=log_with(), today=self.today)
+        self.assertEqual(view.days, [])
+        self.assertEqual(view.total_sessions, 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -5,6 +5,50 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.22.0 — what the app says, decided without a screen to say it on
+Groundwork for running this on a phone. Nothing on screen changes; where
+the words come from does.
+
+A new `presenter` module now holds the decisions behind the task list,
+the NEXT UP card, the "booked for today" banner, the Today summary and
+the week review. Each is a plain function from data to a small view
+model — `TaskListView`, `NextUpView`, `DueView`, `TodayView`, `WeekView`
+— and none of them can draw anything. The controller reads its widget
+variables, hands the values over, and writes the answers back; it makes
+no decisions in between. Six query functions left `app.py` entirely.
+
+This matters beyond tidiness. The rules that make this app what it is
+were living inside methods that also called `.grid()`: a day with
+nothing finished shows no counter rather than a zero, an empty week is
+omitted instead of listed, a missed booking stops claiming to be today.
+Checking any of those used to mean building a window and reading a
+label. There are now 27 tests that assert them directly, in under half a
+second, with tkinter made unavailable — so a second front-end inherits
+the design law instead of having to rediscover it.
+
+- **The banner and the click can no longer disagree.** `refresh_due` and
+  `show_booked` each worked out "what is booked for today" separately,
+  and in 3.21.0 they had drifted — the banner counted today while the
+  click selected the oldest overdue task. Both now call one function and
+  use its answer, including which Schedule rows get highlighted, which
+  were still being re-derived from the date a third time. The fix in
+  3.21.0 corrected the answer; this removes the second place it could go
+  wrong again.
+- **The week review takes a typed view model, not dictionaries.**
+  `WeekReviewDialog` was reading `entry["label"]` out of hand-built
+  dicts. Stringly-typed keys are exactly what a second front-end gets
+  subtly wrong, so it takes `WeekDay` objects now. Two tests were
+  updated to construct the new type; both assert the same behaviour as
+  before.
+- **The portability guard covers the new module.** `presenter` joins the
+  eight core modules imported in a subprocess with tkinter poisoned —
+  nine of the fifteen modules the guard covers now need no display at
+  all.
+
+Behaviour is unchanged. 431 tests pass, up from 404: 27 are new, 402 are
+untouched, and 2 were rewritten to construct `WeekDay` instead of a
+dict — same assertions, new type.
+
 ## 3.21.0 — "today" means today, Reset keeps your minutes, and NEXT UP
 ## stops interrupting
 Three findings from walking the app as the person it is for, rather than

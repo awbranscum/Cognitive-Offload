@@ -21,6 +21,7 @@ from .dialogs import (
 )
 from .main_tab import build_main_tab
 from .matrix_tab import build_matrix_tab
+from . import presenter
 from .models import (
     KIND_KEY_BY_LABEL,
     Task,
@@ -34,13 +35,8 @@ from .queries import (
     DEFAULT_SORT,
     SORT_ORDERS,
     all_tags,
-    completed_titles_today,
-    counts,
     rank_for_starting,
-    scheduled_today,
     split_lines,
-    suggest_tasks,
-    visible_tasks,
 )
 from .sessions import DEFAULT_BREAK_MINUTES, SessionLog
 from .storage import (
@@ -54,7 +50,7 @@ from .storage import (
     category_label,
     display_path,
 )
-from .rows import focus_caption, matrix_row, sort_label, task_row
+from .rows import focus_caption, matrix_row, sort_label
 from .theme import apply_theme, px, style_text, tokens
 from .timer import FocusTimer
 from .undo import UndoStack
@@ -289,38 +285,30 @@ class CognitiveOffloadApp(tk.Tk):
 
     def refresh_tasks(self, keep_selection: bool = True) -> None:
         self._refresh_tag_choices()
-        self._visible = visible_tasks(
+        view = presenter.task_list_view(
             self.tasks,
             search=self.search_var.get(),
             tag=self._active_tag(),
             order=SORT_ORDERS.get(self.sort_var.get(), DEFAULT_SORT),
             show_done=self.show_done_var.get(),
             kind=self._active_kind(),
+            completed_log=self.completed_log,
         )
+        self._visible = view.visible
 
         # set_rows already restores the selection by row id, which is the same
         # matching this used to do by hand - once per selected row, each time
         # repainting every row.
-        self.task_list.set_rows([task_row(t) for t in self._visible],
-                                keep_selection=keep_selection)
-
-        open_count, done_count, flagged = counts(self.tasks)
-        hidden = len(self.tasks) - len(self._visible)
-        summary = f"{open_count} open · {done_count} done"
-        if flagged:
-            summary += f" · {flagged} flagged"
-        if hidden > 0:
-            summary += f" · {hidden} hidden"
-        self.counts_var.set(summary)
+        self.task_list.set_rows(view.rows, keep_selection=keep_selection)
+        self.counts_var.set(view.summary)
         self.refresh_next_up()
-        finished = len(completed_titles_today(self.tasks, self.completed_log))
-        # Only ever shown when there is something to show: "0 done today" is
-        # the kind of scoreboard this app is meant not to keep.
-        # Hide the whole pill, not just its text: the tinted DoneToday style
-        # paints its padded background even for an empty label, and an empty
-        # green box is a 0-done scoreboard in pill form.
-        if finished:
-            self.today_var.set(f"{finished} done today →")
+        # An empty ``done_today_text`` is the presenter's decision that today
+        # has nothing to say, not a missing value. Hide the whole pill rather
+        # than just blanking it: the tinted DoneToday style paints its padded
+        # background even for an empty label, and an empty green box is a
+        # 0-done scoreboard in pill form.
+        if view.done_today_text:
+            self.today_var.set(view.done_today_text)
             if not self.today_label.winfo_manager():
                 self.today_label.pack(side="right", padx=(0, 12))
         else:
@@ -341,10 +329,10 @@ class CognitiveOffloadApp(tk.Tk):
         # in. Once the block ends the task is suggestible again: "another
         # round when you're ready" and the suggestion may rightly agree.
         exclude = self._focus_task_id if self.timer.open_block else None
-        suggestions = suggest_tasks(self.tasks, limit=1, offset=self._next_offset,
-                                    warm=self.session_log.recent_task_ids(),
-                                    exclude=exclude)
-        if not suggestions:
+        view = presenter.next_up_view(self.tasks, offset=self._next_offset,
+                                      warm=self.session_log.recent_task_ids(),
+                                      exclude=exclude)
+        if view is None:
             self._next_task_id = None
             self.next_title_var.set("")
             self.next_step_var.set("")
@@ -352,12 +340,9 @@ class CognitiveOffloadApp(tk.Tk):
                 self.next_frame.grid_remove()
             return
 
-        task = suggestions[0]
-        self._next_task_id = task.id
-        self.next_title_var.set(task.text)
-        self.next_step_var.set(
-            f"→ {task.first_step}" if task.first_step else "no first step yet — you'll be asked"
-        )
+        self._next_task_id = view.task_id
+        self.next_title_var.set(view.title)
+        self.next_step_var.set(view.step)
         if getattr(self, "next_frame", None) is not None:
             # While a focus block actually runs, the strip steps out of
             # sight. Leaving it up put the largest button on the window —
@@ -1453,6 +1438,11 @@ class CognitiveOffloadApp(tk.Tk):
     # ------------------------------------------------------------------
     # booked time (the Schedule quadrant is where this matters)
     # ------------------------------------------------------------------
+    def _due_today(self) -> "presenter.DueView":
+        """Today's bookings, from the one place that counts them."""
+        return presenter.due_view(self.tasks,
+                                  self._matrix_cache.get("schedule", []))
+
     def refresh_due(self) -> None:
         # Counts what is booked for today itself. A banner claiming seven
         # things are due today when five were booked weeks ago is a number
@@ -1460,74 +1450,36 @@ class CognitiveOffloadApp(tk.Tk):
         # trusting the booking feature entirely. Missed bookings keep their
         # place in the list and their weight in the ranking; they simply
         # stop being counted as today.
-        due = scheduled_today(self.tasks)
-        booked = [t for t in self._matrix_cache.get("schedule", [])
-                  if t.scheduled_for == today_iso()]
-        total = len(due) + len(booked)
-        if total:
-            self.due_var.set(f"{total} booked for today →")
-        else:
-            self.due_var.set("")
+        self.due_var.set(self._due_today().text)
 
     def show_today(self) -> None:
         """What you actually finished today, plus the minutes you focused."""
-        finished = completed_titles_today(self.tasks, self.completed_log)
-        if not finished:
+        view = presenter.today_view(self.tasks, self.completed_log,
+                                    self.session_log)
+        if not view.body:
             return
-        lines = [f"·  {title}" for title in finished]
-        minutes = self.session_log.minutes_today()
-        sessions = self.session_log.count_today()
-        footer = ""
-        if sessions:
-            footer = (f"\n\nPlus {sessions} focus session"
-                      f"{'s' if sessions != 1 else ''} — {minutes} minutes.")
         with self._ask_over_focus():
-            messagebox.showinfo(
-                "Today",
-                "Finished today:\n\n" + "\n".join(lines) + footer,
-            )
+            messagebox.showinfo("Today", view.body)
 
     def show_week(self) -> None:
         """The last seven days, as evidence — only the days that had anything."""
-        from datetime import date, timedelta
-
-        days = []
-        total_sessions = 0
-        total_minutes = 0
-        today = date.today()
-        for offset in range(6, -1, -1):
-            day = today - timedelta(days=offset)
-            iso = day.isoformat()
-            sessions = self.session_log.on_day(iso)
-            titles = completed_titles_today(self.tasks, self.completed_log, on=iso)
-            if not sessions and not titles:
-                continue  # omitted, never listed as a zero
-            minutes = sum(s.minutes for s in sessions)
-            total_sessions += len(sessions)
-            total_minutes += minutes
-            if offset == 0:
-                label = "Today"
-            elif offset == 1:
-                label = "Yesterday"
-            else:
-                label = day.strftime("%A")
-            days.append({"label": label, "sessions": len(sessions),
-                         "minutes": minutes, "titles": titles})
+        view = presenter.week_view(self.tasks, self.completed_log,
+                                   self.session_log)
         with self._ask_over_focus():
-            WeekReviewDialog(self, days, total_sessions, total_minutes).show()
+            WeekReviewDialog(self, view.days, view.total_sessions,
+                             view.total_minutes).show()
 
     def show_booked(self) -> None:
         # The banner counts today's bookings, so its click must land on one
         # of them. Following due_tasks here selected the OLDEST booking —
         # so the most confident gesture in the feature took you to a task
         # from two months ago.
-        due = scheduled_today(self.tasks)
-        if due:
-            self._select_task(due[0])
-            self.set_status(f"Booked for today: {due[0].text}")
+        view = self._due_today()
+        if view.tasks:
+            self._select_task(view.tasks[0])
+            self.set_status(f"Booked for today: {view.tasks[0].text}")
             return
-        booked = [t for t in self._matrix_cache.get("schedule", [])
-                  if t.scheduled_for == today_iso()]
+        booked = view.scheduled
         if booked:
             self.notebook.select(1)
             self.matrix_notebook.select(CATEGORY_KEYS.index("schedule"))
@@ -1536,8 +1488,13 @@ class CognitiveOffloadApp(tk.Tk):
             listing = self.matrix_lists.get("schedule")
             if listing is not None:
                 listing.selection_clear(0, tk.END)
+                # Highlight exactly the rows the banner counted, by identity,
+                # rather than asking "is this today?" a second time here.
+                # Two answers to that question is how the count and the click
+                # drifted apart in the first place.
+                counted = {id(t) for t in booked}
                 for index, task in enumerate(self._matrix_cache.get("schedule", [])):
-                    if task.scheduled_for == today_iso():
+                    if id(task) in counted:
                         listing.selection_set(index)
             self.set_status(f"Booked in Schedule: {booked[0].title}")
 
@@ -2025,8 +1982,6 @@ class CognitiveOffloadApp(tk.Tk):
         self._autosave_job = self.after(AUTOSAVE_SECONDS * 1000, self._autosave)
 
     def _roll_over_the_day(self) -> None:
-        from .models import today_iso
-
         today = today_iso()
         if self._day is None:
             self._day = today
