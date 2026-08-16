@@ -5,6 +5,54 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.25.0 — the porting guide, and tests that keep it honest
+Nothing changes on screen. This writes down what a second front-end — a
+phone app, a web page, a terminal UI — would have to build and what it
+would reuse unchanged, which is the last piece of the portability work
+that does not require carving `app.py`.
+
+`docs/PORTING.md` opens with the blocking fact rather than burying it:
+**tkinter cannot ship on Google Play**, and every route for running
+Python on Android needs a different toolkit and breaks the
+zero-dependency rule this project states in its README. That trade is
+the owner's to make and has not been made. What the work buys is that
+whichever toolkit is eventually chosen, the ranking, the wording, the
+counting and the design law come across intact instead of being
+reimplemented — and subtly changed — inside it.
+
+It then covers the ten modules that need no display, the roughly fifty
+commands and the ask surface a front-end has to supply, the ~1,600 lines
+of layout that no seam makes portable, and three specific hazards.
+
+- **The guide is tested.** A document describing an interface is worth
+  having only while it is accurate, and left alone it decays quietly:
+  someone moves a module across the line, and the file keeps confidently
+  describing a codebase that no longer exists — worse than no guide,
+  because a reader trusts it. So `tests/test_porting_doc.py` asserts its
+  checkable claims against the source. Deliberately only the claims a
+  porter would be *harmed* by getting wrong; line counts and rough
+  totals are left loose, because a test that fails on every honest
+  addition is one people learn to delete.
+- **The hazards are real properties, not general cautions.** The clock
+  stops when a device sleeps, so a phone must supply `CLOCK_BOOTTIME` or
+  silently bank fewer minutes than the person did. `_ask_over_focus()`
+  wraps exactly nine of the modal sites, so generalising it to all of
+  them is a behaviour change dressed as a refactor — a mistake already
+  made once, in a design plan that put the number at ten. And
+  `_save_config` reads the focus length from the spinbox, so writing
+  config and then saving writes the old value back.
+- **The README had quietly fallen three modules behind.** `presenter`,
+  `viewmodels` and `ports` were missing from its project layout, and its
+  claim that "the model, query and storage layers never import tkinter"
+  understated an enforced boundary now covering ten modules. Both fixed,
+  and two tests now keep the layout from drifting again in either
+  direction — listing a module that no longer exists, or omitting one
+  that does.
+
+462 tests pass, up from 451. Eleven are new; none of the existing ones
+changed. Each new test was checked against a deliberately corrupted copy
+of the documents first, including the exact nine-versus-ten trap.
+
 ## 3.24.0 — Ctrl+Z means the same thing in both tabs
 **Undo now covers the Eisenhower Matrix.** It never did, and the effect
 was worse than nothing happening.

@@ -251,7 +251,10 @@ cognitive_offload/
     storage.py              config, atomic session file, matrix file store
     app.py                  the controller: commands, autosave, Tk wiring
     timer.py                the focus/break clock as a pure state machine
+    presenter.py            what each screen says, with nothing to say it on
+    viewmodels.py           what a row shows, with no opinion on drawing it
     rows.py                 how a task renders as a row (shared by both tabs)
+    ports.py                what the app needs from the platform underneath it
     undo.py                 the Ctrl+Z stack, UI-free
     main_tab.py             layout of the capture/tasks/scratchpad tab
     matrix_tab.py           layout of the matrix tab
@@ -261,8 +264,15 @@ cognitive_offload/
 tests/                      unittest suite (no third-party runner needed)
 ```
 
-The model, query and storage layers never import tkinter, which is what makes
-them testable without a display.
+Ten of those modules never import tkinter — the model, query, session, storage,
+timer, undo, view-model, row, presenter and ports layers — which is what makes
+them testable without a display. That boundary is not a convention but a test:
+`tests/test_portability.py` imports each of them in a subprocess with tkinter
+made unavailable, and fails if any of them needs it.
+
+[`docs/PORTING.md`](docs/PORTING.md) describes what a second front-end would
+have to build and what it would reuse unchanged — including why tkinter itself
+cannot ship on Android.
 
 ## Tests
 
