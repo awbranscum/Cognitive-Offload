@@ -877,8 +877,15 @@ class CognitiveOffloadApp(tk.Tk):
         if not tasks:
             self.set_status("Select a task to delete.")
             return
-        label = tasks[0].title if len(tasks) == 1 else f"{len(tasks)} tasks"
-        if not messagebox.askyesno("Delete", f"Delete {label}?"):
+        # Confirm for a batch only, which is what the task list has always
+        # done. Asking about every single delete made sense while the matrix
+        # had no undo and the dialog was the only protection; since it gained
+        # one, the question guards nothing that Ctrl+Z does not, and costs a
+        # decision every time. Deleting one thing here is now exactly as
+        # cheap, and as recoverable, as deleting one thing in the list.
+        if len(tasks) > 1 and not messagebox.askyesno(
+            "Delete", f"Delete {_plural(len(tasks), 'task')}?"
+        ):
             return
         before = [task.copy() for task in tasks]
         done = 0
@@ -1144,10 +1151,25 @@ class CognitiveOffloadApp(tk.Tk):
             else:
                 current = self._focus_task()
                 name = f'"{current.text}"' if current else "the current block"
-                elapsed = max(0, self._timer_total - self._timer_remaining) // 60
+                # The same rounding the timer banks with, so the number in
+                # the question is the number that gets logged. A promise
+                # about "those minutes" is worth nothing if it names a
+                # different figure — and the old floor division said "0
+                # minutes" for a block that would still bank one.
+                elapsed = max(1, round(
+                    (self._timer_total - self._timer_remaining) / 60))
+                # It used to say "Drop it and start a new one?" — which
+                # stopped being true when replacing a block started banking
+                # its minutes. Telling someone they are about to lose the
+                # eight minutes they managed is the exact fear that keeps
+                # them pinned in a block they cannot work in, and it is the
+                # opposite of what actually happens.
                 question = (
-                    f"You are {elapsed} minute{'s' if elapsed != 1 else ''} into {name}.\n\n"
-                    "Drop it and start a new one?"
+                    f"You are {elapsed} minute{'s' if elapsed != 1 else ''} "
+                    f"into {name}.\n\n"
+                    "Those minutes are kept, not lost — starting something "
+                    "else banks them.\n\n"
+                    "Start something else instead?"
                 )
             with self._ask_over_focus():
                 if not messagebox.askyesno("Something is already running", question):

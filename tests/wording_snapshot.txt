@@ -34,7 +34,7 @@ app.py | messagebox.askyesno | clear_notes | Clear scratchpad
 app.py | messagebox.askyesno | copy_matrix_to_tasks | Copy to tasks
 app.py | messagebox.askyesno | copy_matrix_to_tasks | Copy {task} from {}?
 app.py | messagebox.askyesno | delete_matrix_tasks | Delete
-app.py | messagebox.askyesno | delete_matrix_tasks | Delete {}?
+app.py | messagebox.askyesno | delete_matrix_tasks | Delete {task}?
 app.py | messagebox.askyesno | delete_selected | Delete tasks
 app.py | messagebox.askyesno | delete_selected | Delete {} selected tasks?
 app.py | messagebox.askyesno | load_state_dialog | Discard the unsaved changes in this session?
@@ -75,7 +75,7 @@ app.py | note= | _bank_session |  (couldn't write the session log — the day st
 app.py | ok_text= | book_matrix_time | Book
 app.py | ok_text= | tag_selected | Add
 app.py | question= | begin_focus | A break is running.\n\nEnd it and start a session now?
-app.py | question= | begin_focus | You are {} minute{s} into {}.\n\nDrop it and start a new one?
+app.py | question= | begin_focus | You are {} minute{s} into {}.\n\nThose minutes are kept, not lost — starting something else banks them.\n\nStart something else instead?
 app.py | text= | _build_ui |   Cognitive Offload  
 app.py | text= | _build_ui |   Eisenhower Matrix  
 app.py | text= | _tick_timer | Start

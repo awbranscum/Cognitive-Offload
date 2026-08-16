@@ -1685,6 +1685,53 @@ class AppSmokeTests(unittest.TestCase):
         self.assertIn('5 min banked on "old thing"', self.app.status_var.get())
         self.app.pause_timer()
 
+    def _replace_question(self, seconds_in):
+        """What you are asked when starting a block over a running one."""
+        self.capture("the one I am on")
+        self.capture("the one I want")
+        old = next(t for t in self.app.tasks if t.text == "the one I am on")
+        new = next(t for t in self.app.tasks if t.text == "the one I want")
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "", "warmup_done": 0,
+            }
+            self.app.begin_focus(old)
+        self.app._timer_deadline -= seconds_in
+        self.app._tick_timer()
+        with mock.patch("cognitive_offload.app.messagebox.askyesno",
+                        return_value=False) as ask:
+            self.app.begin_focus(new)
+        self.addCleanup(self.app.pause_timer)
+        return ask.call_args.args[1]
+
+    def test_replacing_a_block_no_longer_says_the_minutes_are_dropped(self):
+        """The question contradicted the code twelve lines below it.
+
+        Replacing a block banks its minutes — "Drop it" told the person they
+        were about to lose the work they managed, which is the fear that
+        keeps someone pinned in a block they cannot work in.
+        """
+        question = self._replace_question(seconds_in=300)
+        self.assertNotIn("Drop it", question)
+        self.assertIn("kept, not lost", question)
+        self.assertIn("5 minutes into", question)
+
+    def test_the_number_asked_about_is_the_number_that_gets_banked(self):
+        """A promise about "those minutes" must name the right figure.
+
+        Floor division said "0 minutes" for a block the timer would still
+        bank one minute of.
+        """
+        question = self._replace_question(seconds_in=20)
+        self.assertIn("1 minute into", question)
+        self.assertNotIn("0 minute", question)
+
+    def test_declining_the_replacement_leaves_the_block_running(self):
+        """So "kept either way" is true on both branches, not just one."""
+        self._replace_question(seconds_in=300)
+        self.assertTrue(self.app._timer_running)
+        self.assertEqual(self.app.session_log.count_today(), 0)
+
     def test_pausing_updates_the_pop_out_button(self):
         self.app.start_timer(minutes=10)
         self.app.open_focus_window()
@@ -1884,6 +1931,38 @@ class AppSmokeTests(unittest.TestCase):
         with mock.patch("cognitive_offload.app.messagebox.askyesno",
                         return_value=True):
             self.app.delete_matrix_tasks(category)
+
+    def test_deleting_one_matrix_task_no_longer_asks(self):
+        """The guard's only justification went away when undo arrived.
+
+        The task list has always confirmed for a batch and not for one,
+        because Ctrl+Z covers the single case. The matrix asked every time
+        — correct while it had no undo, pure friction once it did.
+        """
+        self.app.matrix.create("do_first", "just this one", "")
+        self.app.refresh_matrix()
+        self._matrix_select("do_first", 0)
+        with mock.patch("cognitive_offload.app.messagebox.askyesno") as ask:
+            self.app.delete_matrix_tasks("do_first")
+            ask.assert_not_called()
+        self.assertEqual(self.app.matrix.list("do_first"), [])
+        self.assertIn("Ctrl+Z", self.app.status_var.get())
+        self.app.undo()
+        self.assertEqual([t.title for t in self.app.matrix.list("do_first")],
+                         ["just this one"])
+
+    def test_deleting_several_matrix_tasks_still_asks(self):
+        for title in ("one", "two", "three"):
+            self.app.matrix.create("do_first", title, "")
+        self.app.refresh_matrix()
+        self._matrix_select("do_first", 0, 1, 2)
+        with mock.patch("cognitive_offload.app.messagebox.askyesno",
+                        return_value=False) as ask:
+            self.app.delete_matrix_tasks("do_first")
+            ask.assert_called_once()
+            self.assertIn("3 tasks", ask.call_args.args[1])
+        self.assertEqual(len(self.app.matrix.list("do_first")), 3,
+                         "declining must delete nothing")
 
     def test_undo_brings_a_deleted_matrix_task_back(self):
         self.app.matrix.create("do_first", "matters a lot", "the details")

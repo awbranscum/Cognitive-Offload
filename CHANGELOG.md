@@ -5,6 +5,53 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.28.0 — switching no longer claims to throw your minutes away
+- **"Drop it" was never true, and it was the worst possible thing to
+  say.** Starting a block while one is already running asked: *"You are
+  8 minutes into 'the report'. Drop it and start a new one?"* Twelve
+  lines below, on the path taken when you say yes, the code reads
+  `# Bank what was actually done rather than dropping those minutes on
+  the floor`. Since 3.21.0 the replaced block banks its minutes; the
+  question in front of it still said they were dropped.
+
+  Telling someone they are about to lose the eight minutes they managed
+  is exactly the fear that keeps a person pinned inside a block they
+  cannot work in — and it contradicts the one promise this app has been
+  making all along, that the minutes you did are the minutes you keep.
+  It now says: *"Those minutes are kept, not lost — starting something
+  else banks them. Start something else instead?"*
+
+  True on both branches, which is why it can be said plainly: answer yes
+  and they are banked, cancel the next dialog and the block simply keeps
+  running, untouched.
+
+- **The number in that question is now the number that gets logged.** It
+  counted with floor division while the timer banks with `max(1,
+  round(…))`, so twenty seconds in it said "0 minutes" and then recorded
+  one. A promise about "those minutes" is worth nothing if it names a
+  different figure.
+
+- **Deleting one matrix task no longer asks first.** *Proposed, not an
+  obvious correction — this removes a dialog.* The task list has always
+  confirmed for a batch and not for a single item, because Ctrl+Z covers
+  the single case. The matrix asked every time, which was right while it
+  had no undo and the dialog was the only thing standing between you and
+  a deleted file. 3.24.0 gave it undo, restoring title and content
+  alike, so the question now guards nothing that Ctrl+Z does not while
+  costing a decision on every deletion. Deleting one thing in a quadrant
+  is now exactly as cheap, and as recoverable, as deleting one thing in
+  the list — and the status line says so. Deleting several still asks.
+
+Left alone deliberately: "Copy N tasks from Do First?" confirms
+unconditionally, but it copies the whole quadrant, so its count is
+something you want to know rather than a guard; clearing the scratchpad
+and clearing completed are bulk by definition, which is already the
+rule; and the quadrant picker is required input, not a question.
+
+483 tests pass, up from 478. Five new, no existing test changed. Each
+was checked against the old behaviour first — including the rounding,
+whose failure reads "You are 0 minutes into… Those minutes are kept."
+
 ## 3.27.0 — the "already running" dialog stops giving dangerous advice
 - **It no longer tells you it is safe when it is not.** The dialog that
   appears when a second copy cannot claim the session folder used to end
