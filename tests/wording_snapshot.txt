@@ -1,0 +1,138 @@
+# Every user-visible modal string, extracted from the source.
+# One entry per line: file | kind | enclosing function | text
+# Interpolations collapse to {}. Newlines are written \n.
+#
+# This file is the safety net for moving wording between modules.
+# If a test told you to look here: a string changed. If that was
+# deliberate, regenerate with
+#     python tests/wording.py --update
+# and review the diff as a change to what the app SAYS.
+app.py | filedialog.askdirectory | change_db_folder | Choose the session folder
+app.py | filedialog.askdirectory | change_matrix_db_folder | Choose the matrix folder
+app.py | filedialog.askopenfilename | load_state_dialog | Open session
+app.py | filedialog.asksaveasfilename | export_state | Export session
+app.py | hint= | book_matrix_time | today / tomorrow / a weekday / 2026-08-01 — blank clears it
+app.py | hint= | tag_selected | Lower-cased automatically.
+app.py | messagebox.askyesno | _claim_instance_lock | Already running?
+app.py | messagebox.askyesno | _claim_instance_lock | Another copy of Cognitive Offload looks open with this session folder ({}).\n\nTwo copies would silently overwrite each other's saves.\n\nOpen here anyway? (That is safe if the other copy crashed or was force-closed.)
+app.py | messagebox.askyesno | _finish_break | Break over
+app.py | messagebox.askyesno | _finish_break | Start another focus session?
+app.py | messagebox.askyesno | _finish_session | Session finished
+app.py | messagebox.askyesno | _finish_session | {}\n\nTake a {}-minute break now?
+app.py | messagebox.askyesno | _recover_state | Load failed
+app.py | messagebox.askyesno | begin_focus | Something is already running
+app.py | messagebox.askyesno | brain_dump_into_tasks | Brain dump
+app.py | messagebox.askyesno | brain_dump_into_tasks | Create {} tasks from the scratchpad?
+app.py | messagebox.askyesno | change_db_folder | Change folder
+app.py | messagebox.askyesno | change_db_folder | Could not save to {}.\n\nSwitch folders anyway and lose the unsaved changes?
+app.py | messagebox.askyesno | clear_completed | Clear completed
+app.py | messagebox.askyesno | clear_completed | Remove {} completed task(s)?
+app.py | messagebox.askyesno | clear_notes | Clear everything in the scratchpad?
+app.py | messagebox.askyesno | clear_notes | Clear scratchpad
+app.py | messagebox.askyesno | copy_matrix_to_tasks | Copy to tasks
+app.py | messagebox.askyesno | copy_matrix_to_tasks | Copy {} task(s) from {}?
+app.py | messagebox.askyesno | delete_matrix_tasks | Delete
+app.py | messagebox.askyesno | delete_matrix_tasks | Delete {}?
+app.py | messagebox.askyesno | delete_selected | Delete tasks
+app.py | messagebox.askyesno | delete_selected | Delete {} selected tasks?
+app.py | messagebox.askyesno | load_state_dialog | Discard the unsaved changes in this session?
+app.py | messagebox.askyesno | load_state_dialog | Unsaved changes
+app.py | messagebox.askyesnocancel | on_close | Save failed
+app.py | messagebox.askyesnocancel | on_close | Saving to the session folder failed.\n\nSave a copy somewhere else before quitting?\n\n(“No” quits without saving. “Cancel” stays here.)
+app.py | messagebox.showerror | _ensure_folders | Could not use {}:\n{}
+app.py | messagebox.showerror | _ensure_folders | Folder error
+app.py | messagebox.showerror | _ensure_folders | Folder error
+app.py | messagebox.showerror | _import_matrix_tasks | Move failed
+app.py | messagebox.showerror | _recover_state | Could not copy {} back into place. It is still there, untouched.
+app.py | messagebox.showerror | _recover_state | Load failed
+app.py | messagebox.showerror | _recover_state | Load failed
+app.py | messagebox.showerror | _recover_state | Load failed
+app.py | messagebox.showerror | _recover_state | The backup could not be read either: {}
+app.py | messagebox.showerror | _recover_state | {}\n\nThe file could not be moved aside either, so auto-save is off for this session and nothing will be overwritten.
+app.py | messagebox.showerror | add_matrix_task | Save failed
+app.py | messagebox.showerror | book_matrix_time | Save failed
+app.py | messagebox.showerror | delete_matrix_tasks | Delete failed
+app.py | messagebox.showerror | edit_matrix_task | Save failed
+app.py | messagebox.showerror | export_state | Export failed
+app.py | messagebox.showerror | load_state | Load failed
+app.py | messagebox.showerror | load_state | {}\n\nAuto-save is off for this session so the file is not overwritten. Choose a different session folder, or move the file out of the way first.
+app.py | messagebox.showerror | load_state_dialog | Load failed
+app.py | messagebox.showerror | move_matrix_tasks | Move failed
+app.py | messagebox.showerror | save_state | Save failed
+app.py | messagebox.showerror | send_selected_to_matrix | Move failed
+app.py | messagebox.showerror | undo | Undo failed
+app.py | messagebox.showinfo | _recover_state | Load failed
+app.py | messagebox.showinfo | show_today | Today
+app.py | messagebox.showwarning | book_matrix_time | Date not understood
+app.py | messagebox.showwarning | book_matrix_time | Try 'today', 'tomorrow', a weekday, or a date like 2026-08-01.
+app.py | messagebox.showwarning | load_state | Some records were unreadable
+app.py | messagebox.showwarning | load_state | {} task record{} in {} couldn't be read and {} left out.\n\nAuto-save is off so the file stays untouched for now. Saving (Ctrl+S) accepts the loss; Export a copy first if you want to look at the original.
+app.py | messagebox.showwarning | load_state_dialog | Some records were unreadable
+app.py | messagebox.showwarning | load_state_dialog | {} task record{} in {} couldn't be read and {} left out.\n\nAuto-save is off so the file stays untouched for now. Saving (Ctrl+S) accepts the loss.
+app.py | ok_text= | book_matrix_time | Book
+app.py | ok_text= | tag_selected | Add
+app.py | text= | _build_ui |   Cognitive Offload  
+app.py | text= | _build_ui |   Eisenhower Matrix  
+app.py | text= | _tick_timer | Start
+app.py | text= | _update_timer_label | {}:{}
+app.py | text= | finish_session_early | Start
+app.py | text= | pause_timer | Resume
+app.py | text= | refresh_matrix | {} task{}
+app.py | text= | refresh_matrix | {}{}
+app.py | text= | reset_timer | Start
+app.py | text= | start_timer | Pause
+app.py | window_title= | add_matrix_task | New task – {}
+app.py | window_title= | edit_matrix_task | Edit matrix task
+app.py | window_title= | edit_selected_details | Edit task
+app.py | window_title= | move_matrix_tasks | Move between quadrants
+dialogs.py | dialog-title | __init__ | Keyboard shortcuts
+dialogs.py | dialog-title | __init__ | Session finished
+dialogs.py | dialog-title | __init__ | Start a focus session
+dialogs.py | dialog-title | __init__ | This week
+dialogs.py | dialog-title | __init__ | Where do I start?
+dialogs.py | messagebox.showwarning | collect | Date not understood
+dialogs.py | messagebox.showwarning | collect | The title cannot be empty.
+dialogs.py | messagebox.showwarning | collect | Title required
+dialogs.py | messagebox.showwarning | collect | Try 'today', 'tomorrow', a weekday, or a date like 2026-08-01.
+dialogs.py | text= | __init__ |    ✓ {}
+dialogs.py | text= | __init__ | A quiet week is just a quiet week — nothing here counts against you. The strip fills in as sessions happen.
+dialogs.py | text= | __init__ | About
+dialogs.py | text= | __init__ | Booked for
+dialogs.py | text= | __init__ | Cancel
+dialogs.py | text= | __init__ | Close
+dialogs.py | text= | __init__ | Close
+dialogs.py | text= | __init__ | Dates can be "today", "tomorrow", a weekday like "fri", or 2026-08-01. The minutes are a guess, and a guess is plenty — nothing holds you to it.
+dialogs.py | text= | __init__ | Details
+dialogs.py | text= | __init__ | Excused from suggestions until {} — put it back in the running now
+dialogs.py | text= | __init__ | Feels like
+dialogs.py | text= | __init__ | First move
+dialogs.py | text= | __init__ | Keep the timer floating over my work
+dialogs.py | text= | __init__ | Leave it blank if you would rather not decide now.
+dialogs.py | text= | __init__ | Name the smallest physical action. You are only committing to this.
+dialogs.py | text= | __init__ | Pick the shape of the work, not the most important thing. Starting anything beats picking perfectly.
+dialogs.py | text= | __init__ | Session length
+dialogs.py | text= | __init__ | Show me others
+dialogs.py | text= | __init__ | Show the warm-up ladder before sessions
+dialogs.py | text= | __init__ | Smallest next step
+dialogs.py | text= | __init__ | Start on this
+dialogs.py | text= | __init__ | Tags (comma separated)
+dialogs.py | text= | __init__ | The two-minute physical action that starts it — "open the doc", "find Dana's email". This is the part that gets you moving.
+dialogs.py | text= | __init__ | This week, in evidence
+dialogs.py | text= | __init__ | Title
+dialogs.py | text= | __init__ | What can you face right now?
+dialogs.py | text= | __init__ | Where does it pick up next time?
+dialogs.py | text= | __init__ | Working on
+dialogs.py | text= | __init__ | Your guess: about {} min.
+dialogs.py | text= | __init__ | minutes
+dialogs.py | text= | __init__ | minutes, at a guess
+dialogs.py | text= | __init__ | was: {}
+dialogs.py | text= | __init__ | {} session{} · {} minutes across the week.
+dialogs.py | text= | __init__ | {} thought{} parked in the scratchpad while you worked — safe there.
+dialogs.py | text= | _build_ladder | Edit steps…
+dialogs.py | text= | _build_ladder | Step down towards the task instead of leaping at it. Tick what you've done — skipping them is fine too.
+dialogs.py | text= | _build_ladder | Warm-up ladder
+dialogs.py | text= | _edit_steps | Warm-up ladder
+dialogs.py | text= | _edit_steps | Your own downshift, in your own words. Blank lines are dropped; the changes stick for future sessions.
+dialogs.py | text= | _refresh |     → {}
+dialogs.py | text= | _refresh | Nothing open in that shape. Try 'Anything', or capture something new — an empty list is allowed.
+dialogs.py | text= | button_row | Cancel

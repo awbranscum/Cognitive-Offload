@@ -5,6 +5,51 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.26.0 — the folder picker says which folder, and the wording is pinned
+- **"Change folder" now tells you which one.** There are two buttons with
+  that exact label — one in the header for your tasks and sessions, one
+  in the matrix tab for the quadrant files — and both opened a directory
+  picker with no title at all, the only two of the app's forty modal
+  sites without one. On screen each button sits beside the path it
+  changes, which is fine; then the picker covers the screen and that
+  context is gone. They now read "Choose the session folder" and "Choose
+  the matrix folder". The buttons themselves are unchanged: beside their
+  paths they are already clear, and two differently-worded buttons would
+  be a bigger change than the problem.
+
+- **Every word the app says is now written down and watched.** The next
+  piece of work moves questions between modules, and each one carries
+  wording that was argued over — a booking that stops claiming to be
+  today, a failure that explains itself without blaming anyone, an offer
+  to stop that does not read as giving up. Moved code gets reviewed for
+  whether it still works; nobody rereads forty strings to check the tone
+  survived. So `tests/wording_snapshot.txt` records all 129 of them and
+  `tests/test_wording.py` fails if any changes.
+
+  A failure there is not a bug, it is a question: the message names
+  exactly what the app no longer says and what it says instead, and
+  points at `python tests/wording.py --update` for when the change was
+  the point.
+
+  Read out of the source rather than by driving the app, deliberately —
+  half these strings live on error paths (a corrupt save, a vanished
+  folder, a failed rename) that are awkward to reach, and a parser
+  reaches all of them equally. Interpolated values collapse to `{}`,
+  because a path or a count differs every run while the sentence around
+  it is the thing under review. Entries are keyed by what a string is
+  and where it lives, never by line number: a net that cries wolf on
+  every edit above it is one people stop reading.
+
+- **The design law is asserted against all of it at once.** One test
+  scans every string for phrases that scold — "you didn't", "you should
+  have", "overdue", "still not". Shame is what makes someone close the
+  app and not come back, and it arrives one word at a time.
+
+471 tests pass, up from 462. Nine new, no existing test changed. The net
+was checked against three deliberate corruptions first: a reworded
+question, a shaming title, and the folder title from this same release
+removed again.
+
 ## 3.25.0 — the porting guide, and tests that keep it honest
 Nothing changes on screen. This writes down what a second front-end — a
 phone app, a web page, a terminal UI — would have to build and what it

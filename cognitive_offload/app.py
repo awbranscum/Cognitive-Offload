@@ -1973,7 +1973,14 @@ class CognitiveOffloadApp(tk.Tk):
         return True
 
     def change_db_folder(self) -> None:
-        new_path = filedialog.askdirectory(initialdir=str(self.config_store.db_path))
+        # Titled, because there are two "Change folder" buttons in this app —
+        # one here for your tasks and sessions, one in the matrix tab for the
+        # quadrant files. On screen each sits beside the path it changes, but
+        # the picker covers that, so the title is the only thing left saying
+        # which folder you are about to move.
+        new_path = filedialog.askdirectory(
+            title="Choose the session folder",
+            initialdir=str(self.config_store.db_path))
         if not new_path:
             return
         if self._dirty and not self.save_state(silent=True):
@@ -2000,7 +2007,9 @@ class CognitiveOffloadApp(tk.Tk):
         self.set_status(f"Session folder: {self.config_store.db_path}")
 
     def change_matrix_db_folder(self) -> None:
-        new_path = filedialog.askdirectory(initialdir=str(self.matrix.root))
+        new_path = filedialog.askdirectory(
+            title="Choose the matrix folder",
+            initialdir=str(self.matrix.root))
         if not new_path:
             return
         self.config_store.matrix_db_path = Path(new_path)
