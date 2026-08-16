@@ -7,14 +7,16 @@
 # deliberate, regenerate with
 #     python tests/wording.py --update
 # and review the diff as a change to what the app SAYS.
+app.py | body= | _claim_instance_lock | Another copy of Cognitive Offload looks open with this session folder ({}).\n\nThis folder cannot say for certain — some network and synced folders cannot — so this may be a leftover from a copy that closed badly.\n\nTwo copies would silently overwrite each other's saves. Open here anyway? (That is safe if the other copy crashed or was force-closed.)
+app.py | body= | _claim_instance_lock | Cognitive Offload is already open with this session folder ({}).\n\nBoth copies save to the same file every thirty seconds, so whichever you type in second quietly undoes the other.\n\nThe window you want is already open — switch to it. Open a second copy here anyway?
 app.py | filedialog.askdirectory | change_db_folder | Choose the session folder
 app.py | filedialog.askdirectory | change_matrix_db_folder | Choose the matrix folder
 app.py | filedialog.askopenfilename | load_state_dialog | Open session
 app.py | filedialog.asksaveasfilename | export_state | Export session
+app.py | finished= | _finish_session | {} min, and it's finished. Nice.
 app.py | hint= | book_matrix_time | today / tomorrow / a weekday / 2026-08-01 — blank clears it
 app.py | hint= | tag_selected | Lower-cased automatically.
-app.py | messagebox.askyesno | _claim_instance_lock | Already running?
-app.py | messagebox.askyesno | _claim_instance_lock | Another copy of Cognitive Offload looks open with this session folder ({}).\n\nTwo copies would silently overwrite each other's saves.\n\nOpen here anyway? (That is safe if the other copy crashed or was force-closed.)
+app.py | intro= | _recover_state | {}\n\nThe unreadable file was set aside as {}, so nothing is lost.
 app.py | messagebox.askyesno | _finish_break | Break over
 app.py | messagebox.askyesno | _finish_break | Start another focus session?
 app.py | messagebox.askyesno | _finish_session | Session finished
@@ -26,11 +28,11 @@ app.py | messagebox.askyesno | brain_dump_into_tasks | Create {} tasks from the 
 app.py | messagebox.askyesno | change_db_folder | Change folder
 app.py | messagebox.askyesno | change_db_folder | Could not save to {}.\n\nSwitch folders anyway and lose the unsaved changes?
 app.py | messagebox.askyesno | clear_completed | Clear completed
-app.py | messagebox.askyesno | clear_completed | Remove {} completed task(s)?
+app.py | messagebox.askyesno | clear_completed | Remove {completed task}?
 app.py | messagebox.askyesno | clear_notes | Clear everything in the scratchpad?
 app.py | messagebox.askyesno | clear_notes | Clear scratchpad
 app.py | messagebox.askyesno | copy_matrix_to_tasks | Copy to tasks
-app.py | messagebox.askyesno | copy_matrix_to_tasks | Copy {} task(s) from {}?
+app.py | messagebox.askyesno | copy_matrix_to_tasks | Copy {task} from {}?
 app.py | messagebox.askyesno | delete_matrix_tasks | Delete
 app.py | messagebox.askyesno | delete_matrix_tasks | Delete {}?
 app.py | messagebox.askyesno | delete_selected | Delete tasks
@@ -66,21 +68,26 @@ app.py | messagebox.showinfo | show_today | Today
 app.py | messagebox.showwarning | book_matrix_time | Date not understood
 app.py | messagebox.showwarning | book_matrix_time | Try 'today', 'tomorrow', a weekday, or a date like 2026-08-01.
 app.py | messagebox.showwarning | load_state | Some records were unreadable
-app.py | messagebox.showwarning | load_state | {} task record{} in {} couldn't be read and {} left out.\n\nAuto-save is off so the file stays untouched for now. Saving (Ctrl+S) accepts the loss; Export a copy first if you want to look at the original.
+app.py | messagebox.showwarning | load_state | {} task record{} in {} couldn't be read and {were was} left out.\n\nAuto-save is off so the file stays untouched for now. Saving (Ctrl+S) accepts the loss; Export a copy first if you want to look at the original.
 app.py | messagebox.showwarning | load_state_dialog | Some records were unreadable
-app.py | messagebox.showwarning | load_state_dialog | {} task record{} in {} couldn't be read and {} left out.\n\nAuto-save is off so the file stays untouched for now. Saving (Ctrl+S) accepts the loss.
+app.py | messagebox.showwarning | load_state_dialog | {} task record{} in {} couldn't be read and {were was} left out.\n\nAuto-save is off so the file stays untouched for now. Saving (Ctrl+S) accepts the loss.
+app.py | note= | _bank_session |  (couldn't write the session log — the day strip may forget this one)
 app.py | ok_text= | book_matrix_time | Book
 app.py | ok_text= | tag_selected | Add
+app.py | question= | begin_focus | A break is running.\n\nEnd it and start a session now?
+app.py | question= | begin_focus | You are {} minute{s} into {}.\n\nDrop it and start a new one?
 app.py | text= | _build_ui |   Cognitive Offload  
 app.py | text= | _build_ui |   Eisenhower Matrix  
 app.py | text= | _tick_timer | Start
-app.py | text= | _update_timer_label | {}:{}
+app.py | text= | _update_timer_label | {02d}:{02d}
 app.py | text= | finish_session_early | Start
 app.py | text= | pause_timer | Resume
-app.py | text= | refresh_matrix | {} task{}
+app.py | text= | refresh_matrix | {} task{s}
 app.py | text= | refresh_matrix | {}{}
 app.py | text= | reset_timer | Start
 app.py | text= | start_timer | Pause
+app.py | title= | _claim_instance_lock | Already open
+app.py | title= | _claim_instance_lock | Already running?
 app.py | window_title= | add_matrix_task | New task – {}
 app.py | window_title= | edit_matrix_task | Edit matrix task
 app.py | window_title= | edit_selected_details | Edit task

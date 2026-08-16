@@ -5,6 +5,59 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.27.0 — the "already running" dialog stops giving dangerous advice
+- **It no longer tells you it is safe when it is not.** The dialog that
+  appears when a second copy cannot claim the session folder used to end
+  with *"Open here anyway? (That is safe if the other copy crashed or
+  was force-closed.)"* — and until 3.23.0 that was both true and kind,
+  because a crashed copy and a running one were indistinguishable and
+  the crashed case was the common one.
+
+  3.23.0 changed which case is common and did not change the words. A
+  crashed copy is now claimed silently and never reaches this dialog, so
+  what is left is almost always a copy that is *genuinely running* —
+  where "that is safe if the other one crashed" is false, and following
+  it causes exactly the silent overwrite the dialog's own second line
+  warns about. The dialog was arguing with itself.
+
+  It now says what it actually knows. When a copy really is holding the
+  folder: *"Cognitive Offload is already open with this session folder…
+  Both copies save to the same file every thirty seconds, so whichever
+  you type in second quietly undoes the other. The window you want is
+  already open — switch to it."* The override is still there, because a
+  hung process is a real thing; it is simply no longer described as
+  safe. Where the folder genuinely cannot tell — network and synced
+  folders often cannot — the old reassurance is kept word for word,
+  because there it is still true.
+
+- **The status bar speaks with one voice.** Fifteen messages said
+  "1 task(s)" while the matrix commands, going through a helper written
+  for the job, said "1 matrix task". Same bar, two voices. In an app
+  whose whole difference is that the words were written for a person,
+  "1 task(s)" reads like output from something that did not care enough
+  to look. All fifteen now pluralise properly. One of them also said
+  "Pinned 3 tasks — shows at the top", which agreed with nothing once
+  the count was fixed; it names what shows instead.
+
+- **The wording net had two blind spots, and this pass found them by
+  using it.** Regenerating the snapshot showed the new lock dialog had
+  *vanished* from it: the strings are built into variables now rather
+  than passed inline, and the extractor only saw literals at the call
+  site. That is precisely the shape wording takes as it moves out of the
+  controller — so the net would have quietly stopped covering strings
+  while still appearing to work. It now reads sentences assigned to a
+  name too, which immediately picked up five more user-visible strings
+  that were never covered: the break-is-running question, the
+  drop-it-and-start-a-new-one question, the couldn't-write-the-session-
+  log note, and two more.
+
+  The second blind spot: `{_plural(n, 'completed task')}` collapsed the
+  noun into `{}`, so "task" could have become "item" unnoticed. String
+  literals inside an interpolation now come along.
+
+478 tests pass, up from 471. Seven new. One existing test changed
+deliberately: it pinned "Pinned 1 task(s) to the top."
+
 ## 3.26.0 — the folder picker says which folder, and the wording is pinned
 - **"Change folder" now tells you which one.** There are two buttons with
   that exact label — one in the header for your tasks and sessions, one

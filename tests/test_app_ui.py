@@ -1608,7 +1608,8 @@ class AppSmokeTests(unittest.TestCase):
         self.select(buried)
         self.app.promote_selected()
         self.assertEqual(self.app._visible[0].text, "old and buried")
-        self.assertIn("Pinned 1 task(s) to the top.", self.app.status_var.get())
+        # "1 task", not "1 task(s)" — the status bar speaks one way now.
+        self.assertIn("Pinned 1 task to the top.", self.app.status_var.get())
         self.assertIn("pinned", self.visible_texts()[0])
 
     def test_pinning_again_unpins(self):
@@ -2476,6 +2477,50 @@ class InstanceGuardTests(unittest.TestCase):
         self.addCleanup(app.destroy)
         self.assertFalse(app.aborted)
         self.assertTrue((config.db_path / ".lock").exists())
+
+    def _ask_for(self, uncertain):
+        """What the second copy is asked when the lock refuses."""
+        from cognitive_offload.app import CognitiveOffloadApp
+        from cognitive_offload.storage import InstanceLock
+
+        app = CognitiveOffloadApp.__new__(CognitiveOffloadApp)
+        lock = InstanceLock.__new__(InstanceLock)
+        lock.uncertain = uncertain
+        lock.acquire = lambda: False
+        lock.holder = lambda: "started yesterday"
+        lock.takeover = lambda: None
+        with mock.patch("cognitive_offload.app.messagebox.askyesno",
+                        return_value=False) as ask:
+            CognitiveOffloadApp._claim_instance_lock(app, lock)
+        return ask.call_args.args
+
+    def test_a_running_copy_is_not_called_safe_to_override(self):
+        """The reassurance that made this dangerous.
+
+        While a crashed copy was indistinguishable from a live one, "that is
+        safe if the other copy crashed" was kind and usually right. Now a
+        crashed copy is claimed silently and never reaches this dialog, so
+        offering that line here would be talking someone into the exact
+        overwrite the warning is about.
+        """
+        title, body = self._ask_for(uncertain=False)
+        self.assertEqual(title, "Already open")
+        self.assertNotIn("crashed", body)
+        self.assertNotIn("safe", body)
+        self.assertIn("already open — switch to it", body)
+
+    def test_when_the_folder_cannot_tell_the_reassurance_stays(self):
+        """It is still true there, so it is still said."""
+        title, body = self._ask_for(uncertain=True)
+        self.assertEqual(title, "Already running?")
+        self.assertIn("cannot say for certain", body)
+        self.assertIn("crashed", body)
+
+    def test_both_wordings_still_name_the_holder_and_the_stake(self):
+        for uncertain in (True, False):
+            _, body = self._ask_for(uncertain=uncertain)
+            self.assertIn("started yesterday", body)
+            self.assertIn("session folder", body)
 
     def test_declining_the_takeover_aborts_the_second_copy(self):
         from cognitive_offload.app import CognitiveOffloadApp

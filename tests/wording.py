@@ -25,17 +25,30 @@ PACKAGE = Path(__file__).resolve().parent.parent / "cognitive_offload"
 _TEXT_KEYWORDS = ("text", "title", "message", "window_title", "ok_text", "hint")
 
 
-def _flatten(node) -> str | None:
-    """A string literal, or the literal skeleton of an f-string.
+def _interpolation(node) -> str:
+    """Render one ``{…}`` slot of an f-string.
 
-    Interpolations collapse to ``{}`` on purpose: a path or a count changes
-    per run, while the sentence around it is the thing under review.
+    Usually ``{}``: a path or a count differs every run while the sentence
+    around it is what is under review. But an interpolated *call* can carry
+    words of its own — ``{_plural(n, 'completed task')}`` puts the noun
+    inside the slot — and dropping those would let someone change "task" to
+    "item" without the net noticing. So any string literals inside the
+    expression come along.
     """
+    words = [n.value for n in ast.walk(node)
+             if isinstance(n, ast.Constant) and isinstance(n.value, str) and n.value]
+    return "{" + " ".join(words) + "}" if words else "{}"
+
+
+def _flatten(node) -> str | None:
+    """A string literal, or the literal skeleton of an f-string."""
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
     if isinstance(node, ast.JoinedStr):
-        return "".join(v.value if isinstance(v, ast.Constant) and isinstance(v.value, str)
-                       else "{}" for v in node.values)
+        return "".join(
+            v.value if isinstance(v, ast.Constant) and isinstance(v.value, str)
+            else _interpolation(v)
+            for v in node.values)
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
         left, right = _flatten(node.left), _flatten(node.right)
         if left is not None and right is not None:
@@ -63,6 +76,23 @@ def _entries_for(path: Path) -> list[str]:
     tree = ast.parse(source)
     owner = _owners(tree)
     found: list[str] = []
+
+    # Sentences assigned to a name before being asked. A question built as
+    # `title = "Already open"` and passed as a variable is invisible at the
+    # call site, and that is exactly the shape wording takes as it moves out
+    # of the controller — so the net has to see it, or it would quietly stop
+    # covering the strings while appearing to still work.
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        text = _flatten(node.value) if node.value is not None else None
+        if not text or " " not in text.strip():
+            continue  # identifiers, style names and sort keys are not wording
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        for target in targets:
+            if isinstance(target, ast.Name):
+                where = owner.get(id(node), "<module>")
+                found.append(f"{path.name} | {target.id}= | {where} | {text}")
 
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):

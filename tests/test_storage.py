@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from cognitive_offload.models import Task
 from cognitive_offload.ports import Locations, app_private_locations, desktop_locations
@@ -534,6 +535,51 @@ class InstanceLockTests(TempDirTest):
         after = InstanceLock(self.root)
         self.assertTrue(after.acquire())
         self.assertTrue(after.owned)
+
+
+class LockCertaintyTests(TempDirTest):
+    """A refusal has to say whether it *knows*.
+
+    "A copy is running" and "we cannot tell whether a copy is running" want
+    different things said to the person: the first must not offer the
+    crashed-copy reassurance, because following it causes the very overwrite
+    the warning is about.
+    """
+
+    def test_a_fresh_lock_starts_certain(self):
+        lock = InstanceLock(self.root)
+        self.assertFalse(lock.uncertain)
+
+    def test_a_live_holder_is_a_certain_refusal(self):
+        first = InstanceLock(self.root)
+        first.acquire()
+        second = InstanceLock(self.root)
+        self.assertFalse(second.acquire())
+        self.assertFalse(second.uncertain,
+                         "a live copy holds it — that is a fact, not a guess")
+
+    def test_an_unlockable_filesystem_refuses_but_admits_it_cannot_tell(self):
+        """Where locking is unsupported, a crash leftover is still possible."""
+        first = InstanceLock(self.root)
+        first.acquire()
+        second = InstanceLock(self.root)
+        with mock.patch("cognitive_offload.storage._take_lock", return_value=None):
+            self.assertFalse(second.acquire())
+        self.assertTrue(second.uncertain)
+
+    def test_a_lock_file_that_will_not_open_is_also_uncertain(self):
+        """The file is there but unreadable — no grounds to claim anything.
+
+        Only the *second* open is blocked: the first is the O_EXCL create,
+        and failing that one means an unwritable folder, which deliberately
+        lets the app start and complain at the first save instead.
+        """
+        (self.root / ".lock").write_text("{}", encoding="utf-8")
+        lock = InstanceLock(self.root)
+        with mock.patch("cognitive_offload.storage.os.open",
+                        side_effect=[FileExistsError(), PermissionError("nope")]):
+            self.assertFalse(lock.acquire())
+        self.assertTrue(lock.uncertain)
 
 
 class LocationsTests(unittest.TestCase):

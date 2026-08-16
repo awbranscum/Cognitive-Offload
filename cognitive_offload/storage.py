@@ -269,6 +269,11 @@ class InstanceLock:
     def __init__(self, folder: Path):
         self.path = Path(folder) / ".lock"
         self.owned = False
+        # Set when a refusal could not be explained: this filesystem does not
+        # do locking, or the file would not open. The caller needs to know the
+        # difference, because "a copy is running" and "we cannot tell whether
+        # a copy is running" deserve different things said to the person.
+        self.uncertain = False
         # Held open for as long as this copy runs: the operating system lock
         # lives on the open file, not on the file's existence, so letting the
         # handle close would hand the lock straight back.
@@ -325,12 +330,16 @@ class InstanceLock:
         try:
             fd = os.open(self.path, os.O_RDWR)
         except OSError:
+            self.uncertain = True  # cannot even look; say so rather than guess
             return False
         held = _take_lock(fd)
         if held is not True:
-            # Either a live copy holds it, or this filesystem cannot tell us
-            # (network and synced folders often cannot). Both fall back to the
-            # old, careful answer: assume the other copy is real and ask.
+            # False means a live copy is holding the lock right now, which we
+            # can state as fact. None means this filesystem does not do
+            # locking — network and synced folders often do not — and then a
+            # leftover file from a crash is still a real possibility. Both
+            # refuse; only one of them is certain.
+            self.uncertain = held is None
             os.close(fd)
             return False
         # The lock was free, so whoever wrote this file is gone. Claiming it

@@ -162,18 +162,40 @@ class CognitiveOffloadApp(tk.Tk):
         work every 30 seconds — double-clicking run.bat twice, or reopening
         a window that was just lost behind others, is exactly the slip this
         guards against.
+
+        The question asked depends on what is actually known. Since the lock
+        started being held by the operating system, a copy that crashed is
+        claimed silently and never reaches here — so a refusal now usually
+        means a copy really is running, and saying "that is safe if the other
+        one crashed" would be talking the person into the exact loss the
+        warning is about. That reassurance is kept only where it is still
+        true: a folder that cannot do locking at all.
         """
         if lock.acquire():
             return True
-        answer = messagebox.askyesno(
-            "Already running?",
-            f"Another copy of Cognitive Offload looks open with this session "
-            f"folder ({lock.holder()}).\n\n"
-            "Two copies would silently overwrite each other's saves.\n\n"
-            "Open here anyway? (That is safe if the other copy crashed or "
-            "was force-closed.)",
-        )
-        if answer:
+        if lock.uncertain:
+            title = "Already running?"
+            body = (
+                f"Another copy of Cognitive Offload looks open with this "
+                f"session folder ({lock.holder()}).\n\n"
+                "This folder cannot say for certain — some network and synced "
+                "folders cannot — so this may be a leftover from a copy that "
+                "closed badly.\n\n"
+                "Two copies would silently overwrite each other's saves. Open "
+                "here anyway? (That is safe if the other copy crashed or was "
+                "force-closed.)"
+            )
+        else:
+            title = "Already open"
+            body = (
+                f"Cognitive Offload is already open with this session folder "
+                f"({lock.holder()}).\n\n"
+                "Both copies save to the same file every thirty seconds, so "
+                "whichever you type in second quietly undoes the other.\n\n"
+                "The window you want is already open — switch to it. Open a "
+                "second copy here anyway?"
+            )
+        if messagebox.askyesno(title, body):
             lock.takeover()
             return True
         return False
@@ -552,7 +574,7 @@ class CognitiveOffloadApp(tk.Tk):
         self.refresh_tasks()
         self.mark_dirty()
         word = "done" if target else "open"
-        self.set_status(f"Marked {len(tasks)} task(s) {word}.")
+        self.set_status(f"Marked {_plural(len(tasks), 'task')} {word}.")
 
     def toggle_selected_priority(self) -> None:
         tasks = self._require_selection("change its priority")
@@ -564,7 +586,7 @@ class CognitiveOffloadApp(tk.Tk):
             task.priority = target
         self.refresh_tasks()
         self.mark_dirty()
-        self.set_status(f"{'Flagged' if target else 'Unflagged'} {len(tasks)} task(s).")
+        self.set_status(f"{'Flagged' if target else 'Unflagged'} {_plural(len(tasks), 'task')}.")
 
     def tag_selected(self) -> None:
         tasks = self._require_selection("tag it")
@@ -579,7 +601,7 @@ class CognitiveOffloadApp(tk.Tk):
         changed = sum(1 for task in tasks if task.add_tag(tag))
         self.refresh_tasks()
         self.mark_dirty()
-        self.set_status(f"Tagged {changed} task(s) with '{tag.strip().lower()}'.")
+        self.set_status(f"Tagged {_plural(changed, 'task')} with '{tag.strip().lower()}'.")
 
     def edit_selected_details(self) -> None:
         tasks = self.selected_tasks()
@@ -636,14 +658,17 @@ class CognitiveOffloadApp(tk.Tk):
         self.mark_dirty()
         count = len(tasks)
         if not pin:
-            self.set_status(f"Unpinned {count} task(s).")
+            self.set_status(f"Unpinned {_plural(count, 'task')}.")
         elif SORT_ORDERS.get(self.sort_var.get(), DEFAULT_SORT) == "priority":
-            self.set_status(f"Pinned {count} task(s) to the top.")
+            self.set_status(f"Pinned {_plural(count, 'task')} to the top.")
         else:
             # Under other sort orders the pin holds but doesn't reorder;
             # saying otherwise would be the same lie in a new costume.
+            # "shows" agreed with nothing once the count was pluralised
+            # properly; naming what shows fixes it for one task and for six.
             self.set_status(
-                f"Pinned {count} task(s) — shows at the top under Priority sort."
+                f"Pinned {_plural(count, 'task')} — pinned tasks sit at the "
+                "top under Priority sort."
             )
 
     def delete_selected(self) -> None:
@@ -659,14 +684,14 @@ class CognitiveOffloadApp(tk.Tk):
             self.tasks.remove(task)
         self.refresh_tasks(keep_selection=False)
         self.mark_dirty()
-        self.set_status(f"Deleted {len(tasks)} task(s). Ctrl+Z undoes it.")
+        self.set_status(f"Deleted {_plural(len(tasks), 'task')}. Ctrl+Z undoes it.")
 
     def clear_completed(self) -> None:
         done = [t for t in self.tasks if t.done]
         if not done:
             self.set_status("No completed tasks to clear.")
             return
-        if not messagebox.askyesno("Clear completed", f"Remove {len(done)} completed task(s)?"):
+        if not messagebox.askyesno("Clear completed", f"Remove {_plural(len(done), 'completed task')}?"):
             return
         self.push_undo("clear completed")
         previous_log = list(self.completed_log)
@@ -677,7 +702,7 @@ class CognitiveOffloadApp(tk.Tk):
         self.tasks = [t for t in self.tasks if not t.done]
         self.refresh_tasks(keep_selection=False)
         self.mark_dirty()
-        self.set_status(f"Cleared {len(done)} completed task(s).")
+        self.set_status(f"Cleared {_plural(len(done), 'completed task')}.")
 
     # ------------------------------------------------------------------
     # scratchpad
@@ -931,7 +956,7 @@ class CognitiveOffloadApp(tk.Tk):
             self.set_status("Select a task to send to the task list.")
             return
         moved = self._import_matrix_tasks(tasks, "import from matrix")
-        self.set_status(f"Moved {len(moved)} task(s) to the main list.")
+        self.set_status(f"Moved {_plural(len(moved), 'task')} to the main list.")
         self.notebook.select(0)
 
     def focus_matrix_task(self, category: str) -> None:
@@ -961,7 +986,7 @@ class CognitiveOffloadApp(tk.Tk):
             self.set_status(f"{category_label(category)} is empty.")
             return
         if not messagebox.askyesno(
-            "Copy to tasks", f"Copy {len(tasks)} task(s) from {category_label(category)}?"
+            "Copy to tasks", f"Copy {_plural(len(tasks), 'task')} from {category_label(category)}?"
         ):
             return
         self.push_undo("copy from matrix")
@@ -969,7 +994,7 @@ class CognitiveOffloadApp(tk.Tk):
             self.tasks.insert(0, task.to_task())
         self.refresh_tasks(keep_selection=False)
         self.mark_dirty()
-        self.set_status(f"Copied {len(tasks)} task(s) to the main list.")
+        self.set_status(f"Copied {_plural(len(tasks), 'task')} to the main list.")
         self.notebook.select(0)
 
     def send_selected_to_matrix(self) -> None:
@@ -1002,9 +1027,9 @@ class CognitiveOffloadApp(tk.Tk):
         self.mark_dirty()
         # Say what actually happened, not what was asked for.
         self.set_status(
-            f"Moved {moved} of {len(tasks)} task(s) to {category_label(destination)}."
+            f"Moved {moved} of {_plural(len(tasks), 'task')} to {category_label(destination)}."
             if failed else
-            f"Moved {moved} task(s) to {category_label(destination)}."
+            f"Moved {_plural(moved, 'task')} to {category_label(destination)}."
         )
         self.notebook.select(1)
         # Land on the quadrant the tasks actually went to, with the new rows
@@ -1815,7 +1840,7 @@ class CognitiveOffloadApp(tk.Tk):
         if not initial:
             self.set_status(f"Loaded {self.state_store.path}")
         elif self.tasks:
-            self.set_status(f"Loaded {len(self.tasks)} task(s).")
+            self.set_status(f"Loaded {_plural(len(self.tasks), 'task')}.")
 
     def _recover_state(self, exc: StorageError) -> dict | None:
         """The session file is unreadable. Make that survivable.
@@ -2094,6 +2119,18 @@ class CognitiveOffloadApp(tk.Tk):
             except tk.TclError:
                 pass
         self.destroy()
+
+
+def _plural(count: int, noun: str) -> str:
+    """``1 task`` / ``3 tasks`` — never ``1 task(s)``.
+
+    The matrix commands already spoke this way through ``_batch_status``
+    while the task list said "task(s)", so the same status bar had two
+    voices. In an app whose whole difference is that the words were written
+    for a person, "1 task(s)" reads like output from a machine that did not
+    care enough to look.
+    """
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
 
 
 def _batch_status(verb: str, done: int, total: int, noun: str) -> str:
