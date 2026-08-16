@@ -5,6 +5,57 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.24.0 — Ctrl+Z means the same thing in both tabs
+**Undo now covers the Eisenhower Matrix.** It never did, and the effect
+was worse than nothing happening.
+
+No matrix action told the undo stack anything, so pressing Ctrl+Z after
+deleting a matrix task popped whatever older entry happened to be
+sitting there. The deleted task stayed deleted, and *a change you were
+not thinking about* was reverted instead. Reproduced exactly: capture a
+task and flag it, delete a task in the matrix, press Ctrl+Z — the matrix
+task is still gone, the flag is quietly off again, and the status line
+says "Undid: toggle priority." Press it again, which is what anyone does
+when the first press appears not to have worked, and it walks further
+back through unrelated work, hunting for a restore that was never
+coming.
+
+That mattered here more than it would elsewhere, because the app teaches
+the habit itself: deleting from the task list sets the status "Deleted 1
+task(s). Ctrl+Z undoes it." The expectation was trained in one tab and
+broken in the other. And a confirmation dialog is the weakest protection
+there is for someone who deletes on impulse and clicks *Yes* on reflex —
+which is exactly why every one of the sixteen task-list commands already
+had undo behind it. There was also an inversion: the matrix asked "are
+you sure?" for *every* delete while the task list only asks when more
+than one is selected, so the surface you could not recover from leaned
+on the weaker guard.
+
+Adding, editing, moving, booking a time, and deleting are all undoable
+now, in the matrix as in the list, and deleting says so on the status
+line the way the task list always has.
+
+- The machinery was already there, which is the frustrating part:
+  `MatrixStore.restore()` has carried the docstring "the undo half of
+  delete" all along, and sending a task to the matrix already registered
+  its own undo. The matrix tab's own commands simply never called any of
+  it. One helper now covers all five, because they are the same sentence:
+  *these tasks ended up in some state, and this is the state they were in
+  before.*
+- Restoring drops what is on disk now before writing back what was
+  there. An edit or a move renames the file, so writing the old copy
+  without clearing the new one would show the task twice — the failure
+  the existing send-to-matrix undo was already careful about.
+- A copy of a matrix task now carries the file it came from. That is not
+  part of what a task *says*, so it is not in the saved record, but an
+  undo that wrote the old wording to a freshly chosen filename would
+  leave a duplicate behind.
+- Nothing is promised that did not happen: if a delete fails outright,
+  the status line does not offer Ctrl+Z.
+
+451 tests pass, up from 444 — seven new, none of which pass against the
+old code, and no existing test changed.
+
 ## 3.23.0 — a crash no longer costs you a question at the next launch
 - **The app opens.** If it crashed, was force-quit, or the battery ran
   out, the next launch used to stop and ask: *"Another copy looks open

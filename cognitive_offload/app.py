@@ -809,6 +809,7 @@ class CognitiveOffloadApp(tk.Tk):
         except StorageError as exc:
             messagebox.showerror("Save failed", str(exc))
             return
+        self._undo_matrix_change("add to the matrix", [], [created.id])
         self.refresh_matrix()
         self.set_status(f"Added to {category_label(category)}.")
 
@@ -830,6 +831,9 @@ class CognitiveOffloadApp(tk.Tk):
         ).show()
         if not result:
             return
+        # Taken before the writes below, which change the task in place and
+        # can rename its file.
+        before = [task.copy()]
         try:
             task.first_step = result["first_step"]
             task.kind = result["kind"]
@@ -839,6 +843,7 @@ class CognitiveOffloadApp(tk.Tk):
         except StorageError as exc:
             messagebox.showerror("Save failed", str(exc))
             return
+        self._undo_matrix_change("edit matrix task", before, [task.id])
         self.refresh_matrix()
         self.set_status("Matrix task updated.")
 
@@ -850,6 +855,7 @@ class CognitiveOffloadApp(tk.Tk):
         label = tasks[0].title if len(tasks) == 1 else f"{len(tasks)} tasks"
         if not messagebox.askyesno("Delete", f"Delete {label}?"):
             return
+        before = [task.copy() for task in tasks]
         done = 0
         try:
             for task in tasks:
@@ -857,8 +863,12 @@ class CognitiveOffloadApp(tk.Tk):
                 done += 1
         except StorageError as exc:
             messagebox.showerror("Delete failed", str(exc))
+        if done:
+            self._undo_matrix_change("delete from the matrix", before,
+                                     [t.id for t in tasks])
         self.refresh_matrix()
-        self.set_status(_batch_status("Deleted", done, len(tasks), "matrix task"))
+        self.set_status(_batch_status("Deleted", done, len(tasks), "matrix task")
+                        + (" Ctrl+Z undoes it." if done else ""))
 
     def move_matrix_tasks(self, category: str) -> None:
         tasks = self._selected_matrix_tasks(category)
@@ -870,6 +880,7 @@ class CognitiveOffloadApp(tk.Tk):
         ).show()
         if not destination or destination == category:
             return
+        before = [task.copy() for task in tasks]
         done = 0
         try:
             for task in tasks:
@@ -877,6 +888,9 @@ class CognitiveOffloadApp(tk.Tk):
                 done += 1
         except StorageError as exc:
             messagebox.showerror("Move failed", str(exc))
+        if done:
+            self._undo_matrix_change("move between quadrants", before,
+                                     [t.id for t in tasks])
         self.refresh_matrix()
         self.set_status(
             _batch_status("Moved", done, len(tasks), "task")
@@ -1323,6 +1337,35 @@ class CognitiveOffloadApp(tk.Tk):
             self.matrix.delete(task)
         self.refresh_matrix()
 
+    def _revert_matrix_tasks(self, before: list, ids: list) -> None:
+        """Put the matrix back: drop what is there now, write back what was.
+
+        One shape covers adding, editing, moving, booking and deleting,
+        because every one of them is the same sentence — *these ids ended up
+        in some state, and this is the state they were in before*. An add has
+        nothing to write back; a delete has nothing to drop.
+
+        Dropping first matters for edits and moves: both can rename the file,
+        so writing the old copy without removing the new one would show the
+        task twice.
+        """
+        self._remove_matrix_tasks_by_id(ids)
+        for task in before:
+            self.matrix.restore(task)
+        self.refresh_matrix()
+
+    def _undo_matrix_change(self, label: str, before: list, ids: list) -> None:
+        """Register a matrix change with the same undo stack as everything else.
+
+        Without this the stack simply did not hear about matrix work, so the
+        next Ctrl+Z popped an older, unrelated entry: the deleted task stayed
+        deleted and a change the user was not thinking about was reverted
+        instead.
+        """
+        self.push_undo(label)
+        self.attach_undo(
+            lambda before=before, ids=ids: self._revert_matrix_tasks(before, ids))
+
     def _remove_matrix_tasks_by_id(self, ids: list) -> None:
         """Delete matrix tasks by id, resolved fresh from disk."""
         wanted = set(ids)
@@ -1520,6 +1563,7 @@ class CognitiveOffloadApp(tk.Tk):
                 "Try 'today', 'tomorrow', a weekday, or a date like 2026-08-01.",
             )
             return
+        before = [task.copy() for task in tasks]
         done = 0
         try:
             for task in tasks:
@@ -1527,6 +1571,9 @@ class CognitiveOffloadApp(tk.Tk):
                 done += 1
         except StorageError as exc:
             messagebox.showerror("Save failed", str(exc))
+        if done:
+            self._undo_matrix_change("book a time", before,
+                                     [t.id for t in tasks])
         self.refresh_matrix()
         human = humanize_date(when) if when else ""
         spoken = f"for {human} ({when})" if human and human != when else f"for {when}"

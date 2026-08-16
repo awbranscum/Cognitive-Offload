@@ -368,6 +368,18 @@ class MatrixTask:
             estimate_minutes=_as_minutes(data.get("estimate_minutes")),
         )
 
+    def copy(self) -> "MatrixTask":
+        """A detached duplicate, including the file it came from.
+
+        ``path`` is carried across deliberately even though ``to_dict`` omits
+        it: it is *where this task lives*, not part of what it says. An undo
+        that wrote the old data to a freshly chosen filename would leave the
+        task on screen twice.
+        """
+        clone = MatrixTask.from_dict(self.to_dict(), self.category)
+        clone.path = self.path
+        return clone
+
     @property
     def is_ready(self) -> bool:
         return bool(self.first_step)

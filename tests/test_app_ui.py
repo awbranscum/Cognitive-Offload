@@ -1872,6 +1872,121 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual([t.text for t in self.app.tasks], ["goes to the matrix"])
         self.assertEqual(self.app.matrix.list("schedule"), [])  # not in two places
 
+    # -- the matrix keeps its own promises about Ctrl+Z ------------------
+    def _matrix_select(self, category, *indices):
+        listing = self.app.matrix_lists[category]
+        listing.selection_clear(0, tk.END)
+        for index in indices:
+            listing.selection_set(index)
+
+    def _delete_selected_matrix(self, category):
+        with mock.patch("cognitive_offload.app.messagebox.askyesno",
+                        return_value=True):
+            self.app.delete_matrix_tasks(category)
+
+    def test_undo_brings_a_deleted_matrix_task_back(self):
+        self.app.matrix.create("do_first", "matters a lot", "the details")
+        self.app.refresh_matrix()
+        self._matrix_select("do_first", 0)
+        self._delete_selected_matrix("do_first")
+        self.assertEqual(self.app.matrix.list("do_first"), [])
+
+        self.app.undo()
+        restored = self.app.matrix.list("do_first")
+        self.assertEqual([t.title for t in restored], ["matters a lot"])
+        self.assertEqual(restored[0].content, "the details")
+
+    def test_undoing_a_matrix_delete_leaves_unrelated_work_alone(self):
+        """The other half, and the reason this was worse than "no undo".
+
+        With the matrix silent about undo, Ctrl+Z popped whatever older entry
+        was on the stack: the deleted task stayed deleted *and* a change the
+        user was not thinking about was reverted instead.
+        """
+        self.capture("flag this one")
+        self.select(0)
+        self.app.toggle_selected_priority()
+        self.assertTrue(self.app.tasks[0].priority)
+
+        self.app.matrix.create("do_first", "matters a lot", "")
+        self.app.refresh_matrix()
+        self._matrix_select("do_first", 0)
+        self._delete_selected_matrix("do_first")
+
+        self.app.undo()
+        self.assertEqual([t.title for t in self.app.matrix.list("do_first")],
+                         ["matters a lot"])
+        self.assertTrue(self.app.tasks[0].priority, "the flag was not the target")
+        self.assertIn("matrix", self.app.status_var.get())
+
+    def test_the_deleted_status_only_promises_undo_when_it_happened(self):
+        self.app.matrix.create("do_first", "gone", "")
+        self.app.refresh_matrix()
+        self._matrix_select("do_first", 0)
+        self._delete_selected_matrix("do_first")
+        self.assertIn("Ctrl+Z", self.app.status_var.get())
+
+        self._matrix_select("do_first")  # nothing selected
+        self.app.delete_matrix_tasks("do_first")
+        self.assertNotIn("Ctrl+Z", self.app.status_var.get())
+
+    def test_undo_removes_a_task_added_to_the_matrix(self):
+        with mock.patch("cognitive_offload.app.TaskEditorDialog") as dialog:
+            dialog.return_value.show.return_value = {
+                "title": "added by hand", "content": "", "first_step": "",
+                "kind": "", "scheduled_for": "",
+            }
+            self.app.add_matrix_task("delegate")
+        self.assertEqual(len(self.app.matrix.list("delegate")), 1)
+        self.app.undo()
+        self.assertEqual(self.app.matrix.list("delegate"), [])
+
+    def test_undo_restores_the_wording_of_an_edited_matrix_task(self):
+        """An edit renames the file, so the old copy must know its own path."""
+        self.app.matrix.create("schedule", "original title", "original content")
+        self.app.refresh_matrix()
+        self._matrix_select("schedule", 0)
+        with mock.patch("cognitive_offload.app.TaskEditorDialog") as dialog:
+            dialog.return_value.show.return_value = {
+                "title": "renamed title", "content": "new content",
+                "first_step": "", "kind": "", "scheduled_for": "",
+            }
+            self.app.edit_matrix_task("schedule")
+        self.assertEqual([t.title for t in self.app.matrix.list("schedule")],
+                         ["renamed title"])
+
+        self.app.undo()
+        back = self.app.matrix.list("schedule")
+        self.assertEqual([t.title for t in back], ["original title"])
+        self.assertEqual(back[0].content, "original content")
+
+    def test_undo_moves_a_task_back_to_the_quadrant_it_came_from(self):
+        self.app.matrix.create("do_first", "wandering task", "")
+        self.app.refresh_matrix()
+        self._matrix_select("do_first", 0)
+        with mock.patch("cognitive_offload.app.QuadrantDialog") as dialog:
+            dialog.return_value.show.return_value = "eliminate"
+            self.app.move_matrix_tasks("do_first")
+        self.assertEqual(len(self.app.matrix.list("eliminate")), 1)
+
+        self.app.undo()
+        self.assertEqual([t.title for t in self.app.matrix.list("do_first")],
+                         ["wandering task"])
+        self.assertEqual(self.app.matrix.list("eliminate"), [],
+                         "a moved task must not end up in both quadrants")
+
+    def test_undo_clears_a_booking_made_on_a_matrix_task(self):
+        self.app.matrix.create("schedule", "needs a date", "")
+        self.app.refresh_matrix()
+        self._matrix_select("schedule", 0)
+        with mock.patch("cognitive_offload.app.PromptDialog") as dialog:
+            dialog.return_value.show.return_value = "tomorrow"
+            self.app.book_matrix_time("schedule")
+        self.assertTrue(self.app.matrix.list("schedule")[0].scheduled_for)
+
+        self.app.undo()
+        self.assertEqual(self.app.matrix.list("schedule")[0].scheduled_for, "")
+
     def test_undo_still_finds_a_matrix_file_renamed_after_the_send(self):
         """The undo entry must survive the file being renamed or moved."""
         self.capture("original name")
