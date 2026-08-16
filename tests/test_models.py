@@ -76,8 +76,21 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(humanize_date("2026-08-12", on), "in 7 days")
         self.assertEqual(humanize_date("2026-08-19", on), "in 14 days")
         self.assertEqual(humanize_date("2026-08-20", on), "2026-08-20")  # far: plain
-        self.assertEqual(humanize_date("2026-08-01", on), "2026-08-01")  # past: plain
         self.assertEqual(humanize_date("not-a-date", on), "not-a-date")
+
+    def test_humanize_date_places_the_past_without_arithmetic(self):
+        """A missed booking has to say when it was for. An ISO string is
+        precisely the flat data this function exists to remove."""
+        from cognitive_offload.models import humanize_date
+
+        on = "2026-08-05"  # a Wednesday
+        self.assertEqual(humanize_date("2026-08-04", on), "yesterday")
+        self.assertEqual(humanize_date("2026-08-01", on), "1 Aug")
+        self.assertEqual(humanize_date("2026-06-16", on), "16 Jun")
+        # Deliberately NOT the weekday form the near future uses: "Thu"
+        # ahead is unambiguous, "Thu" behind could be four days ago or
+        # eleven — a date you cannot place is the failure being fixed.
+        self.assertNotEqual(humanize_date("2026-07-30", on), "Thu")
 
     def test_estimate_round_trips_clamps_and_tolerates_junk(self):
         task = Task(text="x", estimate_minutes=25)

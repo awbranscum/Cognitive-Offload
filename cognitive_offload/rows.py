@@ -13,7 +13,7 @@ a task's badges stay identical wherever it appears.
 
 from __future__ import annotations
 
-from .models import Task, humanize_date, kind_label
+from .models import Task, humanize_date, kind_label, today_iso
 from .queries import SORT_ORDERS
 from .viewmodels import Badge, Row
 
@@ -26,11 +26,16 @@ def _shared_badges(item) -> list[Badge]:
     if item.is_ready:
         badges.append(Badge("ready", "ready"))
     if item.scheduled_for:
-        # An overdue booking is a nudge, not a telling-off.
+        # An overdue booking is a nudge, not a telling-off — so a missed
+        # booking says when it was for, in the same quiet tone a future one
+        # uses. It must not say "today": twelve rows all claiming today
+        # when two of them are today makes the badge carry no information,
+        # and the honest response to that is to disbelieve all of them.
+        booked_today = item.scheduled_for == today_iso()
         badges.append(Badge(
-            "today" if item.is_due()
+            "today" if booked_today
             else f"booked {humanize_date(item.scheduled_for)}",
-            "today" if item.is_due() else "booked",
+            "today" if booked_today else "booked",
         ))
     if item.estimate_minutes:
         badges.append(Badge(f"~{item.estimate_minutes} min", "estimate"))

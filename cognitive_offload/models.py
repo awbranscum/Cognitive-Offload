@@ -88,7 +88,16 @@ def humanize_date(iso: str, on: str | None = None) -> str:
         return target.strftime("%a")
     if 7 <= delta <= 14:
         return f"in {delta} days"
-    return iso  # far future (and the past) stays a plain date
+    if delta == -1:
+        return "yesterday"
+    if delta < 0:
+        # A short, plain date — deliberately NOT the weekday form used for
+        # the near future. "Thu" two days ahead is unambiguous; "Thu" in
+        # the past could be four days ago or eleven, and a date you cannot
+        # place is the thing this function exists to prevent. (%-d is not
+        # available on Windows, and this app ships a run.bat.)
+        return f"{target.day} {target.strftime('%b')}"
+    return iso  # far future stays a plain date
 
 
 def kind_label(kind: str) -> str:

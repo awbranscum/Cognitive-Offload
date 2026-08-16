@@ -1220,6 +1220,45 @@ class AppSmokeTests(unittest.TestCase):
         self.app.refresh_tasks()
         self.assertIn("booked tomorrow", self.visible_texts()[0])
 
+    def test_only_a_booking_dated_today_says_today(self):
+        """Twelve rows all claiming "today" when two of them are today makes
+        the badge carry no information, and the honest response to a badge
+        that lies is to disbelieve every one of them."""
+        from datetime import date, timedelta
+        from cognitive_offload.models import today_iso
+
+        self.capture("booked weeks ago")
+        self.capture("booked for today")
+        stale = next(t for t in self.app.tasks if t.text == "booked weeks ago")
+        stale.scheduled_for = (date.today() - timedelta(days=54)).isoformat()
+        now = next(t for t in self.app.tasks if t.text == "booked for today")
+        now.scheduled_for = today_iso()
+        self.app.refresh_tasks()
+        rows = {t.text: self.visible_texts()[i]
+                for i, t in enumerate(self.app._visible)}
+        self.assertIn("today", rows["booked for today"])
+        self.assertNotIn("today", rows["booked weeks ago"])
+        # It still says WHEN it was for — a missed booking is a nudge, not
+        # a telling-off, and never a bare ISO date.
+        self.assertIn("booked", rows["booked weeks ago"])
+        self.assertNotIn(stale.scheduled_for, rows["booked weeks ago"])
+
+    def test_the_banner_counts_and_opens_todays_bookings_only(self):
+        from datetime import date, timedelta
+        from cognitive_offload.models import today_iso
+
+        for text, offset in (("ancient", 60), ("old", 12), ("actually today", 0)):
+            self.capture(text)
+            task = next(t for t in self.app.tasks if t.text == text)
+            task.scheduled_for = (date.today() - timedelta(days=offset)).isoformat()
+        self.app.refresh_tasks()
+        self.assertIn("1 booked for today", self.app.due_var.get())
+        # ...and the click lands on that one, not the oldest.
+        self.app.show_booked()
+        self.assertIn("actually today", self.app.status_var.get())
+        self.assertEqual(today_iso(),
+                         self.app.selected_tasks()[0].scheduled_for)
+
     def test_clearing_a_snooze_from_the_editor(self):
         from datetime import date, timedelta
 
@@ -1313,6 +1352,100 @@ class AppSmokeTests(unittest.TestCase):
             self.app.finish_session_early()
         self.app.refresh_next_up()
         self.assertEqual(self.app.next_title_var.get(), "worked on recently")
+
+    def test_reset_keeps_the_minutes_you_actually_did(self):
+        """Quitting mid-block already banks them and so does "Done early".
+        Reset binning them charged the person who tidied up before
+        stopping — on a depleted afternoon, the only person pressing it."""
+        self.capture("book the dentist")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "", "warmup_done": 0,
+            }
+            self.app.focus_on_selected()
+        task_id = self.app.tasks[0].id
+        self.app._timer_deadline -= 4 * 60
+        self.app._tick_timer()
+        self.app.reset_timer()
+        self.assertEqual(self.app.session_log.minutes_today(), 4)
+        [record] = self.app.session_log.sessions
+        self.assertEqual(record.task, "book the dentist")
+        self.assertEqual(record.task_id, task_id)  # so it warms tomorrow
+        self.assertIn("banked", self.app.status_var.get())  # not "Timer reset."
+
+    def test_reset_banks_nothing_when_there_is_nothing_to_bank(self):
+        # An untouched timer, a second press, and a break must all stay silent
+        # — the rule is "count what happened", never "manufacture a number".
+        self.app.reset_timer()
+        self.assertEqual(self.app.session_log.sessions, [])
+        self.assertIn("Timer reset", self.app.status_var.get())
+
+        self.capture("something")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "", "warmup_done": 0,
+            }
+            self.app.focus_on_selected()
+        self.app._timer_deadline -= 3 * 60
+        self.app._tick_timer()
+        self.app.reset_timer()
+        self.app.reset_timer()  # idempotent: bank_early guards on timer.banked
+        self.assertEqual(len(self.app.session_log.sessions), 1)
+
+        self.app.start_timer(minutes=5, mode="break")
+        self.app._timer_deadline -= 2 * 60
+        self.app._tick_timer()
+        self.app.reset_timer()
+        self.assertEqual(len(self.app.session_log.sessions), 1)  # break: no record
+
+    def test_replacing_a_paused_block_still_banks_its_minutes(self):
+        self.capture("the big one")
+        self.capture("something smaller")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 25, "first_step": "", "warmup_done": 0,
+            }
+            self.app.focus_on_selected()
+        self.app._timer_deadline -= 6 * 60
+        self.app._tick_timer()
+        self.app.pause_timer()  # stopped, thought better of it
+        self.select(1)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter, \
+             mock.patch("cognitive_offload.app.messagebox.askyesno") as asked:
+            starter.return_value.show.return_value = {
+                "minutes": 10, "first_step": "", "warmup_done": 0,
+            }
+            self.app.focus_on_selected()
+        asked.assert_not_called()  # a pause must not be interrogated
+        self.assertEqual(self.app.session_log.minutes_today(), 6)
+        self.app.pause_timer()
+
+    def test_next_up_steps_out_of_sight_while_a_block_runs(self):
+        """The largest button on the window said "Start this" on a different
+        task, sixty seconds into the block you fought to begin."""
+        self.capture("the other thing")
+        self.capture("the one I chose")
+        chosen = next(t for t in self.app.tasks if t.text == "the one I chose")
+        self.select(next(i for i, t in enumerate(self.app._visible)
+                         if t.id == chosen.id))
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "", "warmup_done": 0,
+            }
+            self.app.focus_on_selected()
+        self.assertEqual(self.app.next_frame.grid_info(), {})
+        # The keyboard path is deliberately untouched: only the soliciting
+        # button goes away, not the deliberate keystroke.
+        self.assertEqual(self.app.next_title_var.get(), "the other thing")
+        # A pause is exactly when "what should I do instead?" is fair.
+        self.app.pause_timer()
+        self.app.refresh_next_up()
+        self.assertNotEqual(self.app.next_frame.grid_info(), {})
+        self.app.reset_timer()
+        self.assertNotEqual(self.app.next_frame.grid_info(), {})
 
     def test_next_up_never_pitches_the_task_you_are_focusing_on(self):
         """Mid-session, "what should I start?" is not the thing in progress."""

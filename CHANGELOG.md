@@ -5,6 +5,37 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.21.0 — "today" means today, Reset keeps your minutes, and NEXT UP
+## stops interrupting
+Three findings from walking the app as the person it is for, rather than
+as its author.
+- **A booking says when it was actually for.** Only a task booked for
+  today itself wears the `today` badge; earlier ones keep the quiet
+  `booked yesterday` / `booked 16 Jun` wording a future booking already
+  uses. The banner counts today's bookings, and clicking it now lands on
+  one of them instead of the oldest missed one. Twelve rows all claiming
+  "today" when two of them were today made the badge carry no
+  information — and the honest response to a badge that lies is to stop
+  believing all of them, which quietly broke booking for the people who
+  used it most. Missed bookings keep their place and their weight in the
+  ranking; they lose only the false claim on today. Nothing turns red,
+  nothing says "overdue", nothing is counted.
+- **Reset banks the minutes you actually did.** Quitting mid-block
+  already kept them, and so did "Done early" — but "Done early" lives in
+  the pop-out, which is off by default, so the main window's only honest
+  stop was a Reset that silently binned the work. That credited the
+  person who closed the laptop and charged the person who tidied up
+  first. On an afternoon when four minutes are the only thing the day
+  produced, those four minutes are the whole point. Replacing a *paused*
+  block now banks its minutes too. An untouched timer, a second press,
+  and a break still record nothing.
+- **NEXT UP steps out of sight while a block runs.** The largest button
+  on the window read "Start this" — on a different task — for the whole
+  fifteen minutes, and pressing it raised a "drop it and start a new
+  one?" question the app had invented for itself. It returns the moment
+  you pause, finish, or reset; pausing is exactly when "what should I do
+  instead?" is a fair question. The keyboard shortcut is unchanged.
+
 ## 3.20.0 — A brain that can outlive its face
 First step toward running on more than one kind of screen.
 - The types describing what a row *shows* moved out of the tkinter widget

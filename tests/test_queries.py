@@ -252,6 +252,27 @@ class StartingTests(unittest.TestCase):
         result = [t.text for t in due_tasks([today, late, future, finished])]
         self.assertEqual(result, ["late", "today"])
 
+    def test_scheduled_today_is_today_only_while_due_stays_inclusive(self):
+        """The two questions are different: "what may I still catch up on"
+        keeps the past; "what does the word today truthfully cover" does
+        not. Saying today about a date that is not today is a claim the
+        user can check, and finding it false costs the whole feature."""
+        from cognitive_offload.queries import scheduled_today
+
+        stale = make("booked weeks ago")
+        stale.scheduled_for = "2020-01-01"
+        now = make("booked for today")
+        now.scheduled_for = today_iso()
+        finished = make("done today", done=True)
+        finished.scheduled_for = today_iso()
+        pool = [stale, now, finished]
+        self.assertEqual([t.text for t in scheduled_today(pool)],
+                         ["booked for today"])
+        # due_tasks keeps its inclusive meaning — a missed booking still has
+        # a route back; it just stops being counted as today.
+        self.assertEqual([t.text for t in due_tasks(pool)],
+                         ["booked weeks ago", "booked for today"])
+
     def test_filter_by_kind(self):
         admin = make("admin task")
         admin.kind = "admin"

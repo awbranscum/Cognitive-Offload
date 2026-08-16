@@ -27,6 +27,7 @@ from .models import (
     humanize_date,
     now_stamp,
     parse_date_input,
+    today_iso,
 )
 from .queries import (
     ALL_KINDS,
@@ -35,8 +36,8 @@ from .queries import (
     all_tags,
     completed_titles_today,
     counts,
-    due_tasks,
     rank_for_starting,
+    scheduled_today,
     split_lines,
     suggest_tasks,
     visible_tasks,
@@ -358,7 +359,22 @@ class CognitiveOffloadApp(tk.Tk):
             f"→ {task.first_step}" if task.first_step else "no first step yet — you'll be asked"
         )
         if getattr(self, "next_frame", None) is not None:
-            self.next_frame.grid()
+            # While a focus block actually runs, the strip steps out of
+            # sight. Leaving it up put the largest button on the window —
+            # "Start this", on a different task — in front of someone
+            # sixty seconds into the block they fought to begin, and
+            # clicking it raised a "drop it and start a new one?" question
+            # the app had invented for itself. A pause is different: that
+            # is exactly when "what should I do instead?" is fair, so this
+            # tests the running clock, not open_block.
+            #
+            # The vars above stay populated on purpose, so Ctrl-driven
+            # start_next still behaves normally — the soliciting button
+            # goes away, the deliberate keystroke does not.
+            if self._timer_running and self._timer_mode == "focus":
+                self.next_frame.grid_remove()
+            else:
+                self.next_frame.grid()
 
     def next_task(self) -> Task | None:
         return next((t for t in self.tasks if t.id == self._next_task_id), None)
@@ -1129,7 +1145,15 @@ class CognitiveOffloadApp(tk.Tk):
 
         banked = None
         replaced = None
-        if self._timer_running:
+        if self.timer.open_block:
+            # open_block, not _timer_running: a block PAUSED partway is the
+            # other realistic way to arrive here — you stopped, thought
+            # better of it, and picked something smaller — and those
+            # minutes were being dropped. (The guard in the branch above
+            # stays on _timer_running deliberately: that one raises a
+            # yes/no modal, and asking it of someone who merely paused
+            # would put a decision exactly where it hurts.)
+            #
             # Only now is the replacement certain. Bank what was actually done
             # rather than dropping those minutes on the floor — silently: the
             # old block's end dialog in the middle of starting a new one is a
@@ -1430,8 +1454,15 @@ class CognitiveOffloadApp(tk.Tk):
     # booked time (the Schedule quadrant is where this matters)
     # ------------------------------------------------------------------
     def refresh_due(self) -> None:
-        due = due_tasks(self.tasks)
-        booked = [t for t in self._matrix_cache.get("schedule", []) if t.is_due()]
+        # Counts what is booked for today itself. A banner claiming seven
+        # things are due today when five were booked weeks ago is a number
+        # the user can check, and checking it is what makes them stop
+        # trusting the booking feature entirely. Missed bookings keep their
+        # place in the list and their weight in the ranking; they simply
+        # stop being counted as today.
+        due = scheduled_today(self.tasks)
+        booked = [t for t in self._matrix_cache.get("schedule", [])
+                  if t.scheduled_for == today_iso()]
         total = len(due) + len(booked)
         if total:
             self.due_var.set(f"{total} booked for today →")
@@ -1486,12 +1517,17 @@ class CognitiveOffloadApp(tk.Tk):
             WeekReviewDialog(self, days, total_sessions, total_minutes).show()
 
     def show_booked(self) -> None:
-        due = due_tasks(self.tasks)
+        # The banner counts today's bookings, so its click must land on one
+        # of them. Following due_tasks here selected the OLDEST booking —
+        # so the most confident gesture in the feature took you to a task
+        # from two months ago.
+        due = scheduled_today(self.tasks)
         if due:
             self._select_task(due[0])
             self.set_status(f"Booked for today: {due[0].text}")
             return
-        booked = [t for t in self._matrix_cache.get("schedule", []) if t.is_due()]
+        booked = [t for t in self._matrix_cache.get("schedule", [])
+                  if t.scheduled_for == today_iso()]
         if booked:
             self.notebook.select(1)
             self.matrix_notebook.select(CATEGORY_KEYS.index("schedule"))
@@ -1501,7 +1537,7 @@ class CognitiveOffloadApp(tk.Tk):
             if listing is not None:
                 listing.selection_clear(0, tk.END)
                 for index, task in enumerate(self._matrix_cache.get("schedule", [])):
-                    if task.is_due():
+                    if task.scheduled_for == today_iso():
                         listing.selection_set(index)
             self.set_status(f"Booked in Schedule: {booked[0].title}")
 
@@ -1639,6 +1675,18 @@ class CognitiveOffloadApp(tk.Tk):
         self.pause_timer()
 
     def reset_timer(self) -> None:
+        # Bank first, while the task is still known — clearing the id below
+        # would leave the record with no name on it.
+        #
+        # Quitting mid-block already keeps your minutes, and so does "Done
+        # early". Reset did not, which credited the person who closed the
+        # laptop and quietly charged the person who tidied up before
+        # stopping. On an empty-tank afternoon those four minutes are the
+        # only evidence the day produced anything, and Reset is exactly the
+        # button that person reaches for. It banks nothing when there is
+        # nothing to bank: an untouched timer, a break, or a block that
+        # already logged itself all return None here.
+        banked = self.finish_session_early(interactive=False)
         self._stop_ticking()
         self._focus_task_id = None
         self.focus_task_var.set("Nothing picked yet")
@@ -1646,7 +1694,10 @@ class CognitiveOffloadApp(tk.Tk):
         self.timer_button.config(text="Start")
         self._update_timer_label()
         self.refresh_next_up()
-        self.set_status("Timer reset.")
+        if not banked:
+            # Leave the "N min banked" line standing when there was one:
+            # it is the evidence, and "Timer reset." would bury it.
+            self.set_status("Timer reset.")
 
     def on_timer_minutes_changed(self) -> None:
         if self.timer.set_length_if_idle(self._minutes()):

@@ -124,6 +124,20 @@ def due_tasks(tasks: list[Task], on: str | None = None) -> list[Task]:
     return sorted(due, key=lambda t: t.scheduled_for)
 
 
+def scheduled_today(tasks: list[Task], on: str | None = None) -> list[Task]:
+    """Open tasks booked for today itself — not "today or earlier".
+
+    ``due_tasks`` is deliberately inclusive of the past, because a booking
+    you missed still deserves a route back. But saying "today" about a date
+    that is not today is a claim the user can check, and finding it false
+    teaches them to disbelieve the whole feature. Anything ranked, warmed
+    or nudged still uses ``due_tasks``; only the places that say the word
+    "today" use this.
+    """
+    on = on or today_iso()
+    return [t for t in tasks if not t.done and t.scheduled_for == on]
+
+
 def rank_for_starting(tasks: list[Task], kind: str | None = None, on: str | None = None,
                       warm: set | None = None) -> list[Task]:
     """Order open tasks by how easy they are to *start*, best first.
