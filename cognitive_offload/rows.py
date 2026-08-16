@@ -3,16 +3,19 @@
 The badge and subtitle logic used to be copy-pasted between the main list
 and the matrix quadrants, so any wording change had to be made twice and
 drift would mean the same task reading differently on the two tabs. Both
-builders now feed from the same helpers. (Badge/Row come from widgets, so
-tkinter is imported transitively — but never a display: these functions
-build plain data and test headless.)
+builders now feed from the same helpers.
+
+This module decides what a row *says*; it never draws one. It imports no
+UI toolkit, so a front-end on any platform can reuse these decisions
+instead of re-deriving which tasks read as "ready" — which is exactly why
+a task's badges stay identical wherever it appears.
 """
 
 from __future__ import annotations
 
 from .models import Task, humanize_date, kind_label
 from .queries import SORT_ORDERS
-from .widgets import Badge, Row
+from .viewmodels import Badge, Row
 
 
 def _shared_badges(item) -> list[Badge]:

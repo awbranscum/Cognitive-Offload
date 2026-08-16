@@ -11,11 +11,11 @@ sentence.
 from __future__ import annotations
 
 import tkinter as tk
-from dataclasses import dataclass, field
 from tkinter import ttk
 
 from . import theme
 from .theme import RADIUS_PILL, font, px, rounded_rect, tokens
+from .viewmodels import Badge, Row
 
 
 # Badge texts are a small closed set ("admin", "ready", "#work", dates), so
@@ -35,31 +35,10 @@ def _mix(base: str, other: str, amount: float) -> str:
     return "#" + "".join(f"{round(x + (y - x) * amount):02x}" for x, y in zip(a, b))
 
 
-@dataclass
-class Badge:
-    text: str
-    variant: str = "tag"  # key into Tokens.badges
-
-
-@dataclass
-class Row:
-    """One entry in a :class:`RowList`."""
-
-    id: str
-    title: str
-    subtitle: str = ""
-    badges: list = field(default_factory=list)
-    done: bool = False
-    flagged: bool = False
-    marker: str = ""  # optional leading glyph override
-
-    def as_text(self) -> str:
-        """Flat text of the whole row (used by tests and accessibility)."""
-        parts = [self.title]
-        parts.extend(badge.text for badge in self.badges)
-        if self.subtitle:
-            parts.append(self.subtitle)
-        return "  ".join(parts)
+# Badge and Row now live in viewmodels, which imports no UI toolkit — so
+# the logic that builds rows can run on a platform without tkinter. They
+# are re-exported here because this is where every drawing caller already
+# looks for them.
 
 
 class BadgeStrip(tk.Canvas):

@@ -5,6 +5,24 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.20.0 — A brain that can outlive its face
+First step toward running on more than one kind of screen.
+- The types describing what a row *shows* moved out of the tkinter widget
+  module into `viewmodels.py`, which imports no UI toolkit. That frees
+  `rows.py` — the logic deciding which badges and wording a task has
+  earned — to run anywhere. Importing a GUI toolkit to learn that a task
+  is flagged was coupling that quietly limited what this app could ever
+  run on.
+- The boundary is now a tested invariant, not a habit: `test_portability`
+  imports every core module (task model, ranking, sessions, storage,
+  timer, undo, row building) in a subprocess with tkinter made
+  unavailable, and fails if any of them needs it. A companion test guards
+  the guard — it asserts the UI modules *do* fail there, so a blocker
+  that blocked nothing could never let the first test pass for the wrong
+  reason.
+- No behaviour changes. Eight of fourteen modules are now provably
+  display-free.
+
 ## 3.19.14 — No version left unwritten
 - Backfilled the missing 3.19.1–3.19.2 entries: the six-badge cap that
   keeps a tag flood from squeezing a task's title to nothing had
