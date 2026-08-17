@@ -5,6 +5,45 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.30.0 — the clock's words move somewhere they can be tested
+Nothing on screen changes. The timer line — "ends 15:42", "break ends
+09:05 tomorrow", "· a good moment to find a stopping point" — was
+computed inside the method that also writes the widgets, calling the
+system clock as it went. It now lives in `presenter.timer_view()`, which
+takes the current time as an argument and returns what to display.
+
+- **Two soul features had no test anywhere that runs headless.** The
+  after-midnight clause exists because a clock time you cannot place on
+  a day is precisely the ambiguity the line was added to remove; the
+  soft landing exists because a transition costs less when it is
+  announced. Reaching either meant building a real window *at the right
+  time of day*, so in practice neither was covered. With the clock
+  passed in, both are ordinary assertions — and there are now ten of
+  them, running in about a millisecond.
+
+- **`plural` and `batch_status` moved too**, so the counting words a
+  second front-end needs are no longer stranded in the tkinter
+  controller. Twenty call sites now go through the presenter.
+
+- **The wording net was taught about `presenter.py` first, deliberately.**
+  It only read `app.py` and `dialogs.py`, so every string that moved out
+  would have vanished from the snapshot while the tests stayed green —
+  the net losing coverage at the exact moment it is most needed. Adding
+  the file *before* moving anything meant the diff could be read for
+  what it was.
+
+  And it read correctly: `ends {%H:%M}` and `break ends {%H:%M}` changed
+  file and nothing else. Four passes of correcting wording before
+  starting to move it is what made that diff worth trusting — content
+  changes and location changes never mixed. The count went **up**, 214
+  to 215, because `presenter.py` had two strings of its own that had
+  never been watched at all.
+
+  One entry dropped: the bare `{02d}:{02d}` clock format, which has no
+  words in it and was already on the list of low-signal skeletons.
+
+498 tests pass, up from 484. Fourteen new, no existing test changed.
+
 ## 3.29.0 — the README stops promising the wrong things
 Two of the README's safety claims had gone out of date, in the two
 places where being wrong actually costs something.

@@ -185,7 +185,11 @@ def _entries_for(path: Path) -> list[str]:
 def snapshot() -> str:
     """The whole wording surface, sorted so the file is stable."""
     entries: list[str] = []
-    for name in ("app.py", "dialogs.py"):
+    # presenter.py is here because wording is moving into it. Without this
+    # line every string that moves would simply vanish from the snapshot
+    # while the tests stayed green — the net losing coverage at exactly the
+    # moment it is most needed.
+    for name in ("app.py", "dialogs.py", "presenter.py"):
         entries += _entries_for(PACKAGE / name)
     # Newlines would break the one-entry-per-line format, and reviewing an
     # escaped blob is worse than reviewing a marker.

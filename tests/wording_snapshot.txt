@@ -18,8 +18,6 @@ app.py | finished= | _finish_session | {} min, and it's finished. Nice.
 app.py | hint= | book_matrix_time | today / tomorrow / a weekday / 2026-08-01 — blank clears it
 app.py | hint= | tag_selected | Lower-cased automatically.
 app.py | intro= | _recover_state | {}\n\nThe unreadable file was set aside as {}, so nothing is lost.
-app.py | line= | _update_timer_label | break ends {%H:%M}
-app.py | line= | _update_timer_label | ends {%H:%M}
 app.py | line= | append_scratchpad | [{}] {}
 app.py | messagebox.askyesno | _finish_break | Break over
 app.py | messagebox.askyesno | _finish_break | Start another focus session?
@@ -156,7 +154,6 @@ app.py | status | undo | Undid: {}.
 app.py | text= | _build_ui |   Cognitive Offload  
 app.py | text= | _build_ui |   Eisenhower Matrix  
 app.py | text= | _tick_timer | Start
-app.py | text= | _update_timer_label | {02d}:{02d}
 app.py | text= | finish_session_early | Start
 app.py | text= | pause_timer | Resume
 app.py | text= | refresh_matrix | {} task{s}
@@ -222,3 +219,7 @@ dialogs.py | text= | _edit_steps | Your own downshift, in your own words. Blank 
 dialogs.py | text= | _refresh |     → {}
 dialogs.py | text= | _refresh | Nothing open in that shape. Try 'Anything', or capture something new — an empty list is allowed.
 dialogs.py | text= | button_row | Cancel
+presenter.py | footer= | today_view | \n\nPlus {} focus session{s} — {} minutes.
+presenter.py | line= | timer_view | break ends {%H:%M}
+presenter.py | line= | timer_view | ends {%H:%M}
+presenter.py | summary= | task_list_view | {} open · {} done

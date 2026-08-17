@@ -15,6 +15,7 @@ cannot accidentally reimplement it differently.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
@@ -29,6 +30,15 @@ from .queries import (
 )
 from .rows import task_row
 from .viewmodels import Row
+
+
+@dataclass
+class TimerView:
+    """What the clock says: the digits, the line under them, the bar."""
+
+    clock: str = "00:00"
+    ends: str = ""
+    fraction: float = 0.0
 
 
 @dataclass
@@ -84,6 +94,65 @@ class WeekView:
     days: list = field(default_factory=list)
     total_sessions: int = 0
     total_minutes: int = 0
+
+
+def plural(count: int, noun: str) -> str:
+    """``1 task`` / ``3 tasks`` — never ``1 task(s)``.
+
+    In an app whose whole difference is that the words were written for a
+    person, "1 task(s)" reads like output from a machine that did not care
+    enough to look.
+    """
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
+def batch_status(verb: str, done: int, total: int, noun: str) -> str:
+    """Report what actually happened, not what was asked for.
+
+    Deliberately leaves the sentence unfinished: callers add their own tail
+    (" to Schedule.", " Ctrl+Z undoes it.") and the full stop that goes with
+    it.
+    """
+    if done == total:
+        return f"{verb} {plural(done, noun)}"
+    return f"{verb} {done} of {total} {noun}s — the rest failed"
+
+
+def timer_view(remaining: int, total: int, *, mode: str = "focus",
+               running: bool = False, closing: bool = False,
+               now: float | None = None) -> TimerView:
+    """The countdown, and the line that says where it lands on the clock.
+
+    ``now`` is a parameter rather than a call to the clock inside, which is
+    what finally makes this testable. Both of the interesting branches — the
+    block that ends after midnight, and the soft landing near the end — used
+    to be reachable only by building a real window at the right time of day,
+    so in practice neither was covered anywhere that runs headless.
+    """
+    minutes, seconds = divmod(max(0, remaining), 60)
+    view = TimerView(clock=f"{minutes:02d}:{seconds:02d}")
+    elapsed = max(0, total - remaining)
+    view.fraction = elapsed / total if total else 0.0
+    if not (running and remaining > 0):
+        return view
+
+    # "ends 15:42" is anchorable in a way "22:00 left" is not, which is the
+    # whole difficulty with time blindness.
+    stamp = time.time() if now is None else now
+    ends = time.localtime(stamp + remaining)
+    line = ("break ends " if mode == "break" else "ends ") + \
+        time.strftime("%H:%M", ends)
+    if time.localtime(stamp)[:3] != ends[:3]:
+        # A clock time you cannot place on a day is exactly the ambiguity
+        # this line exists to remove.
+        line += " tomorrow"
+    if closing:
+        # A soft landing: the transition costs less when it is announced,
+        # and a chosen stopping point is what makes the hand-off question
+        # answerable.
+        line += " · a good moment to find a stopping point"
+    view.ends = line
+    return view
 
 
 def task_list_view(

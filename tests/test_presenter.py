@@ -6,6 +6,7 @@ zero?" was to build a Tk window and read a label. These are the same rules,
 now testable in milliseconds and reusable by a front-end that has no ttk.
 """
 
+import time
 import unittest
 from datetime import date, timedelta
 
@@ -26,6 +27,89 @@ def log_with(*sessions):
 
 def stamp(day, clock="09:00:00"):
     return f"{day} {clock}"
+
+
+def at(hour, minute=0):
+    """A wall-clock time today, as epoch seconds, in whatever zone we are in."""
+    parts = list(time.localtime())
+    parts[3], parts[4], parts[5] = hour, minute, 0
+    parts[8] = -1  # let mktime work out DST rather than guessing
+    return time.mktime(tuple(parts))
+
+
+class TimerViewTests(unittest.TestCase):
+    """The clock's words.
+
+    Two of these branches could not be tested at all before: reaching them
+    meant building a real window at the right time of day, so the soft
+    landing and the after-midnight case were covered nowhere that runs
+    headless — a named feature of the app with no test behind it.
+    """
+
+    def test_the_digits_count_down_in_minutes_and_seconds(self):
+        self.assertEqual(presenter.timer_view(905, 1500).clock, "15:05")
+
+    def test_a_finished_clock_does_not_go_negative(self):
+        self.assertEqual(presenter.timer_view(-30, 1500).clock, "00:00")
+
+    def test_a_stopped_timer_says_nothing_about_when_it_ends(self):
+        self.assertEqual(presenter.timer_view(900, 1500, running=False).ends, "")
+
+    def test_a_running_block_says_when_it_lands_on_the_clock(self):
+        """"ends 09:20" is anchorable in a way "20:00 left" is not."""
+        view = presenter.timer_view(1200, 1500, running=True, now=at(9, 0))
+        self.assertEqual(view.ends, "ends 09:20")
+
+    def test_a_break_says_so(self):
+        view = presenter.timer_view(300, 300, mode="break", running=True,
+                                    now=at(9, 0))
+        self.assertEqual(view.ends, "break ends 09:05")
+
+    def test_a_block_running_past_midnight_says_tomorrow(self):
+        """A clock time you cannot place on a day is the ambiguity to remove."""
+        view = presenter.timer_view(1200, 1500, running=True, now=at(23, 50))
+        self.assertEqual(view.ends, "ends 00:10 tomorrow")
+
+    def test_the_soft_landing_is_announced(self):
+        view = presenter.timer_view(90, 1500, running=True, closing=True,
+                                    now=at(9, 0))
+        self.assertIn("a good moment to find a stopping point", view.ends)
+
+    def test_the_soft_landing_is_absent_the_rest_of_the_time(self):
+        view = presenter.timer_view(900, 1500, running=True, closing=False,
+                                    now=at(9, 0))
+        self.assertNotIn("stopping point", view.ends)
+
+    def test_both_clauses_can_appear_together(self):
+        view = presenter.timer_view(90, 1500, running=True, closing=True,
+                                    now=at(23, 59))
+        self.assertIn("tomorrow", view.ends)
+        self.assertIn("stopping point", view.ends)
+
+    def test_the_bar_tracks_how_much_is_done(self):
+        self.assertAlmostEqual(presenter.timer_view(750, 1500).fraction, 0.5)
+        self.assertEqual(presenter.timer_view(0, 0).fraction, 0.0,
+                         "an untouched timer must not divide by zero")
+
+
+class PluralTests(unittest.TestCase):
+    def test_one_is_singular_and_everything_else_is_not(self):
+        self.assertEqual(presenter.plural(1, "task"), "1 task")
+        self.assertEqual(presenter.plural(3, "task"), "3 tasks")
+        self.assertEqual(presenter.plural(0, "task"), "0 tasks")
+
+    def test_a_batch_that_all_worked_just_says_so(self):
+        self.assertEqual(presenter.batch_status("Deleted", 1, 1, "matrix task"),
+                         "Deleted 1 matrix task")
+
+    def test_a_partial_batch_reports_what_actually_happened(self):
+        self.assertEqual(presenter.batch_status("Moved", 1, 3, "task"),
+                         "Moved 1 of 3 tasks — the rest failed")
+
+    def test_the_sentence_is_left_unfinished_for_the_caller(self):
+        """Callers add their own tail and the full stop that goes with it."""
+        self.assertFalse(
+            presenter.batch_status("Deleted", 2, 2, "task").endswith("."))
 
 
 class TaskListViewTests(unittest.TestCase):
