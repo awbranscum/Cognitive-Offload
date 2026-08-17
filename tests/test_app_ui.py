@@ -934,13 +934,19 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(self.app.today_label.winfo_manager(), "")
 
     def test_the_ends_line_says_tomorrow_across_midnight(self):
+        """The wiring: a rolled-over block reaches the label.
+
+        This used to also assert that an un-patched 15-minute block says
+        nothing about tomorrow — which is false in the last quarter hour of
+        any day, so the suite failed for anyone running it near midnight.
+        The same-day case is now covered properly in test_presenter, against
+        a fixed clock, which is what timer_view taking `now` was for.
+        """
         self.app.start_timer(minutes=15)
         # Pretend the block ends 26 hours out so the date rolls over.
         with mock.patch.object(self.app.timer, "remaining", 26 * 3600):
             self.app._update_timer_label()
         self.assertIn("tomorrow", self.app.finish_var.get())
-        self.app._update_timer_label()  # back to a same-day block
-        self.assertNotIn("tomorrow", self.app.finish_var.get())
         self.app.pause_timer()
 
     def test_a_refused_start_keeps_the_running_blocks_parked_thoughts(self):
@@ -2484,6 +2490,31 @@ class AppSmokeTests(unittest.TestCase):
         self.run_session(choice="done", next_step="typed then changed my mind")
         self.assertTrue(self.app.tasks[0].done)
         self.assertEqual(self.app.tasks[0].first_step, "open the doc")
+
+    def test_which_finish_message_appears_and_in_what_order(self):
+        """Pinned because the wording net cannot see this.
+
+        The snapshot watches which strings EXIST, not which one is shown.
+        The rotation index is read after the session count has already been
+        incremented, so the first block after opening the app gets the
+        SECOND message, not the first. That is easy to "tidy" into an
+        off-by-one while every string still exists and the snapshot diff
+        comes back empty — silently changing the sentence every person sees
+        first, at the most loaded moment the app has.
+        """
+        seen = []
+        for _ in range(4):
+            with mock.patch("cognitive_offload.app.messagebox.askyesno",
+                            return_value=False):
+                self.app._finish_session(10)
+            seen.append(self.app.status_var.get())
+
+        self.assertEqual(seen, [
+            "10 minutes done — that counts, however it went.",
+            "Session finished. The hard part was starting, and you did that.",
+            "That's 10 minutes on it. Banked.",
+            "10 minutes done — that counts, however it went.",
+        ])
 
     def test_the_hand_off_is_undoable(self):
         self.capture("the long job")

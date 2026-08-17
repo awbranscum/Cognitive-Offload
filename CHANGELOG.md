@@ -5,6 +5,53 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.31.0 — the session's last words move, and a blind spot gets named
+Nothing on screen changes. The words a block ends with — the rotating
+finish message, the break offer, the finished-and-calibrated line, the
+three pop-out captions — now live in `presenter.py` beside the timer's.
+
+- **The move was preceded by a test, because the net could not have
+  caught this one.** The snapshot watches which strings *exist*, not
+  which one is *shown*. `DONE_MESSAGES[count % 3]` is read after the
+  session count has already been incremented, so the first block after
+  opening the app gets the **second** sentence, not the first. Writing
+  `done_message(count - 1, …)` looks like an obvious off-by-one fix; it
+  would quietly change the line every person meets first, at the most
+  loaded moment the app has, and the snapshot diff would come back
+  empty because all three sentences still exist.
+
+  So the rotation was pinned as behaviour *first*, against the old code,
+  and it still passes against the new. Both halves were checked: the
+  deliberate off-by-one fails the behavioural test, and leaves the
+  snapshot byte-identical.
+
+- **A hole opened and was closed in the same pass.** Moving
+  `break_offer` out of a `messagebox` call and into `return f"…"` took
+  it off the net, because a bare return was not something the extractor
+  read — and the entry count did not fall, because two other strings
+  arrived at the same moment and masked it. Returned sentences are now
+  watched, which also picked up seven strings that had never been
+  covered anywhere. 215 → 222.
+
+  The lesson is narrower than "check the count": the count is necessary
+  and not sufficient. The diff has to be read.
+
+- **A latent flake surfaced and was fixed with the tool this refactor
+  built.** Running the suite at 23:45 failed:
+  `test_the_ends_line_says_tomorrow_across_midnight` asserted that an
+  ordinary fifteen-minute block says nothing about tomorrow — which is
+  false in the last quarter hour of any day. It has been wrong since it
+  was written and would have failed CI at that hour on any recent
+  release; it simply had not been run then. The same-day property is now
+  asserted in `test_presenter` against a **fixed** clock, which is
+  precisely what giving `timer_view` a `now` parameter was for, and the
+  app-level test keeps only the wiring check it can make honestly.
+
+506 tests pass, up from 498. Eight new. One existing test lost its
+wall-clock dependency, deliberately. Every rendered string was compared
+in the running app — the finish status, the calibration tail, the
+captions, and the task-less break offer are identical to before.
+
 ## 3.30.0 — the clock's words move somewhere they can be tested
 Nothing on screen changes. The timer line — "ends 15:42", "break ends
 09:05 tomorrow", "· a good moment to find a stopping point" — was

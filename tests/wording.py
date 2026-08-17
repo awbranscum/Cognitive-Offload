@@ -136,6 +136,18 @@ def _entries_for(path: Path) -> list[str]:
                     where = owner.get(id(node), "<module>")
                     found.append(f"{path.name} | {target.id}= | {where} | {text}")
 
+    # Sentences a function hands back. Once wording lives in the presenter it
+    # is usually `return f"..."` rather than an assignment or a call, so
+    # without this the net would quietly stop watching every string the
+    # moment it finished moving — which is precisely when it matters.
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Return) or node.value is None:
+            continue
+        for text in _texts(node.value):
+            if " " in text.strip():
+                where = owner.get(id(node), "<module>")
+                found.append(f"{path.name} | returns | {where} | {text}")
+
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue

@@ -14,7 +14,6 @@ app.py | filedialog.askdirectory | change_db_folder | Choose the session folder
 app.py | filedialog.askdirectory | change_matrix_db_folder | Choose the matrix folder
 app.py | filedialog.askopenfilename | load_state_dialog | Open session
 app.py | filedialog.asksaveasfilename | export_state | Export session
-app.py | finished= | _finish_session | {} min, and it's finished. Nice.
 app.py | hint= | book_matrix_time | today / tomorrow / a weekday / 2026-08-01 — blank clears it
 app.py | hint= | tag_selected | Lower-cased automatically.
 app.py | intro= | _recover_state | {}\n\nThe unreadable file was set aside as {}, so nothing is lost.
@@ -22,7 +21,6 @@ app.py | line= | append_scratchpad | [{}] {}
 app.py | messagebox.askyesno | _finish_break | Break over
 app.py | messagebox.askyesno | _finish_break | Start another focus session?
 app.py | messagebox.askyesno | _finish_session | Session finished
-app.py | messagebox.askyesno | _finish_session | {}\n\nTake a {}-minute break now?
 app.py | messagebox.askyesno | _recover_state | Load failed
 app.py | messagebox.askyesno | begin_focus | Something is already running
 app.py | messagebox.askyesno | brain_dump_into_tasks | Brain dump
@@ -219,7 +217,16 @@ dialogs.py | text= | _edit_steps | Your own downshift, in your own words. Blank 
 dialogs.py | text= | _refresh |     → {}
 dialogs.py | text= | _refresh | Nothing open in that shape. Try 'Anything', or capture something new — an empty list is allowed.
 dialogs.py | text= | button_row | Cancel
+presenter.py | BREAK_OVER_CAPTION= | <module> | Break over. One more small block?
 presenter.py | footer= | today_view | \n\nPlus {} focus session{s} — {} minutes.
 presenter.py | line= | timer_view | break ends {%H:%M}
 presenter.py | line= | timer_view | ends {%H:%M}
+presenter.py | returns | batch_status | {} {}
+presenter.py | returns | batch_status | {} {} of {} {}s — the rest failed
+presenter.py | returns | break_offer | {}\n\nTake a {}-minute break now?
+presenter.py | returns | focus_caption_done | {} min logged, and that one is done.
+presenter.py | returns | focus_caption_more | {} min logged. Another round when you're ready.
+presenter.py | returns | plural | {} {}
+presenter.py | returns | plural | {} {}s
 presenter.py | summary= | task_list_view | {} open · {} done
+presenter.py | text= | finished_message | {} min, and it's finished. Nice.

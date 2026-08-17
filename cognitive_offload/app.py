@@ -60,12 +60,6 @@ ALL_TAGS = "(all)"
 AUTOSAVE_SECONDS = 30
 # Said at the end of a session. Deliberately flat and factual: the point is
 # that the time is banked, not that you have been a good boy.
-DONE_MESSAGES = [
-    "That's {minutes} minutes on it. Banked.",
-    "{minutes} minutes done — that counts, however it went.",
-    "Session finished. The hard part was starting, and you did that.",
-]
-
 
 class CognitiveOffloadApp(tk.Tk):
     def __init__(self, config: Config | None = None):
@@ -1460,7 +1454,7 @@ class CognitiveOffloadApp(tk.Tk):
         task = self._focus_task()
         self._bank_session(minutes)
 
-        message = DONE_MESSAGES[self._session_count % len(DONE_MESSAGES)].format(minutes=minutes)
+        message = presenter.done_message(self._session_count, minutes)
         self.set_status(message)
         self.bell()
 
@@ -1477,7 +1471,7 @@ class CognitiveOffloadApp(tk.Tk):
             else:
                 choice = "break" if messagebox.askyesno(
                     "Session finished",
-                    f"{message}\n\nTake a {self.config_store.break_minutes}-minute break now?",
+                    presenter.break_offer(message, self.config_store.break_minutes),
                 ) else "carry_on"
 
         if task is not None and choice != "done" and next_step:
@@ -1492,23 +1486,16 @@ class CognitiveOffloadApp(tk.Tk):
             task.set_done(True)
             self.refresh_tasks()
             self.mark_dirty()
-            finished = f"{minutes} min, and it's finished. Nice."
-            actual = self.session_log.minutes_for_task(task.id)
-            if task.estimate_minutes and actual:
-                # Calibration, not a mark: time-sense only improves when the
-                # guess meets the actual number somewhere visible and quiet.
-                finished += (f" You guessed ~{task.estimate_minutes} min; "
-                             f"it took about {actual} across your sessions.")
-            self.set_status(finished)
+            self.set_status(presenter.finished_message(
+                minutes, task.estimate_minutes,
+                self.session_log.minutes_for_task(task.id)))
             self._focus_task_id = None
-            self.focus_task_var.set(f"{minutes} min logged, and that one is done.")
+            self.focus_task_var.set(presenter.focus_caption_done(minutes))
             self._sync_focus_window()
         if choice == "break":
             self.start_timer(minutes=self.config_store.break_minutes, mode="break")
         elif choice != "done":
-            self.focus_task_var.set(
-                f"{minutes} min logged. Another round when you're ready."
-            )
+            self.focus_task_var.set(presenter.focus_caption_more(minutes))
         if parked:
             # Attention is free now: put the parked lines on screen instead
             # of relying on the user remembering to scroll a growing pad.
@@ -1518,7 +1505,7 @@ class CognitiveOffloadApp(tk.Tk):
         self.refresh_next_up()
 
     def _finish_break(self) -> None:
-        self.focus_task_var.set("Break over. One more small block?")
+        self.focus_task_var.set(presenter.BREAK_OVER_CAPTION)
         self.set_status("Break finished.")
         self.bell()
         task = self._focus_task()

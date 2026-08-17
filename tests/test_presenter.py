@@ -59,6 +59,7 @@ class TimerViewTests(unittest.TestCase):
         """"ends 09:20" is anchorable in a way "20:00 left" is not."""
         view = presenter.timer_view(1200, 1500, running=True, now=at(9, 0))
         self.assertEqual(view.ends, "ends 09:20")
+        self.assertNotIn("tomorrow", view.ends, "a same-day block says no such thing")
 
     def test_a_break_says_so(self):
         view = presenter.timer_view(300, 300, mode="break", running=True,
@@ -110,6 +111,58 @@ class PluralTests(unittest.TestCase):
         """Callers add their own tail and the full stop that goes with it."""
         self.assertFalse(
             presenter.batch_status("Deleted", 2, 2, "task").endswith("."))
+
+
+class SessionEndWordingTests(unittest.TestCase):
+    """What the app says when a block ends — the loaded moment."""
+
+    def test_the_rotation_starts_where_the_counter_is(self):
+        """The count passed in is post-banking, so a run opens on index 1.
+
+        Pinned in app.py as behaviour too; here it is pinned as arithmetic,
+        because the snapshot cannot see which of the three is chosen.
+        """
+        said = [presenter.done_message(n, 10) for n in (1, 2, 3, 4)]
+        self.assertEqual(said, [
+            "10 minutes done — that counts, however it went.",
+            "Session finished. The hard part was starting, and you did that.",
+            "That's 10 minutes on it. Banked.",
+            "10 minutes done — that counts, however it went.",
+        ])
+
+    def test_no_finish_message_scores_the_work(self):
+        """A block that went badly earns the same words as one that went well."""
+        for n in range(len(presenter.DONE_MESSAGES)):
+            said = presenter.done_message(n, 5).lower()
+            for scold in ("only", "just", "should", "failed", "but "):
+                self.assertNotIn(scold, said)
+
+    def test_the_break_offer_carries_the_message_it_follows(self):
+        offer = presenter.break_offer("5 minutes done.", 5)
+        self.assertTrue(offer.startswith("5 minutes done."))
+        self.assertIn("Take a 5-minute break now?", offer)
+
+    def test_finishing_without_a_guess_says_nothing_about_guesses(self):
+        self.assertEqual(presenter.finished_message(25),
+                         "25 min, and it's finished. Nice.")
+
+    def test_a_guess_and_an_actual_are_reported_side_by_side(self):
+        said = presenter.finished_message(25, estimate=30, actual=25)
+        self.assertIn("You guessed ~30 min", said)
+        self.assertIn("about 25 across your sessions", said)
+
+    def test_a_guess_with_nothing_logged_stays_quiet(self):
+        """Half a comparison is worse than none — it would read as a verdict."""
+        self.assertNotIn("guessed", presenter.finished_message(25, estimate=30,
+                                                               actual=0))
+
+    def test_the_captions_say_what_was_logged(self):
+        self.assertEqual(presenter.focus_caption_done(15),
+                         "15 min logged, and that one is done.")
+        self.assertIn("Another round when you're ready",
+                      presenter.focus_caption_more(15))
+        self.assertEqual(presenter.BREAK_OVER_CAPTION,
+                         "Break over. One more small block?")
 
 
 class TaskListViewTests(unittest.TestCase):

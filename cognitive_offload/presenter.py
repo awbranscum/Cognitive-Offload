@@ -118,6 +118,56 @@ def batch_status(verb: str, done: int, total: int, noun: str) -> str:
     return f"{verb} {done} of {total} {noun}s — the rest failed"
 
 
+# Rotated so the same sentence does not arrive every time. The words stay
+# level on purpose: a block that went badly earns the same acknowledgement as
+# one that went well, because the app is not scoring the work.
+DONE_MESSAGES = (
+    "That's {minutes} minutes on it. Banked.",
+    "{minutes} minutes done — that counts, however it went.",
+    "Session finished. The hard part was starting, and you did that.",
+)
+
+
+def done_message(session_count: int, minutes: int) -> str:
+    """What the app says when a block ends.
+
+    ``session_count`` is the count *after* this session was banked, which is
+    why the first block of a run gets the second sentence. That is not a bug
+    to tidy: changing it would move which line every person meets first, and
+    no snapshot of the wording would notice, because all three still exist.
+    """
+    return DONE_MESSAGES[session_count % len(DONE_MESSAGES)].format(minutes=minutes)
+
+
+def break_offer(message: str, break_minutes: int) -> str:
+    """The plain question asked when a block ends with no task attached."""
+    return f"{message}\n\nTake a {break_minutes}-minute break now?"
+
+
+def finished_message(minutes: int, estimate: int = 0, actual: int = 0) -> str:
+    """Finishing the task itself, plus the guess-versus-actual line.
+
+    Calibration, not a mark: time-sense only improves when the guess meets
+    the actual number somewhere visible and quiet.
+    """
+    text = f"{minutes} min, and it's finished. Nice."
+    if estimate and actual:
+        text += (f" You guessed ~{estimate} min; "
+                 f"it took about {actual} across your sessions.")
+    return text
+
+
+def focus_caption_done(minutes: int) -> str:
+    return f"{minutes} min logged, and that one is done."
+
+
+def focus_caption_more(minutes: int) -> str:
+    return f"{minutes} min logged. Another round when you're ready."
+
+
+BREAK_OVER_CAPTION = "Break over. One more small block?"
+
+
 def timer_view(remaining: int, total: int, *, mode: str = "focus",
                running: bool = False, closing: bool = False,
                now: float | None = None) -> TimerView:
