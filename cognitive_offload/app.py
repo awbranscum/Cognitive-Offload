@@ -541,7 +541,11 @@ class CognitiveOffloadApp(tk.Tk):
             self.tasks.insert(0, Task(text=text.strip()))
         self.refresh_tasks(keep_selection=False)
         self.mark_dirty()
-        self.set_status(status.format(count=len(texts)))
+        # {lines} is already pluralised; {count} is the bare number, kept for
+        # a caller that wants to phrase it differently. A template with
+        # neither is passed through untouched.
+        self.set_status(status.format(count=len(texts),
+                                      lines=presenter.plural(len(texts), "line")))
         return len(texts)
 
     def add_task_from_capture(self) -> None:
@@ -745,7 +749,7 @@ class CognitiveOffloadApp(tk.Tk):
             self.set_status("Nothing on that line to turn into a task.")
             return
         previous = self.scratchpad_text()
-        if self._add_tasks(lines, "Sent {count} line(s) to the task list."):
+        if self._add_tasks(lines, "Sent {lines} to the task list."):
             # A move, as the arrow on the button says: the line leaves the
             # pad — it is a commitment now, not a maybe — and Ctrl+Z brings
             # the pad and the list back together. Copying-but-saying-"sent"
@@ -763,7 +767,7 @@ class CognitiveOffloadApp(tk.Tk):
         ):
             return
         previous = self.scratchpad_text()
-        if self._add_tasks(lines, "Moved {count} line(s) into tasks."):
+        if self._add_tasks(lines, "Moved {lines} into tasks."):
             # "Moved" now means moved: every non-blank line became a task,
             # so the pad empties instead of inviting a duplicate dump.
             self.attach_undo(lambda text=previous: self.set_scratchpad(text))

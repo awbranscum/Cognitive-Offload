@@ -5,6 +5,41 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.36.0 — "1 line(s)", on the feature that matters most
+A small user-facing fix, and the clearest evidence yet that the coverage
+work was worth doing.
+
+- **Two status messages still said "(s)".** The brain dump reported
+  *"Moved 1 line(s) into tasks."* and the Line → task button reported
+  *"Sent 1 line(s) to the task list."* Both now use `presenter.plural`:
+  "Moved 1 line into tasks.", "Moved 3 lines into tasks."
+
+  v3.26.0 removed "1 task(s)" from fifteen status messages, and
+  `presenter.plural`'s own docstring says it "reads like output from a
+  machine that did not care enough to look". These two survived on the
+  **brain dump** — the feature that most directly serves "get it out of
+  your head" — and for the Line → task button the singular is not an edge
+  case, it is *the* case: the button sends one line.
+
+- **They survived because they are passed positionally**, to
+  `_add_tasks(lines, "…")`. That is exactly the blind spot closed in
+  v3.35.0; these two entered the snapshot for the first time in that
+  release, as kind `arg`. The wider net found a live instance of a defect
+  the project believed it had eliminated, one release after being widened.
+
+- **The next one is guarded generically.** A test now fails if `(s)` appears
+  anywhere in the snapshot, so the form is caught wherever it is written —
+  subject to the standing caveat that the extractor has to be able to see
+  the position at all.
+
+- `_add_tasks` now offers templates a pluralised `{lines}` beside the bare
+  `{count}`, and a template using neither passes through untouched —
+  "Captured as task." is unaffected, and a test pins that.
+
+- 541 → 546 tests. Restoring either "(s)" fails three behavioural tests and
+  the generic guard. Xvfb (`skipped=2`) and headless (`skipped=234`).
+  pyflakes clean; the snapshot stays at 410 entries, two replaced.
+
 ## 3.35.0 — the third axis, and a claim this file had to stop making
 No behaviour changes. The wording net grows by nearly half, and the
 snapshot stops saying something untrue about itself.

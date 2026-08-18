@@ -187,6 +187,21 @@ class ToneTests(unittest.TestCase):
             offenders += [(word, line) for word in self.SHAMING if word in said]
         self.assertEqual(offenders, [], "a shaming phrase reached the wording")
 
+    def test_nothing_pluralises_with_the_s_form(self):
+        """"1 task(s)" reads like output from a machine that did not care.
+
+        v3.26.0 removed it from fifteen status messages, and two survived
+        on the brain-dump path until v3.35.0 taught the extractor to read
+        positional arguments. Scanning the snapshot rather than the source
+        means the next one is caught wherever it is written, provided the
+        extractor can see the position at all — which is the standing
+        caveat on this whole file.
+        """
+        offenders = [line for line in snapshot().splitlines()
+                     if not line.startswith("#") and "(s)" in line]
+        self.assertEqual(offenders, [],
+                         "use presenter.plural() rather than the (s) form")
+
     def test_the_two_folder_pickers_say_which_folder(self):
         """Both buttons read "Change folder"; only the title distinguishes them.
 

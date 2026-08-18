@@ -197,7 +197,7 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual([t.text for t in self.app.tasks], ["third", "second", "first"])
 
     def test_brain_dump_moves_the_lines_out_of_the_pad(self):
-        """"Moved 3 line(s)" now means moved — a second dump used to
+        """"Moved 3 lines" now means moved — a second dump used to
         create every task again."""
         self.app.note_text.insert("1.0", "- first\n- second\n- third\n")
         self.app.brain_dump_into_tasks()
@@ -214,6 +214,37 @@ class AppSmokeTests(unittest.TestCase):
         self.assertNotIn("take me", pad)
         self.assertIn("keep me", pad)
         self.assertIn("keep me too", pad)
+
+    def test_moving_one_line_says_line_not_line_s(self):
+        """"Sent 1 line(s)" shipped on the button whose whole job is one line.
+
+        v3.26.0 removed "1 task(s)" from fifteen status messages and these
+        two survived, because they are passed positionally to _add_tasks —
+        the extractor could not see them until v3.35.0 taught it to read
+        that position. For Line → task the singular is not an edge case,
+        it is the case.
+        """
+        self.app.note_text.insert("1.0", "ring the bank\nsomething else\n")
+        self.app.note_text.mark_set("insert", "1.0")
+        self.app.send_scratch_line_to_tasks()
+        self.assertEqual(self.app.status_var.get(),
+                         "Sent 1 line to the task list.")
+
+    def test_dumping_one_line_says_line_not_line_s(self):
+        self.app.note_text.insert("1.0", "call the dentist\n")
+        self.app.brain_dump_into_tasks()
+        self.assertEqual(self.app.status_var.get(), "Moved 1 line into tasks.")
+
+    def test_several_lines_are_still_plural(self):
+        self.app.note_text.insert("1.0", "one\ntwo\nthree\n")
+        self.app.brain_dump_into_tasks()
+        self.assertEqual(self.app.status_var.get(), "Moved 3 lines into tasks.")
+
+    def test_a_status_template_with_no_count_is_left_alone(self):
+        """`.format` is given both keys, so a template using neither must
+        pass through untouched rather than raising or growing a stray word."""
+        self.capture("a thought")
+        self.assertEqual(self.app.status_var.get(), "Captured as task.")
 
     def test_undo_reverses_the_whole_move_pad_and_list_together(self):
         self.app.note_text.insert("1.0", "- one\n- two\n")

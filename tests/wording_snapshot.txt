@@ -23,7 +23,7 @@ app.py | arg | book_matrix_time | Book a time
 app.py | arg | book_matrix_time | Cleared the booking on
 app.py | arg | book_matrix_time | When will you actually do this?
 app.py | arg | book_matrix_time | book a time
-app.py | arg | brain_dump_into_tasks | Moved {count} line(s) into tasks.
+app.py | arg | brain_dump_into_tasks | Moved {lines} into tasks.
 app.py | arg | clear_completed | clear completed
 app.py | arg | clear_completed | completed task
 app.py | arg | clear_completed | completed task
@@ -40,7 +40,7 @@ app.py | arg | move_matrix_tasks | move between quadrants
 app.py | arg | promote_selected | pin it
 app.py | arg | refresh_matrix | {}: {}
 app.py | arg | reset_timer | Nothing picked yet
-app.py | arg | send_scratch_line_to_tasks | Sent {count} line(s) to the task list.
+app.py | arg | send_scratch_line_to_tasks | Sent {lines} to the task list.
 app.py | arg | send_selected_to_matrix | send it to the matrix
 app.py | arg | send_selected_to_matrix | send to matrix
 app.py | arg | snooze_next | not today
