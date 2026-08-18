@@ -1,5 +1,8 @@
-# Every user-visible string, extracted from the source:
-# dialogs, labels, and the status bar.
+# The user-visible strings this extractor can see. NOT every string
+# in the app: it reads assignments, returns, container literals,
+# positional and text-like keyword arguments, the status bar, and
+# messagebox/filedialog calls. A string somewhere else is unwatched,
+# and has been three times so far.
 # One entry per line: file | kind | enclosing function | text
 # Interpolations collapse to {}. Newlines are written \n.
 #
@@ -8,6 +11,48 @@
 # deliberate, regenerate with
 #     python tests/wording.py --update
 # and review the diff as a change to what the app SAYS.
+app.py | arg | __init__ | {} {}
+app.py | arg | _apply_state | Nothing picked yet
+app.py | arg | _finish_session | finish task
+app.py | arg | _finish_session | hand off
+app.py | arg | _sync_focus_window | Break — step away
+app.py | arg | add_matrix_task | add to the matrix
+app.py | arg | add_task_from_capture | Captured as task.
+app.py | arg | begin_focus | set first step
+app.py | arg | book_matrix_time | Book a time
+app.py | arg | book_matrix_time | Cleared the booking on
+app.py | arg | book_matrix_time | When will you actually do this?
+app.py | arg | book_matrix_time | book a time
+app.py | arg | brain_dump_into_tasks | Moved {count} line(s) into tasks.
+app.py | arg | clear_completed | clear completed
+app.py | arg | clear_completed | completed task
+app.py | arg | clear_completed | completed task
+app.py | arg | clear_notes | clear scratchpad
+app.py | arg | copy_matrix_to_tasks | copy from matrix
+app.py | arg | delete_matrix_tasks | delete from the matrix
+app.py | arg | delete_matrix_tasks | matrix task
+app.py | arg | delete_selected | delete it
+app.py | arg | edit_matrix_task | edit matrix task
+app.py | arg | edit_selected_details | edit task
+app.py | arg | focus_matrix_task | start from matrix
+app.py | arg | matrix_to_tasks | import from matrix
+app.py | arg | move_matrix_tasks | move between quadrants
+app.py | arg | promote_selected | pin it
+app.py | arg | refresh_matrix | {}: {}
+app.py | arg | reset_timer | Nothing picked yet
+app.py | arg | send_scratch_line_to_tasks | Sent {count} line(s) to the task list.
+app.py | arg | send_selected_to_matrix | send it to the matrix
+app.py | arg | send_selected_to_matrix | send to matrix
+app.py | arg | snooze_next | not today
+app.py | arg | start_timer | Break — step away from the screen.
+app.py | arg | tag_selected | Add tag
+app.py | arg | tag_selected | Tag name
+app.py | arg | tag_selected | add tag
+app.py | arg | tag_selected | tag it
+app.py | arg | toggle_selected_done | mark it done
+app.py | arg | toggle_selected_done | toggle done
+app.py | arg | toggle_selected_priority | change its priority
+app.py | arg | toggle_selected_priority | toggle priority
 app.py | body= | _claim_instance_lock | Another copy of Cognitive Offload looks open with this session folder ({}).\n\nThis folder cannot say for certain — some network and synced folders cannot — so this may be a leftover from a copy that closed badly.\n\nTwo copies would silently overwrite each other's saves. Open here anyway? (That is safe if the other copy crashed or was force-closed.)
 app.py | body= | _claim_instance_lock | Cognitive Offload is already open with this session folder ({}).\n\nBoth copies save to the same file every thirty seconds, so whichever you type in second quietly undoes the other.\n\nThe window you want is already open — switch to it. Open a second copy here anyway?
 app.py | filedialog.askdirectory | change_db_folder | Choose the session folder
@@ -155,10 +200,17 @@ app.py | text= | reset_timer | Start
 app.py | text= | start_timer | Pause
 app.py | title= | _claim_instance_lock | Already open
 app.py | title= | _claim_instance_lock | Already running?
+app.py | value= | __init__ | Nothing picked yet
+app.py | value= | __init__ | Ready.
 app.py | window_title= | add_matrix_task | New task – {}
 app.py | window_title= | edit_matrix_task | Edit matrix task
 app.py | window_title= | edit_selected_details | Edit task
 app.py | window_title= | move_matrix_tasks | Move between quadrants
+dialogs.py | arg | __init__ | Keyboard shortcuts
+dialogs.py | arg | __init__ | Session finished
+dialogs.py | arg | __init__ | Start a focus session
+dialogs.py | arg | __init__ | This week
+dialogs.py | arg | __init__ | Where do I start?
 dialogs.py | dialog-title | __init__ | Keyboard shortcuts
 dialogs.py | dialog-title | __init__ | Session finished
 dialogs.py | dialog-title | __init__ | Start a focus session
@@ -166,6 +218,35 @@ dialogs.py | dialog-title | __init__ | This week
 dialogs.py | dialog-title | __init__ | Where do I start?
 dialogs.py | heading= | __init__ | Move task to:
 dialogs.py | heading= | __init__ | Move {} tasks to:
+dialogs.py | in-list | ShortcutsDialog | Add a tag
+dialogs.py | in-list | ShortcutsDialog | Add as task
+dialogs.py | in-list | ShortcutsDialog | Add to scratchpad
+dialogs.py | in-list | ShortcutsDialog | Ctrl+1 / Ctrl+2
+dialogs.py | in-list | ShortcutsDialog | Ctrl+Enter (capture box)
+dialogs.py | in-list | ShortcutsDialog | Delete selected
+dialogs.py | in-list | ShortcutsDialog | Double click / Ctrl+D
+dialogs.py | in-list | ShortcutsDialog | Edit details
+dialogs.py | in-list | ShortcutsDialog | Enter (capture box)
+dialogs.py | in-list | ShortcutsDialog | Focus session on the selected task
+dialogs.py | in-list | ShortcutsDialog | Focus the capture box
+dialogs.py | in-list | ShortcutsDialog | Move through the list
+dialogs.py | in-list | ShortcutsDialog | Open a saved session
+dialogs.py | in-list | ShortcutsDialog | Pause the session
+dialogs.py | in-list | ShortcutsDialog | Pause the timer / close a dialog
+dialogs.py | in-list | ShortcutsDialog | Pin to the top (again to unpin)
+dialogs.py | in-list | ShortcutsDialog | Save now
+dialogs.py | in-list | ShortcutsDialog | Send scratchpad lines to tasks
+dialogs.py | in-list | ShortcutsDialog | Send selection to the matrix
+dialogs.py | in-list | ShortcutsDialog | Switch tab
+dialogs.py | in-list | ShortcutsDialog | This help
+dialogs.py | in-list | ShortcutsDialog | Toggle done
+dialogs.py | in-list | ShortcutsDialog | Toggle high priority
+dialogs.py | in-list | ShortcutsDialog | Undo the last change
+dialogs.py | in-list | ShortcutsDialog | Up / Down
+dialogs.py | in-list | ShortcutsDialog | Where do I start? — pick something
+dialogs.py | in-list | __init__ | It's finished — mark it done
+dialogs.py | in-list | __init__ | Not yet — keep going
+dialogs.py | in-list | __init__ | Not yet — take {} minutes
 dialogs.py | messagebox.showwarning | collect | Date not understood
 dialogs.py | messagebox.showwarning | collect | The title cannot be empty.
 dialogs.py | messagebox.showwarning | collect | Title required
@@ -212,6 +293,11 @@ dialogs.py | text= | _edit_steps | Your own downshift, in your own words. Blank 
 dialogs.py | text= | _refresh |     → {}
 dialogs.py | text= | _refresh | Nothing open in that shape. Try 'Anything', or capture something new — an empty list is allowed.
 dialogs.py | text= | button_row | Cancel
+main_tab.py | arg | _build_capture_card | Anything in your head — it does not have to be tidy.
+main_tab.py | arg | _build_capture_card | Quick capture
+main_tab.py | arg | _build_focus_card | Focus session
+main_tab.py | in-list | _build_tasks_card | Clear done
+main_tab.py | in-list | _build_tasks_card | To matrix
 main_tab.py | text= | _build_capture_card | Add task
 main_tab.py | text= | _build_capture_card | Enter files it as a task · Ctrl+Enter drops it in the scratchpad
 main_tab.py | text= | _build_capture_card | To scratchpad
@@ -242,6 +328,15 @@ main_tab.py | text= | _build_tasks_card | Show done
 main_tab.py | text= | _build_tasks_card | Start this
 main_tab.py | text= | _build_tasks_card | Where do I start?
 matrix_tab.py | empty_text= | _build_quadrant | Empty. That is allowed.
+matrix_tab.py | in-dict | <module> | Crises and real deadlines. Do these now.
+matrix_tab.py | in-dict | <module> | Loud, but not yours. Hand off, batch, or shrink these — this is urgency borrowed from someone else's list.
+matrix_tab.py | in-dict | <module> | Not urgent, not important. Deleting these is progress, not failure — a shorter list is easier to face.
+matrix_tab.py | in-dict | <module> | The quadrant that decides how your year goes: goals, health, relationships, the slow important things. They have no deadline to make you start, so give them one — book a time on each.
+matrix_tab.py | in-list | _build_quadrant | Book a time
+matrix_tab.py | in-list | _build_quadrant | Copy all to tasks
+matrix_tab.py | in-list | _build_quadrant | Focus on this
+matrix_tab.py | in-list | _build_quadrant | Move to…
+matrix_tab.py | in-list | _build_quadrant | Send to tasks
 matrix_tab.py | text= | _build_quadrant | Double click to edit · Delete removes · Shift/Ctrl multi-selects
 matrix_tab.py | text= | build_matrix_tab | Back to tasks
 matrix_tab.py | text= | build_matrix_tab | Change folder
@@ -249,6 +344,11 @@ matrix_tab.py | text= | build_matrix_tab | Eisenhower Matrix
 matrix_tab.py | text= | build_matrix_tab | Refresh
 matrix_tab.py | text= | build_matrix_tab | Sort by urgency and importance. One quadrant at a time.
 models.py | TIMESTAMP_FORMAT= | <module> | %Y-%m-%d %H:%M:%S
+models.py | arg | from_dict | task record must be an object
+models.py | in-dict | <module> | Admin sprint
+models.py | in-dict | <module> | Creative / fun
+models.py | in-dict | <module> | Deadline sprint
+models.py | in-dict | <module> | Urgent sprint
 models.py | returns | humanize_date | in {} days
 models.py | returns | humanize_date | {} {%b}
 models.py | returns | humanize_date | {} {%b} {}
@@ -256,6 +356,9 @@ models.py | returns | render | [{}] {}
 presenter.py | BREAK_OVER_CAPTION= | <module> | Break over. One more small block?
 presenter.py | NOTHING_HERE= | <module> | Nothing here. Capture a thought above — or take the win and stop.
 presenter.py | footer= | today_view | \n\nPlus {} focus session{s} — {} minutes.
+presenter.py | in-list | <module> | Session finished. The hard part was starting, and you did that.
+presenter.py | in-list | <module> | That's {minutes} minutes on it. Banked.
+presenter.py | in-list | <module> | {minutes} minutes done — that counts, however it went.
 presenter.py | line= | timer_view | break ends {%H:%M}
 presenter.py | line= | timer_view | ends {%H:%M}
 presenter.py | name= | replace_running_question | the current block
@@ -275,18 +378,45 @@ presenter.py | returns | replace_running_question | You are {minute} into {}.\n\
 presenter.py | summary= | task_list_view | {} open · {} done
 presenter.py | text= | finished_message | {} min, and it's finished. Nice.
 queries.py | ALL_KINDS= | <module> | (any feel)
+queries.py | in-list | split_lines | [ ] 
+rows.py | arg | _shared_badges | booked {}
+rows.py | arg | _shared_badges | ~{} min
 rows.py | returns | focus_caption | Free focus
 rows.py | returns | focus_caption | Free focus — {}
 rows.py | returns | focus_caption | {}\n→ {}
 rows.py | subtitle= | matrix_row | → {}
 rows.py | subtitle= | task_row | done {}
 rows.py | subtitle= | task_row | → {}
+storage.py | arg | <module> | [^A-Za-z0-9._ -]+
+storage.py | arg | _new_path | The matrix folder is missing: {} (moved or unmounted?)
+storage.py | arg | _unlink | Could not remove {}: {}
+storage.py | arg | _write | Could not save '{}': {}
+storage.py | arg | ensure | Could not create matrix folders in {}: {}
+storage.py | arg | load | Could not read {}: {}
+storage.py | arg | load | {} does not contain a saved session
+storage.py | arg | load | {} is JSON, but not a Cognitive Offload session (no tasks, notes or scratchpad in it)
+storage.py | arg | load | {} was saved by a newer version of Cognitive Offload (format {}; this one reads up to {}). Open it with the newer version instead — loading it here would drop whatever the newer format added.
+storage.py | arg | path_for | unknown quadrant: {}
+storage.py | arg | save | Could not save settings: {}
+storage.py | arg | save | Could not save to {}: {}
+storage.py | in-list | <module> | Clear the desk and close the tabs that are shouting
+storage.py | in-list | <module> | Delegate (Urgent / Not Important)
+storage.py | in-list | <module> | Do First
+storage.py | in-list | <module> | Do First (Urgent / Important)
+storage.py | in-list | <module> | Eliminate (Not Urgent / Not Important)
+storage.py | in-list | <module> | Open the file and read one line of it
+storage.py | in-list | <module> | Schedule (Not Urgent / Important)
+storage.py | in-list | <module> | Stand up — stretch, water, a lap of the room
 storage.py | returns | holder | details unreadable
 storage.py | returns | holder | started {} on {}
 widgets.py | PARK_DONE= | <module> | Parked in the scratchpad. Back to it.
 widgets.py | PARK_HINT= | <module> | Something else on your mind? Park it here.
+widgets.py | arg | render | {}: {}
+widgets.py | arg | update_session | a good moment to find a stopping point
+widgets.py | arg | update_session | → {}
 widgets.py | label= | render | no sessions
 widgets.py | label= | render | {} session{s}
 widgets.py | text= | __init__ | Done early
 widgets.py | text= | __init__ | Park
 widgets.py | text= | __init__ | Pause
+widgets.py | value= | __init__ | 00:00

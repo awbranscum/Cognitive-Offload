@@ -5,6 +5,61 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.35.0 — the third axis, and a claim this file had to stop making
+No behaviour changes. The wording net grows by nearly half, and the
+snapshot stops saying something untrue about itself.
+
+- **A quarter of the app's wording was never watched.** Coverage has three
+  independent axes and only two had ever been fixed: which **files** are
+  read (v3.33.0), which **keyword arguments** count as wording (v3.34.0),
+  and which **syntactic positions** are looked at at all. The third was
+  still wide open. A string that is an element of a dict, list or tuple —
+  or passed positionally — is not an assignment, not a return and not a
+  keyword, so neither earlier fix could reach it.
+
+  Ninety-two strings were sitting there, and they were not offcuts:
+
+  - **all four Eisenhower quadrant descriptions**, including *"Not urgent,
+    not important. Deleting these is progress, not failure — a shorter
+    list is easier to face."*
+  - **the entire keyboard-shortcuts dialog**, every row of it
+  - **the warm-up ladder steps** — a named feature — such as "Clear the
+    desk and close the tabs that are shouting"
+  - the preset names, and about twenty-five **undo action names** passed
+    positionally ("mark it done", "send it to the matrix") which are read
+    back to a person in the status bar
+
+  Since the no-shaming scan reads this same snapshot, every one of them
+  was unchecked for tone as well. Checked before widening, as last time:
+  **zero shaming hits** across all 92, so no wording had to change first.
+  283 → 410 entries, nothing removed.
+
+- **`value=` joined the watched keywords**, which caught "Nothing picked
+  yet" — the label above the timer — and "Ready.", the status bar at
+  rest. Both are on screen the moment the app opens, and neither had ever
+  been watched.
+
+- **The inverted extractor was prototyped and rejected.** Capturing every
+  prose literal and excluding known noise gives 474 entries against 410,
+  but most of the surplus are *fragments* of f-strings the extractor
+  already assembles whole — `" min logged, and that one is done."` beside
+  the complete `"{} min logged, and that one is done."`. Readability is
+  the point of this file; a diff nobody can read is a net nobody checks.
+  Recorded here so the idea is not re-attempted from scratch.
+
+- **The snapshot stopped claiming to be complete.** Its header opened with
+  "Every user-visible string, extracted from the source" and the module
+  docstring said "Read every user-visible string". Neither was true, for
+  many releases. Both now say what is actually read and note plainly that
+  anything outside those positions is unwatched — a net that overstates
+  its reach is worse than one that states it plainly, because it stops
+  people looking for the gap. A test fails if the old claim comes back.
+
+- 537 → 541 tests. Each new rule was verified by deleting it: removing the
+  container pass fails the container guard, removing the positional pass
+  fails the positional guard, and neither masks the other. Xvfb
+  (`skipped=2`) and headless (`skipped=230`). pyflakes clean.
+
 ## 3.34.0 — an empty list stops telling you to stop
 The first change in a while that a person will actually see, and it fixes
 the app telling you the opposite of the truth at a bad moment.

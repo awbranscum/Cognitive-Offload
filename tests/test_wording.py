@@ -96,6 +96,58 @@ class ExtractorTests(unittest.TestCase):
                      "Something else on your mind? Park it here."):
             self.assertIn(said, text)
 
+    def test_wording_inside_containers_is_read(self):
+        """The third axis, and the one that stayed open longest.
+
+        A string that is an element of a dict, list or tuple is not assigned
+        to a name, not returned, and not a keyword argument — so widening
+        the file list and adding keyword names both missed it. Ninety-two
+        strings were sitting there, and they were not offcuts.
+        """
+        text = snapshot()
+        for said in (
+            # all four quadrant descriptions lived in a dict
+            "Deleting these is progress, not failure",
+            "Crises and real deadlines. Do these now.",
+            # the shortcuts dialog is a list of tuples
+            "Pin to the top (again to unpin)",
+            "Undo the last change",
+            # the warm-up ladder is a list, and a named feature of the app
+            "Clear the desk and close the tabs that are shouting",
+            # the presets are dict values
+            "Admin sprint",
+        ):
+            self.assertIn(said, text, f"{said!r} is shown to a person and unwatched")
+
+    def test_wording_passed_positionally_is_read(self):
+        """Undo action names are read back in the status bar.
+
+        Nothing about their position said "wording", so none of them were
+        watched — the net looked at keywords and returns, and these are
+        neither.
+        """
+        text = snapshot()
+        for said in ("mark it done", "send it to the matrix", "clear scratchpad"):
+            self.assertIn(said, text)
+
+    def test_a_variables_opening_text_is_read(self):
+        """Both of these are on screen the moment the app opens."""
+        text = snapshot()
+        self.assertIn("Nothing picked yet", text)  # the label above the timer
+        self.assertIn("Ready.", text)              # the status bar at rest
+
+    def test_the_snapshot_does_not_claim_to_be_complete(self):
+        """It said "Every user-visible string" for many releases and was not.
+
+        About a quarter of the app's wording was outside it. The header is
+        the first thing anyone reads on a failure, and a safety net that
+        overstates its reach is worse than one that states it plainly:
+        it stops people looking for the gap.
+        """
+        header = snapshot().split("app.py")[0]
+        self.assertNotIn("Every user-visible string", header)
+        self.assertIn("NOT every string", header)
+
     def test_it_captures_titles_bodies_and_dialog_labels_alike(self):
         text = snapshot()
         self.assertIn("messagebox.askyesno", text)

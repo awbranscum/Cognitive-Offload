@@ -1,4 +1,12 @@
-"""Read every user-visible string out of the source.
+"""Read the user-visible strings out of the source.
+
+Not "every" — that claim stood in this docstring for many releases and was
+not true. Coverage has three independent axes, and each was opened
+separately, by an incident: which FILES are read, which KEYWORD arguments
+count as wording, and which SYNTACTIC POSITIONS are looked at at all.
+Fixing one says nothing about the other two. What is watched is listed at
+the top of the snapshot; anything outside those positions is not seen, and
+saying so plainly is worth more than a comfortable summary.
 
 The wording *is* the product. A refactor that moves a question from one module
 to another is supposed to carry its words across untouched, and the only way to
@@ -23,8 +31,20 @@ PACKAGE = Path(__file__).resolve().parent.parent / "cognitive_offload"
 
 # Keyword arguments that carry words a person reads.
 _TEXT_KEYWORDS = ("text", "title", "message", "window_title", "ok_text", "hint",
-                  "empty_text")  # empty_text joined late: the empty-list sentence
-                                 # sat outside the net until v3.34.0 found it
+                  "empty_text", "value")
+# Two of those joined late, and each cost a real string. `empty_text` held the
+# empty-list sentence; `value` holds a StringVar's opening text — "Nothing
+# picked yet" above the timer and "Ready." in the status bar, both on screen
+# the moment the app opens. Keeping a hand-written list of keyword names is
+# why they were missed, which is what _CONTAINER_KINDS below is about.
+
+# Strings that are not wording however they read: toolkit constants that
+# happen to contain a space, and font stacks.
+_NOT_WORDING = frozenset({
+    "insert lineend", "insert lineend +1c", "insert linestart",
+    "DejaVu Sans", "Segoe UI", "SF Pro Text", "Helvetica Neue",
+    "Liberation Sans", "All files", "JSON files",
+})
 
 
 def _interpolation(node) -> str:
@@ -98,6 +118,51 @@ def _texts(node, in_concat: bool = False) -> list[str]:
     return [text] if text else []
 
 
+def _is_wording(text: str | None) -> bool:
+    """Does this literal read as something a person is meant to read?
+
+    A space between words is the whole test, and it is deliberately crude:
+    identifiers, style names, sort keys, tk options and dict keys are single
+    tokens, and sentences are not. The exceptions that slip through are
+    listed in _NOT_WORDING rather than guessed at.
+    """
+    return bool(text) and " " in text.strip() and text.strip() not in _NOT_WORDING
+
+
+def _container_texts(tree: ast.AST, path: Path, owner: dict) -> list[str]:
+    """Wording that lives inside a dict, list, tuple or set.
+
+    This is the third axis of coverage, and the one that stayed open longest.
+    Widening the *file* list (v3.33.0) and adding *keyword* names (v3.34.0)
+    both left it untouched, because it is neither: a string here is not
+    assigned to a name, not returned, and not passed as a keyword — it is an
+    element of a literal collection.
+
+    Ninety-two strings were sitting in these positions unwatched, and they
+    were not offcuts. All four Eisenhower quadrant descriptions, including
+    "Deleting these is progress, not failure — a shorter list is easier to
+    face." The whole keyboard-shortcuts dialog. The warm-up ladder, which is
+    a named feature of the app. The preset names. Since the no-shaming scan
+    reads this same snapshot, every one of them was unchecked for tone too.
+    """
+    found = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Dict):
+            values = node.values
+            kind = "in-dict"
+        elif isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            values = node.elts
+            kind = "in-list"
+        else:
+            continue
+        for element in values:
+            for text in _texts(element):
+                if _is_wording(text):
+                    where = owner.get(id(node), "<module>")
+                    found.append(f"{path.name} | {kind} | {where} | {text}")
+    return found
+
+
 def _owners(tree: ast.AST) -> dict[int, str]:
     """Map every node to the function or class it sits inside."""
     owner: dict[int, str] = {}
@@ -118,6 +183,7 @@ def _entries_for(path: Path) -> list[str]:
     tree = ast.parse(source)
     owner = _owners(tree)
     found: list[str] = []
+    found += _container_texts(tree, path, owner)
 
     # Sentences assigned to a name before being asked. A question built as
     # `title = "Already open"` and passed as a variable is invisible at the
@@ -193,6 +259,18 @@ def _entries_for(path: Path) -> list[str]:
                 if text and text.strip():
                     found.append(f"{path.name} | {keyword.arg}= | {where} | {text}")
 
+        # Sentences handed to a call with no keyword to name them. The undo
+        # stack is the reason: every mutation registers an action name —
+        # `_require_selection("mark it done")`, "not today", "send it to the
+        # matrix" — and those names are read back to a person in the status
+        # bar. Nothing about their position said "wording", so none of them
+        # were watched. The three call shapes above have already taken their
+        # own positional arguments and moved on, so nothing is counted twice.
+        for arg in node.args:
+            for text in _texts(arg):
+                if _is_wording(text):
+                    found.append(f"{path.name} | arg | {where} | {text}")
+
     return found
 
 
@@ -217,8 +295,11 @@ def snapshot() -> str:
     # escaped blob is worse than reviewing a marker.
     flattened = sorted(e.replace("\n", "\\n") for e in entries)
     header = (
-        "# Every user-visible string, extracted from the source:\n"
-        "# dialogs, labels, and the status bar.\n"
+        "# The user-visible strings this extractor can see. NOT every string\n"
+        "# in the app: it reads assignments, returns, container literals,\n"
+        "# positional and text-like keyword arguments, the status bar, and\n"
+        "# messagebox/filedialog calls. A string somewhere else is unwatched,\n"
+        "# and has been three times so far.\n"
         "# One entry per line: file | kind | enclosing function | text\n"
         "# Interpolations collapse to {}. Newlines are written \\n.\n"
         "#\n"
