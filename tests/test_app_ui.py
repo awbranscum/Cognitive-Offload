@@ -875,6 +875,43 @@ class AppSmokeTests(unittest.TestCase):
         self.assertIsNone(self.app._focus_window)
         self.app.pause_timer()
 
+    def test_a_long_task_wraps_in_the_list_instead_of_being_cut_off(self):
+        """The list used to show about 78 characters of a 137-character task.
+
+        Not scrolled off and not shortened with an ellipsis — simply
+        absent, ending mid-word, behind a scrollbar that only goes down.
+        Two tasks that begin the same way looked identical. The capture
+        box invites exactly this ("Anything in your head — it does not
+        have to be tidy"), so the list has to be able to show it.
+        """
+        import tkinter.font as tkfont
+
+        long_text = ("ring the council about the bins and the recycling they "
+                     "keep missing on odd weeks, ask for the reference and "
+                     "whether it affects the charge")
+        self.capture("short one")
+        self.capture(long_text)
+        self.app.deiconify()  # withdrawn windows don't lay out
+        self.app.refresh_tasks()
+        self.app.update()
+        self.app.update_idletasks()
+
+        rows = {self.app.task_list._pool[i]["title"].cget("text"):
+                self.app.task_list._pool[i]["title"] for i in range(2)}
+        long_label, short_label = rows[long_text], rows["short one"]
+
+        def lines(label):
+            metrics = tkfont.Font(font=label.cget("font")).metrics("linespace")
+            return max(1, round(label.winfo_reqheight() / metrics))
+
+        viewport = self.app.task_list.canvas.winfo_width()
+        self.assertGreater(lines(long_label), 1,
+                           "the long task still sits on one clipped line")
+        self.assertLessEqual(long_label.winfo_reqwidth(), viewport,
+                             "the title is wider than the list can show")
+        # Short rows must not pay for it.
+        self.assertEqual(lines(short_label), 1)
+
     def test_focus_window_grows_to_keep_its_controls_when_the_title_wraps(self):
         """A four-line title used to push Pause and the Park row clean off
         the fixed-height window — the re-fit only ran while the title was

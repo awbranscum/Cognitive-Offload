@@ -279,6 +279,12 @@ class RowList(ttk.Frame):
             # One shared bindtag instead of nine bindings per widget: at 300
             # rows that was ~14k bind calls per refresh.
             widget.bindtags((self._row_tag,) + widget.bindtags())
+        # Pooled rows are built lazily, so one created after the last
+        # <Configure> would otherwise keep the un-wrapped default.
+        wrap = getattr(self, "_wrap_at", None)
+        if wrap:
+            title.configure(wraplength=wrap)
+            subtitle.configure(wraplength=wrap)
         return {"frame": frame, "mark": mark, "title": title, "badges": badges,
                 "subtitle": subtitle, "separator": separator, "cells": cells,
                 "visible": True}
@@ -492,6 +498,34 @@ class RowList(ttk.Frame):
 
     def _on_canvas_configure(self, event) -> None:
         self.canvas.itemconfigure(self._window, width=event.width)
+        self._rewrap(event.width)
+
+    #: room a title has after the marker column, the padding and a little
+    #: slack for a badge strip sitting to its right
+    TEXT_INSET = 2 * ROW_PAD_X + 40
+
+    def _rewrap(self, width: int) -> None:
+        """Let a long task use as many lines as it needs.
+
+        The row frame is clamped to the canvas width, and the labels used to
+        have no wraplength at all — so a 137-character task showed about 78
+        characters and the rest was gone. Not scrolled off, not shortened
+        with an ellipsis: simply absent, ending mid-word, with a vertical
+        scrollbar that cannot reach it.
+
+        That is a poor trade in an app whose capture box says "Anything in
+        your head — it does not have to be tidy": it invites the long
+        untidy thought and then shows two thirds of it. The pop-out window
+        has wrapped its task and step labels all along; this is the same
+        treatment for the surface people actually work in.
+        """
+        room = max(80, width - self.TEXT_INSET)
+        if room == getattr(self, "_wrap_at", None):
+            return
+        self._wrap_at = room
+        for cell in self._pool:
+            cell["title"].configure(wraplength=room)
+            cell["subtitle"].configure(wraplength=room)
 
     def _on_wheel(self, event):
         if getattr(event, "num", None) == 4:

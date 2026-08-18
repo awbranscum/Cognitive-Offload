@@ -5,6 +5,40 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.41.0 — a long task stops being cut off in the list
+The list can now show the whole of what you captured.
+
+- **About two thirds of a long task was simply missing.** A 137-character
+  task showed roughly 78 characters. Not scrolled off, not shortened with
+  an ellipsis — absent, ending mid-word, behind a scrollbar that only goes
+  down. Nothing indicated there was more, so two tasks beginning the same
+  way ("ring the council about the bins…" / "…about the tax…") looked
+  identical on the list.
+
+  The title label had `wraplength=0`, the row frame is clamped to the
+  canvas width, and the list has only a vertical scrollbar. Titles and
+  subtitles now wrap to the width actually available, recomputed when the
+  window resizes and applied to rows built later from the pool.
+
+- **The app already did this everywhere else.** The pop-out window has
+  wrapped its task and step labels all along, with a test of its own. The
+  main list — the surface people actually work in — never got the same
+  treatment. The capture card's hint is *"Anything in your head — it does
+  not have to be tidy"*: it invites the long untidy thought, so the list
+  has to be able to show it.
+
+- **Short rows do not pay for it.** A one-line task stays one line and the
+  row stays 35px; the long one grows to two lines and 52px. Wrapping is
+  the fix rather than an ellipsis because it makes the whole task readable
+  where it is, and it costs vertical space only on the tasks that need it.
+
+- **Nothing got slower.** 300 tasks still paint in about 0.7s and a search
+  keystroke still costs about 50ms — unchanged either side of this.
+
+- 554 → 555 tests, Xvfb (`skipped=2`) and headless (`skipped=239`). The new
+  test fails if the wrap width goes back to zero. pyflakes clean, snapshot
+  unchanged.
+
 ## 3.40.0 — the day you booked a task for now counts
 **This changes which task "Where do I start?" offers.** It is a small,
 deliberate behaviour change to the flagship feature, not a pure fix.
