@@ -197,12 +197,20 @@ def _entries_for(path: Path) -> list[str]:
 def snapshot() -> str:
     """The whole wording surface, sorted so the file is stable."""
     entries: list[str] = []
-    # presenter.py is here because wording is moving into it. Without this
-    # line every string that moves would simply vanish from the snapshot
-    # while the tests stayed green — the net losing coverage at exactly the
-    # moment it is most needed.
-    for name in ("app.py", "dialogs.py", "presenter.py"):
-        entries += _entries_for(PACKAGE / name)
+    # The whole package, not a hand-kept list. The list was how a string
+    # moving out of a watched file could vanish from the snapshot while the
+    # tests stayed green — and how SessionLog.summary() sat in sessions.py
+    # unwatched for its whole life. Worse, the no-shaming scan reads this
+    # same snapshot, so an unlisted file was unchecked for tone as well as
+    # for drift: the app's tagline, "Where do I start?", "Not today", and
+    # the park hints were all outside it.
+    #
+    # Modules with no user-visible strings contribute nothing, so widening
+    # costs no noise. Sorted so the file is stable across filesystems.
+    for path in sorted(PACKAGE.glob("*.py")):
+        if path.name.startswith("__"):
+            continue
+        entries += _entries_for(path)
     # Newlines would break the one-entry-per-line format, and reviewing an
     # escaped blob is worse than reviewing a marker.
     flattened = sorted(e.replace("\n", "\\n") for e in entries)

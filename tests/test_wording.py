@@ -63,6 +63,39 @@ class ExtractorTests(unittest.TestCase):
         self.assertGreater(len(strings), 100,
                            "the extractor should be finding the whole surface")
 
+    def test_every_module_with_wording_is_read_not_a_hand_kept_list(self):
+        """The net used to read three files by name, and that was the bug.
+
+        Two consequences, both real: SessionLog.summary() sat in
+        sessions.py unwatched for its whole life, and — because the
+        no-shaming scan reads this same snapshot — every button label and
+        hint outside those three files was unchecked for tone as well as
+        for drift. Narrowing the list back would restore both holes
+        silently, so it is pinned here rather than left to the diff.
+        """
+        seen = {line.split(" | ", 1)[0] for line in snapshot().splitlines()
+                if not line.startswith("#")}
+        for name in ("app.py", "dialogs.py", "presenter.py", "main_tab.py",
+                     "matrix_tab.py", "widgets.py", "rows.py", "models.py",
+                     "storage.py", "queries.py"):
+            self.assertIn(name, seen, f"{name} says things to a person and "
+                                      "is not being watched")
+
+    def test_the_words_on_the_buttons_are_watched_too(self):
+        """Not just dialogs. Most of what this app says, it says on a button.
+
+        These four carry the design: the promise the app makes at the top
+        of the window, the question it exists to answer, the way it lets
+        you decline without declining forever, and the offer to put a
+        thought down instead of holding it.
+        """
+        text = snapshot()
+        for said in ("Get it out of your head, then start one small thing.",
+                     "Where do I start?",
+                     "Not today",
+                     "Something else on your mind? Park it here."):
+            self.assertIn(said, text)
+
     def test_it_captures_titles_bodies_and_dialog_labels_alike(self):
         text = snapshot()
         self.assertIn("messagebox.askyesno", text)

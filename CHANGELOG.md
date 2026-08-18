@@ -5,6 +5,63 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.33.0 — the net stops reading a list, and a past date says which year
+One visible change, and it is a small one: a booking from another year
+now shows that year.
+
+- **The wording net read three files by name, and that was the bug.**
+  Widening it to the whole package added **55 strings that were watched
+  by nothing** — including the app's own tagline ("Get it out of your
+  head, then start one small thing."), the buttons the whole design rests
+  on ("Where do I start?", "Not that one", "Not today", "Start this"),
+  the park hints, and the instance-lock dialog's interpolated tail.
+
+  **This was a hole in the shame guard, not only in the drift alarm.**
+  `test_nothing_the_app_says_scolds` iterates the same snapshot, so every
+  one of those strings was unchecked for tone as well. Checked before
+  widening: the shaming phrases score **zero hits** across all 55, so
+  nothing had to be reworded first. Six modules contribute no strings at
+  all, so the wider net costs no noise. 225 → 280 entries.
+
+  Pinned so it cannot be narrowed back, and verified by narrowing it
+  back: three tests fail when the hand-kept list returns.
+
+- **A past date in another year now says which year.** `humanize_date`
+  rendered anything older than yesterday as "22 Dec" with no year, so a
+  booking from last December read as the *coming* December — and a
+  two-year-old task was indistinguishable from a two-week-old one, on a
+  screen that also says "in 7 days". The function's own comment states
+  its purpose: "a date you cannot place is the thing this function exists
+  to prevent." This was that.
+
+  The year is carried **only when it differs**, so "1 Aug" in August is
+  untouched — every extra token on a row is one more thing to read past.
+  It stays a fact, not a mark: a test asserts the output contains no
+  "overdue", "late", "missed", "still" or "should". This app is for
+  people who keep tasks around, so a stale booking is the ordinary case.
+
+- **`matrix_view` completes the presenter's stage two**, and brought a
+  rule out with it that had been buried in a refresh method and tested
+  nowhere: **an empty quadrant shows no number on its tab**, not "(0)".
+  Four zeroed tabs read as a verdict on the week. The count *inside* the
+  quadrant still says "0 tasks" — you are already looking at the empty
+  list there, so it describes what is on screen rather than following you
+  around.
+
+- **Two of this branch's own lessons caught two of this pass's own
+  mistakes.** Moving the tab text into a `tab=` keyword took it off the
+  net — the extractor does not watch that keyword — and the entry count
+  did not notice, because fifty-five strings arrived in the same commit.
+  Reading the diff caught it; it is now a returned sentence. Separately,
+  the new end-to-end test claimed to pin the quadrant-to-tab pairing and
+  **passed with the order reversed**, because it used `assertIn` over the
+  whole list. Both were found by corrupting the thing on purpose and
+  checking the guard screamed.
+
+- 514 → 526 tests, all passing under Xvfb (`skipped=2`) and headless
+  (`skipped=226`). The midnight band re-checked at 23:53 and 23:59 and
+  still clean. pyflakes clean.
+
 ## 3.32.0 — the midnight flake's twin, and two sentences nobody was watching
 Nothing on screen changes. A test that could only fail after 23:50 is
 fixed, and the last of the session wording moves under the net.

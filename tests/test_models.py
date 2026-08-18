@@ -92,6 +92,39 @@ class TaskTests(unittest.TestCase):
         # eleven — a date you cannot place is the failure being fixed.
         self.assertNotEqual(humanize_date("2026-07-30", on), "Thu")
 
+    def test_a_past_date_in_another_year_says_which_year(self):
+        """"22 Dec" on a booking from last year reads as the coming December.
+
+        Same failure the weekday form was rejected for, one scale up: a
+        two-year-old booking rendered identically to a two-week-old one,
+        on a screen that also says "in 7 days". This app is for people who
+        keep tasks around, so a stale booking is the ordinary case.
+        """
+        from cognitive_offload.models import humanize_date
+
+        on = "2026-08-18"
+        self.assertEqual(humanize_date("2025-12-22", on), "22 Dec 2025")
+        self.assertEqual(humanize_date("2024-08-18", on), "18 Aug 2024")
+
+    def test_a_past_date_in_the_same_year_stays_short(self):
+        """The year is carried only when it is doing work.
+
+        "1 Aug" in August is already placeable, and every extra token on a
+        row is one more thing to read past.
+        """
+        from cognitive_offload.models import humanize_date
+
+        self.assertEqual(humanize_date("2026-08-01", "2026-08-18"), "1 Aug")
+        self.assertNotIn("2026", humanize_date("2026-01-04", "2026-08-18"))
+
+    def test_the_year_reads_as_a_fact_not_as_lateness(self):
+        """Nothing here may imply a person is behind. It is a date, not a mark."""
+        from cognitive_offload.models import humanize_date
+
+        said = humanize_date("2025-12-22", "2026-08-18").lower()
+        for scolding in ("overdue", "late", "missed", "still", "should"):
+            self.assertNotIn(scolding, said)
+
     def test_estimate_round_trips_clamps_and_tolerates_junk(self):
         task = Task(text="x", estimate_minutes=25)
         self.assertEqual(Task.from_dict(task.to_dict()).estimate_minutes, 25)

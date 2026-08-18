@@ -347,6 +347,34 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(self.app.matrix_lists["eliminate"].size(), 0)
         self.assertEqual(self.app.matrix_lists["do_first"].size(), 1)
 
+    def test_the_quadrant_tabs_and_counts_reach_the_widgets(self):
+        """The wiring, not the wording: presenter decides, the tab shows it.
+
+        Nothing asserted this before — the tab text and the count label
+        were computed inside refresh_matrix and read by no test, so the
+        pairing of quadrant to notebook index was free to drift silently.
+        """
+        from cognitive_offload.storage import CATEGORY_KEYS
+        self.app.matrix.create("do_first", "one", "")
+        self.app.matrix.create("do_first", "two", "")
+        self.app.matrix.create("delegate", "hand off", "")
+        self.app.refresh_matrix()
+
+        # By index, not by membership: the tab must be paired with its own
+        # quadrant. An earlier version of this test used assertIn over the
+        # whole list and passed happily with the order reversed, which is
+        # the one thing it was written to catch.
+        tabs = [self.app.matrix_notebook.tab(i, "text")
+                for i in range(len(CATEGORY_KEYS))]
+        self.assertEqual(tabs, ["Do First (2)", "Schedule",
+                                "Delegate (1)", "Eliminate"])
+        # The empty ones carry no number at all, not "(0)".
+        self.assertNotIn("(0)", "".join(tabs))
+        self.assertEqual(
+            self.app.matrix_count_labels["do_first"].cget("text"), "2 tasks")
+        self.assertEqual(
+            self.app.matrix_count_labels["schedule"].cget("text"), "0 tasks")
+
     def test_matrix_copy_leaves_the_files_in_place(self):
         self.app.matrix.create("delegate", "hand off", "with notes")
         self.app.refresh_matrix()

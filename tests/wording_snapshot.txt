@@ -151,8 +151,6 @@ app.py | text= | _build_ui |   Eisenhower Matrix
 app.py | text= | _tick_timer | Start
 app.py | text= | finish_session_early | Start
 app.py | text= | pause_timer | Resume
-app.py | text= | refresh_matrix | {} task{s}
-app.py | text= | refresh_matrix | {}{}
 app.py | text= | reset_timer | Start
 app.py | text= | start_timer | Pause
 app.py | title= | _claim_instance_lock | Already open
@@ -214,6 +212,46 @@ dialogs.py | text= | _edit_steps | Your own downshift, in your own words. Blank 
 dialogs.py | text= | _refresh |     → {}
 dialogs.py | text= | _refresh | Nothing open in that shape. Try 'Anything', or capture something new — an empty list is allowed.
 dialogs.py | text= | button_row | Cancel
+main_tab.py | text= | _build_capture_card | Add task
+main_tab.py | text= | _build_capture_card | Enter files it as a task · Ctrl+Enter drops it in the scratchpad
+main_tab.py | text= | _build_capture_card | To scratchpad
+main_tab.py | text= | _build_focus_card | 15:00
+main_tab.py | text= | _build_focus_card | Min
+main_tab.py | text= | _build_focus_card | Pop out
+main_tab.py | text= | _build_focus_card | Reset
+main_tab.py | text= | _build_focus_card | Start
+main_tab.py | text= | _build_header | Calm mode
+main_tab.py | text= | _build_header | Change folder
+main_tab.py | text= | _build_header | Cognitive Offload
+main_tab.py | text= | _build_header | Dark
+main_tab.py | text= | _build_header | Get it out of your head, then start one small thing.
+main_tab.py | text= | _build_header | Shortcuts
+main_tab.py | text= | _build_scratchpad_card | All → tasks
+main_tab.py | text= | _build_scratchpad_card | Clear
+main_tab.py | text= | _build_scratchpad_card | Line → task
+main_tab.py | text= | _build_scratchpad_card | Scratchpad
+main_tab.py | text= | _build_scratchpad_card | saved with the session
+main_tab.py | text= | _build_tasks_card | Active stack
+main_tab.py | text= | _build_tasks_card | Clear
+main_tab.py | text= | _build_tasks_card | Done
+main_tab.py | text= | _build_tasks_card | Focus on selected
+main_tab.py | text= | _build_tasks_card | NEXT UP
+main_tab.py | text= | _build_tasks_card | Not that one
+main_tab.py | text= | _build_tasks_card | Not today
+main_tab.py | text= | _build_tasks_card | Show done
+main_tab.py | text= | _build_tasks_card | Start this
+main_tab.py | text= | _build_tasks_card | Where do I start?
+matrix_tab.py | text= | _build_quadrant | Double click to edit · Delete removes · Shift/Ctrl multi-selects
+matrix_tab.py | text= | build_matrix_tab | Back to tasks
+matrix_tab.py | text= | build_matrix_tab | Change folder
+matrix_tab.py | text= | build_matrix_tab | Eisenhower Matrix
+matrix_tab.py | text= | build_matrix_tab | Refresh
+matrix_tab.py | text= | build_matrix_tab | Sort by urgency and importance. One quadrant at a time.
+models.py | TIMESTAMP_FORMAT= | <module> | %Y-%m-%d %H:%M:%S
+models.py | returns | humanize_date | in {} days
+models.py | returns | humanize_date | {} {%b}
+models.py | returns | humanize_date | {} {%b} {}
+models.py | returns | render | [{}] {}
 presenter.py | BREAK_OVER_CAPTION= | <module> | Break over. One more small block?
 presenter.py | footer= | today_view | \n\nPlus {} focus session{s} — {} minutes.
 presenter.py | line= | timer_view | break ends {%H:%M}
@@ -228,7 +266,24 @@ presenter.py | returns | momentum_view | No sessions yet today
 presenter.py | returns | momentum_view | {session} today · {} min
 presenter.py | returns | plural | {} {}
 presenter.py | returns | plural | {} {}s
+presenter.py | returns | quadrant_tab | {} ({})
 presenter.py | returns | replace_running_question | A break is running.\n\nEnd it and start a session now?
 presenter.py | returns | replace_running_question | You are {minute} into {}.\n\nThose minutes are kept, not lost — starting something else banks them.\n\nStart something else instead?
 presenter.py | summary= | task_list_view | {} open · {} done
 presenter.py | text= | finished_message | {} min, and it's finished. Nice.
+queries.py | ALL_KINDS= | <module> | (any feel)
+rows.py | returns | focus_caption | Free focus
+rows.py | returns | focus_caption | Free focus — {}
+rows.py | returns | focus_caption | {}\n→ {}
+rows.py | subtitle= | matrix_row | → {}
+rows.py | subtitle= | task_row | done {}
+rows.py | subtitle= | task_row | → {}
+storage.py | returns | holder | details unreadable
+storage.py | returns | holder | started {} on {}
+widgets.py | PARK_DONE= | <module> | Parked in the scratchpad. Back to it.
+widgets.py | PARK_HINT= | <module> | Something else on your mind? Park it here.
+widgets.py | label= | render | no sessions
+widgets.py | label= | render | {} session{s}
+widgets.py | text= | __init__ | Done early
+widgets.py | text= | __init__ | Park
+widgets.py | text= | __init__ | Pause

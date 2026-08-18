@@ -165,6 +165,47 @@ class SessionEndWordingTests(unittest.TestCase):
                          "Break over. One more small block?")
 
 
+class MatrixViewTests(unittest.TestCase):
+    """The quadrant labels, and the rule that an empty one shows no number."""
+
+    def test_a_quadrant_with_tasks_carries_its_count_on_the_tab(self):
+        view = presenter.matrix_view({"do_first": [1, 2, 3]})
+        self.assertEqual(view.quadrants[0].tab, "Do First (3)")
+        self.assertEqual(view.quadrants[0].count, "3 tasks")
+
+    def test_an_empty_quadrant_shows_no_number_on_its_tab(self):
+        """Not "(0)". Four zeroed tabs read as a verdict on the whole week.
+
+        Invisible to the wording snapshot — both strings exist either way,
+        so only behaviour can pin which one a person sees.
+        """
+        view = presenter.matrix_view({"schedule": []})
+        self.assertEqual(view.quadrants[0].tab, "Schedule")
+        self.assertNotIn("0", view.quadrants[0].tab)
+
+    def test_the_count_line_inside_the_quadrant_may_say_zero(self):
+        """Different surface, different rule: you are already looking at the
+        empty list, so "0 tasks" describes what is on screen rather than
+        following you around on a tab you have not opened."""
+        view = presenter.matrix_view({"schedule": []})
+        self.assertEqual(view.quadrants[0].count, "0 tasks")
+
+    def test_one_task_is_singular(self):
+        view = presenter.matrix_view({"delegate": ["a"]})
+        self.assertEqual(view.quadrants[0].count, "1 task")
+
+    def test_the_quadrants_keep_the_order_they_were_given(self):
+        """The controller pairs them with notebook tabs by index."""
+        keys = ["do_first", "schedule", "delegate", "eliminate"]
+        view = presenter.matrix_view({k: [] for k in keys})
+        self.assertEqual([q.key for q in view.quadrants], keys)
+
+    def test_an_unknown_key_still_gets_a_readable_tab(self):
+        """A folder from a newer version must not render as a raw key."""
+        view = presenter.matrix_view({"some_new_bucket": []})
+        self.assertEqual(view.quadrants[0].tab, "Some New Bucket")
+
+
 class MomentumViewTests(unittest.TestCase):
     def test_an_empty_day_is_not_reported_as_a_zero(self):
         """The design rule, not the wording: no zero, and the day stays open."""

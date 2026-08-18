@@ -29,6 +29,7 @@ from .queries import (
     visible_tasks,
 )
 from .rows import task_row
+from .storage import category_label
 from .viewmodels import Row
 
 
@@ -96,6 +97,20 @@ class WeekView:
     total_minutes: int = 0
 
 
+@dataclass
+class MatrixQuadrant:
+    """One quadrant's words: the tab it sits behind, and its count line."""
+
+    key: str = ""
+    tab: str = ""
+    count: str = ""
+
+
+@dataclass
+class MatrixView:
+    quadrants: list = field(default_factory=list)
+
+
 def plural(count: int, noun: str) -> str:
     """``1 task`` / ``3 tasks`` — never ``1 task(s)``.
 
@@ -142,6 +157,42 @@ def done_message(session_count: int, minutes: int) -> str:
 def break_offer(message: str, break_minutes: int) -> str:
     """The plain question asked when a block ends with no task attached."""
     return f"{message}\n\nTake a {break_minutes}-minute break now?"
+
+
+def quadrant_tab(label: str, count: int) -> str:
+    """A quadrant tab: its name, and its count only when there is one.
+
+    A returned sentence rather than an inline expression on purpose. Built
+    inline as ``tab=...`` it was invisible to the wording snapshot — the
+    keyword is not one the extractor watches — so this string fell off the
+    net the moment it moved out of the controller, and the entry count did
+    not notice because fifty-five others arrived in the same commit.
+    """
+    return f"{label} ({count})" if count else label
+
+
+def matrix_view(tasks_by_key: dict) -> MatrixView:
+    """The four quadrants' labels, decided without a screen.
+
+    Carries a rule that was previously buried in a refresh method and
+    tested nowhere: **an empty quadrant shows no number at all**, not
+    "(0)". Same reason the day counter is hidden rather than zeroed and the
+    momentum line says "No sessions yet today" — a zero on a tab you have
+    not opened yet reads as a score, and four of them read as a verdict on
+    the whole week.
+
+    The count line under the list is different: you are already inside that
+    quadrant, looking at an empty list, so "0 tasks" is a plain description
+    of what you can see rather than a number following you around.
+    """
+    view = MatrixView()
+    for key, tasks in tasks_by_key.items():
+        view.quadrants.append(MatrixQuadrant(
+            key=key,
+            tab=quadrant_tab(category_label(key), len(tasks)),
+            count=plural(len(tasks), "task"),
+        ))
+    return view
 
 
 def momentum_view(sessions_today: int, minutes_today: int) -> str:

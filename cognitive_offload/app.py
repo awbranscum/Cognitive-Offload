@@ -791,19 +791,22 @@ class CognitiveOffloadApp(tk.Tk):
                 "will be written until it is back."
             )
         unreadable = []
-        for index, key in enumerate(CATEGORY_KEYS):
+        loaded: dict[str, list] = {}
+        for key in CATEGORY_KEYS:
             try:
                 tasks = self.matrix.list(key)
             except (OSError, StorageError) as exc:
                 tasks = []
                 unreadable.append(f"{category_label(key)}: {exc}")
+            loaded[key] = tasks
             self._matrix_cache[key] = tasks
             self.matrix_lists[key].set_rows([matrix_row(t) for t in tasks])
-            self.matrix_count_labels[key].config(
-                text=f"{len(tasks)} task{'s' if len(tasks) != 1 else ''}"
-            )
-            suffix = f" ({len(tasks)})" if tasks else ""
-            self.matrix_notebook.tab(index, text=f"{category_label(key)}{suffix}")
+        # A quadrant that could not be read shows as empty, which is why the
+        # status line above names the folder: an empty tab must never be the
+        # only evidence that something is wrong.
+        for index, quadrant in enumerate(presenter.matrix_view(loaded).quadrants):
+            self.matrix_count_labels[quadrant.key].config(text=quadrant.count)
+            self.matrix_notebook.tab(index, text=quadrant.tab)
         self.matrix_path_var.set(display_path(self.matrix.root))
         self.refresh_due()
         if unreadable:

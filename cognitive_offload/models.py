@@ -96,6 +96,16 @@ def humanize_date(iso: str, on: str | None = None) -> str:
         # the past could be four days ago or eleven, and a date you cannot
         # place is the thing this function exists to prevent. (%-d is not
         # available on Windows, and this app ships a run.bat.)
+        #
+        # The year is carried only when it differs, for the same reason.
+        # Without it "22 Dec" on a task booked last year reads as the
+        # *coming* December, especially beside a row saying "in 7 days" —
+        # and a two-year-old booking was indistinguishable from a
+        # two-week-old one. This app is built for people who keep tasks
+        # around, so a stale booking is the ordinary case, not an edge.
+        # Same-year dates stay short: "1 Aug" is already placeable.
+        if target.year != base.year:
+            return f"{target.day} {target.strftime('%b')} {target.year}"
         return f"{target.day} {target.strftime('%b')}"
     return iso  # far future stays a plain date
 
