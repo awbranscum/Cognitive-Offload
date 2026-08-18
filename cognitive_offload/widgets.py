@@ -227,6 +227,21 @@ class RowList(ttk.Frame):
             return
         self._paint_selection()
 
+    def set_empty_text(self, text: str) -> None:
+        """Change what an empty list says, after the widget already exists.
+
+        It used to be fixed at construction, so one sentence had to serve
+        every reason a list can be empty — including the case where the
+        right thing to say is the opposite of "take the win and stop".
+        Repaints only when the list is actually empty; there is nothing to
+        see otherwise.
+        """
+        if text == self._empty_text:
+            return
+        self._empty_text = text
+        if not self._rows:
+            self.render()
+
     def _ensure_row(self, index: int) -> dict:
         """Return the pooled widgets for a row, building them the first time."""
         while len(self._pool) <= index:

@@ -22,7 +22,9 @@ from pathlib import Path
 PACKAGE = Path(__file__).resolve().parent.parent / "cognitive_offload"
 
 # Keyword arguments that carry words a person reads.
-_TEXT_KEYWORDS = ("text", "title", "message", "window_title", "ok_text", "hint")
+_TEXT_KEYWORDS = ("text", "title", "message", "window_title", "ok_text", "hint",
+                  "empty_text")  # empty_text joined late: the empty-list sentence
+                                 # sat outside the net until v3.34.0 found it
 
 
 def _interpolation(node) -> str:

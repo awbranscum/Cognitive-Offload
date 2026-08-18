@@ -13,6 +13,7 @@ from tkinter import ttk
 
 from . import theme
 from .models import KIND_LABELS
+from .presenter import NOTHING_HERE
 from .queries import ALL_KINDS, SORT_ORDERS
 from .theme import font, px, style_text, tokens
 from .widgets import MomentumStrip, RowList
@@ -284,7 +285,9 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
         on_toggle=app.toggle_selected_done,
         on_delete=app.delete_selected,
         on_select=app.on_task_selection_changed,
-        empty_text="Nothing here. Capture a thought above — or take the win and stop.",
+        # The same constant the presenter hands back on every refresh — two
+        # copies of one sentence is the drift this branch exists to stop.
+        empty_text=NOTHING_HERE,
     )
     app.task_list.grid(row=4, column=0, sticky="nsew")
 

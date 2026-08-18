@@ -165,6 +165,58 @@ class SessionEndWordingTests(unittest.TestCase):
                          "Break over. One more small block?")
 
 
+class EmptyMessageTests(unittest.TestCase):
+    """Which sentence an empty list shows, which is the whole point.
+
+    Invisible to the wording snapshot: both sentences exist in the module
+    whichever one is reached, so only behaviour can pin this.
+    """
+
+    def test_a_genuinely_empty_list_invites_you_to_capture_something(self):
+        self.assertEqual(presenter.empty_message(0, 0), presenter.NOTHING_HERE)
+
+    def test_everything_done_and_hidden_still_earns_the_win(self):
+        """The case that must NOT change: nothing is outstanding, so
+        "take the win and stop" is exactly right."""
+        self.assertEqual(presenter.empty_message(0, 2), presenter.NOTHING_HERE)
+
+    def test_open_work_hidden_by_a_filter_is_never_told_to_stop(self):
+        """The bug. Three tasks behind a forgotten search read as a finished
+        day, and the app advised stopping over outstanding work."""
+        said = presenter.empty_message(3, 3)
+        self.assertEqual(said,
+                         "3 tasks still here — the filters above are hiding them.")
+        self.assertNotIn("take the win", said)
+        self.assertNotIn("stop", said)
+
+    def test_it_says_how_much_is_still_there(self):
+        """The reassurance is the number: the work was not lost."""
+        self.assertIn("1 task still here", presenter.empty_message(1, 1))
+        self.assertIn("7 tasks still here", presenter.empty_message(7, 9))
+
+    def test_it_asks_nothing_and_offers_no_button(self):
+        """An empty list is already a moment of doubt; a decision on top of
+        it is the last thing that helps. There is also no clear-filters
+        control to promise."""
+        said = presenter.empty_message(3, 3)
+        self.assertNotIn("?", said)
+        self.assertNotIn("Clear", said)
+
+    def test_it_does_not_scold_for_having_filtered(self):
+        said = presenter.empty_message(3, 3).lower()
+        for word in ("forgot", "you left", "still not", "why", "oops"):
+            self.assertNotIn(word, said)
+
+    def test_the_view_carries_the_message_the_controller_shows(self):
+        """Wired through TaskListView, not recomputed by the controller."""
+        from cognitive_offload.models import Task
+        tasks = [Task(text="write the letter"), Task(text="book dentist")]
+        view = presenter.task_list_view(tasks, search="nothing matches this")
+        self.assertEqual(view.rows, [])
+        self.assertEqual(view.empty_text,
+                         "2 tasks still here — the filters above are hiding them.")
+
+
 class MatrixViewTests(unittest.TestCase):
     """The quadrant labels, and the rule that an empty one shows no number."""
 

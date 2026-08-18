@@ -5,6 +5,65 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.34.0 — an empty list stops telling you to stop
+The first change in a while that a person will actually see, and it fixes
+the app telling you the opposite of the truth at a bad moment.
+
+- **A filtered list said "take the win and stop" over work you had not
+  done.** Type a search that matches nothing and the list empties. It then
+  showed *"Nothing here. Capture a thought above — or take the win and
+  stop."* — congratulating you on a finished day with three tasks still
+  outstanding behind a search term you had already forgotten. The only
+  evidence to the contrary was a muted "· 3 hidden" in the far corner of
+  the heading.
+
+  For this app that is worse than untidy. "Put it down and it will be
+  there" is the whole promise, and a list gone empty where your work was
+  reads as loss rather than as a filter — this is not an audience that
+  calmly goes hunting for the cause. It was also the app breaking its own
+  rule about assembling state from two places at a hard moment.
+
+  It now says **"3 tasks still here — the filters above are hiding them."**
+  Nothing is asked and nothing is offered to click: an empty list is
+  already a moment of doubt, and a decision on top of it is the last thing
+  that helps. There is no clear-filters control to point at, so it does
+  not invent one — it says what is true and where to look.
+
+- **The case that is right was left exactly alone.** Finish everything and
+  untick "show done" and the list also empties — but nothing is
+  outstanding, so "take the win and stop" is correct there, and it still
+  says that. The distinguishing signal is the open count, which
+  `task_list_view` already had in hand and was throwing away into a
+  summary string. Both branches are pinned behaviourally, because the
+  wording snapshot cannot see which of two existing sentences is reached.
+
+- **The app already believed this, in one place.** Calm mode clears every
+  filter *before* hiding the filter row, with the comment "never hide a
+  control that is still filtering the list: a shorter list with no visible
+  reason why is worse than the clutter". The same rule, finally applied to
+  the screen that was still breaking it — and the reason naming the
+  filters is safe, since when they are hidden they are also empty.
+
+- **The sentence at the centre of this bug was itself unwatched.** It
+  reached `RowList` as `empty_text=`, and that keyword was not one the
+  extractor read — the same class of hole as `tab=` in v3.33.0, and not
+  something widening the *file* list could have caught. It is now a
+  presenter constant, so `main_tab.py` and the presenter cannot drift into
+  two different sentences. Adding `empty_text` to the watched keywords
+  immediately turned up a second uncovered string: the matrix quadrant's
+  **"Empty. That is allowed."** 280 → 283 entries.
+
+- **Three labels nobody was checking now have a test.** Cross-referencing
+  every controller-written variable against the suite found `path_var`,
+  `matrix_path_var` and `counts_var` read by no test at all. Checked for a
+  real defect first and found none — every folder-change path does refresh
+  its label — but the "which folder am I in" label is one this branch
+  already spent a commit on, and a label whose variable quietly stops
+  updating looks exactly like a label that is correct.
+
+- 526 → 537 tests, all passing under Xvfb (`skipped=2`) and headless
+  (`skipped=230`). Restoring the bug fails six of them. pyflakes clean.
+
 ## 3.33.0 — the net stops reading a list, and a past date says which year
 One visible change, and it is a small one: a booking from another year
 now shows that year.

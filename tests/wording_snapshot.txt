@@ -241,6 +241,7 @@ main_tab.py | text= | _build_tasks_card | Not today
 main_tab.py | text= | _build_tasks_card | Show done
 main_tab.py | text= | _build_tasks_card | Start this
 main_tab.py | text= | _build_tasks_card | Where do I start?
+matrix_tab.py | empty_text= | _build_quadrant | Empty. That is allowed.
 matrix_tab.py | text= | _build_quadrant | Double click to edit · Delete removes · Shift/Ctrl multi-selects
 matrix_tab.py | text= | build_matrix_tab | Back to tasks
 matrix_tab.py | text= | build_matrix_tab | Change folder
@@ -253,6 +254,7 @@ models.py | returns | humanize_date | {} {%b}
 models.py | returns | humanize_date | {} {%b} {}
 models.py | returns | render | [{}] {}
 presenter.py | BREAK_OVER_CAPTION= | <module> | Break over. One more small block?
+presenter.py | NOTHING_HERE= | <module> | Nothing here. Capture a thought above — or take the win and stop.
 presenter.py | footer= | today_view | \n\nPlus {} focus session{s} — {} minutes.
 presenter.py | line= | timer_view | break ends {%H:%M}
 presenter.py | line= | timer_view | ends {%H:%M}
@@ -260,6 +262,7 @@ presenter.py | name= | replace_running_question | the current block
 presenter.py | returns | batch_status | {} {}
 presenter.py | returns | batch_status | {} {} of {} {}s — the rest failed
 presenter.py | returns | break_offer | {}\n\nTake a {}-minute break now?
+presenter.py | returns | empty_message | {task} still here — the filters above are hiding them.
 presenter.py | returns | focus_caption_done | {} min logged, and that one is done.
 presenter.py | returns | focus_caption_more | {} min logged. Another round when you're ready.
 presenter.py | returns | momentum_view | No sessions yet today

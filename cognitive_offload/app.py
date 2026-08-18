@@ -312,6 +312,9 @@ class CognitiveOffloadApp(tk.Tk):
         )
         self._visible = view.visible
 
+        # Before set_rows, so an empty list paints the right sentence the
+        # first time rather than the wrong one for a frame.
+        self.task_list.set_empty_text(view.empty_text)
         # set_rows already restores the selection by row id, which is the same
         # matching this used to do by hand - once per selected row, each time
         # repainting every row.

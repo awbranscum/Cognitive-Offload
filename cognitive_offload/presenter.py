@@ -51,6 +51,7 @@ class TaskListView:
     summary: str = ""
     done_today: int = 0
     done_today_text: str = ""
+    empty_text: str = ""
 
 
 @dataclass
@@ -301,6 +302,41 @@ def timer_view(remaining: int, total: int, *, mode: str = "focus",
     return view
 
 
+NOTHING_HERE = "Nothing here. Capture a thought above — or take the win and stop."
+
+
+def empty_message(open_count: int, hidden: int) -> str:
+    """What an empty list says, which depends on *why* it is empty.
+
+    One sentence used to serve every reason, and for one of them it was
+    actively wrong. With three tasks behind a search term you have
+    forgotten, an empty list told you to take the win and stop — the app
+    congratulating you for a finished day over work that is still
+    outstanding, with only a muted "· 3 hidden" in the far corner saying
+    otherwise. For this app that is worse than untidy: "put it down and it
+    will be there" is the whole promise, and a list that has gone empty
+    where your work was reads as loss, not as a filter.
+
+    The app already holds this belief elsewhere. Calm mode clears every
+    filter *before* hiding the filter row, because "a shorter list with no
+    visible reason why is worse than the clutter". This is that same rule,
+    applied to the one screen that was still breaking it — and it is why
+    naming the filters here is safe: when they are hidden they are also
+    empty, so this branch cannot be reached with nothing to point at.
+
+    Nothing is offered to click and nothing is asked. An empty list is
+    already a small moment of doubt; a decision on top of it is the last
+    thing that helps. It states what is true and where to look.
+    """
+    if hidden > 0 and open_count > 0:
+        return (f"{plural(open_count, 'task')} still here — "
+                "the filters above are hiding them.")
+    # Nothing outstanding: either there is genuinely nothing, or everything
+    # left is done and the "show done" box is off. Both have earned the
+    # original sentence, and it stays exactly as it was.
+    return NOTHING_HERE
+
+
 def task_list_view(
     tasks: list,
     *,
@@ -333,6 +369,7 @@ def task_list_view(
         summary=summary,
         done_today=finished,
         done_today_text=f"{finished} done today →" if finished else "",
+        empty_text=empty_message(open_count, hidden),
     )
 
 

@@ -1897,6 +1897,69 @@ class AppSmokeTests(unittest.TestCase):
         self.run_session(minutes=15, choice="carry_on")
         self.assertFalse(self.app.tasks[0].done)
 
+    def test_a_filter_that_empties_the_list_says_the_work_is_still_there(self):
+        """The end of the wire: presenter decides, the empty label shows it.
+
+        Left alone, an empty list told you to take the win and stop while
+        three tasks sat behind a search term you had forgotten. The app's
+        promise is that you can put something down and it will be there.
+        """
+        for text in ("email the landlord", "book dentist", "file the tax thing"):
+            self.capture(text)
+        self.app.search_var.set("budget")
+        self.app.refresh_tasks()
+
+        self.assertEqual(self.app.task_list.size(), 0)
+        shown = self.app.task_list._empty_label.cget("text")
+        self.assertEqual(
+            shown, "3 tasks still here — the filters above are hiding them.")
+        self.assertTrue(self.app.task_list._empty_label.winfo_manager(),
+                        "the message has to actually be on screen")
+        self.assertEqual(len(self.app.tasks), 3, "and nothing was lost")
+
+    def test_clearing_the_filter_restores_the_ordinary_empty_message(self):
+        """It has to go back, or the reassurance becomes the new wrong text."""
+        self.capture("something")
+        self.app.search_var.set("no match")
+        self.app.refresh_tasks()
+        self.assertIn("still here", self.app.task_list._empty_label.cget("text"))
+        self.app.clear_search()
+        self.app.refresh_tasks()
+        self.assertEqual(self.app.task_list.size(), 1)
+        self.assertEqual(self.app.task_list._empty_label.cget("text"),
+                         "Nothing here. Capture a thought above — "
+                         "or take the win and stop.")
+
+    def test_everything_done_and_hidden_is_still_told_to_take_the_win(self):
+        """The case that must not change: nothing outstanding is a real win."""
+        self.capture("a")
+        self.capture("b")
+        self.select(0, 1)  # both at once: marking done re-sorts the list
+        self.app.toggle_selected_done()
+        self.app.show_done_var.set(False)
+        self.app.refresh_tasks()
+        self.assertEqual(self.app.task_list.size(), 0)
+        self.assertIn("take the win and stop",
+                      self.app.task_list._empty_label.cget("text"))
+
+    def test_the_folder_labels_and_the_counts_line_reach_the_screen(self):
+        """Three labels the controller writes that no test used to read.
+
+        The "which folder am I in" label is one this branch already spent a
+        commit on; nothing guarded it. Checked here rather than assumed,
+        because a label whose variable quietly stops being updated looks
+        exactly like a label that is correct.
+        """
+        self.capture("one")
+        self.capture("two")
+        self.select(0)
+        self.app.toggle_selected_done()
+        self.app.refresh_all()
+        self.assertEqual(self.app.counts_var.get(), "1 open · 1 done")
+        self.assertIn(self.app.state_store.path.name, self.app.path_var.get())
+        self.assertTrue(self.app.matrix_path_var.get(),
+                        "the matrix tab's folder label must say something")
+
     def test_finish_time_is_shown_while_running_and_cleared_when_not(self):
         """Whether the line appears at all — not what it says.
 
