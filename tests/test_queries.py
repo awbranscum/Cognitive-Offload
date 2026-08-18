@@ -174,13 +174,65 @@ class StartingTests(unittest.TestCase):
         ready.first_step = "open the folder"
         self.assertEqual([t.text for t in rank_for_starting([vague, ready])], ["ready", "vague"])
 
-    def test_a_booked_task_that_is_due_comes_first(self):
-        plain = make("plain")
-        plain.first_step = "start it"
-        booked = make("booked")
+    #: every fixture below is named so that ALPHABETICAL order would give
+    #: the opposite answer. The old version of this group compared "booked"
+    #: with "plain" and passed on the first letter — swapping the names
+    #: reversed the result, so it never tested what it claimed.
+
+    def test_a_booking_and_a_first_step_both_beat_plain_work(self):
+        """Both lower the activation energy; both outrank a bare task."""
+        plain = make("aaa plain")
+        booked = make("zzz booked")
         booked.scheduled_for = "2020-01-01"  # long overdue is still due
-        order = [t.text for t in rank_for_starting([plain, booked])]
-        self.assertEqual(order[0], "booked")
+        ready = make("zzz ready")
+        ready.first_step = "start it"
+        order = [t.text for t in rank_for_starting([plain, booked, ready])]
+        self.assertEqual(order[-1], "aaa plain")
+
+    def test_a_booking_for_today_beats_one_that_was_missed(self):
+        """The day you chose is the thing you actually decided.
+
+        `is_due` is inclusive of the past on purpose, so both of these
+        score the same — and the order used to fall through to the first
+        letter of the text. Someone who misses bookings accumulates them,
+        so without this their backlog competes with today's plan and wins
+        on the alphabet.
+        """
+        missed = make("aaa missed")
+        missed.scheduled_for = "2026-07-19"
+        today = make("zzz today")
+        today.scheduled_for = "2026-08-18"
+        order = [t.text for t in
+                 rank_for_starting([missed, today], on="2026-08-18")]
+        self.assertEqual(order[0], "zzz today")
+
+    def test_a_booking_for_today_wins_a_tie_with_a_written_first_step(self):
+        """Not a claim that a booking outranks readiness — they SCORE the
+        same, and this only settles what used to be settled by spelling."""
+        ready = make("aaa ready")
+        ready.first_step = "start it"
+        today = make("zzz today")
+        today.scheduled_for = "2026-08-18"
+        order = [t.text for t in
+                 rank_for_starting([ready, today], on="2026-08-18")]
+        self.assertEqual(order[0], "zzz today")
+
+    def test_an_overdue_booking_and_a_first_step_still_tie(self):
+        """Recorded as the current behaviour, not endorsed as a decision.
+
+        `is_ready` and `is_due` are both weight 3, so a written first step
+        and a booking that arrived long ago are equal. The module docstring
+        lists them in an order that reads like a priority, and the code
+        does not implement one. Which should win is an open question for
+        the owner; until it is answered, this pins that the tie is broken
+        by AGE rather than by the first letter of the text.
+        """
+        older_ready = make("zzz ready", created="2024-01-01 00:00:00")
+        older_ready.first_step = "start it"
+        newer_booked = make("aaa booked", created="2025-01-01 00:00:00")
+        newer_booked.scheduled_for = "2020-01-01"
+        order = [t.text for t in rank_for_starting([newer_booked, older_ready])]
+        self.assertEqual(order[0], "zzz ready", "the older one wins the tie")
 
     def test_flagged_beats_unflagged_when_all_else_is_equal(self):
         plain = make("plain")

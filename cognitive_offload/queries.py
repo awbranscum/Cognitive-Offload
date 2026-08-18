@@ -180,6 +180,20 @@ def rank_for_starting(tasks: list[Task], kind: str | None = None, on: str | None
             # Captured today: it is the thing currently on your mind, and the
             # age tiebreak below would otherwise bury it under everything old.
             - (1 if task.created_at[:10] == on else 0),
+            # Among work that ties on everything above, the day you booked
+            # is the thing you actually decided, so today's plan comes
+            # first. `is_due` is deliberately inclusive of the past, which
+            # left a booking for today and one missed a month ago scoring
+            # identically — and the order then fell to the tiebreaks below,
+            # ending at the first letter of the text. Someone who misses
+            # bookings accumulates them, so without this their backlog
+            # competes with today's plan and wins by alphabet.
+            #
+            # A tiebreak, not a score: as a weighted term it would beat a
+            # written first step, which is a different claim and not one
+            # anyone has made. Missed bookings keep their order among
+            # themselves, oldest first, on created_at.
+            0 if task.scheduled_for == on else 1,
             task.created_at,  # older first: it has waited long enough
             task.text.casefold(),
         )

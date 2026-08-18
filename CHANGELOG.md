@@ -5,6 +5,58 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.40.0 — the day you booked a task for now counts
+**This changes which task "Where do I start?" offers.** It is a small,
+deliberate behaviour change to the flagship feature, not a pure fix.
+
+- **The day you booked a task for was invisible to the ranking.** `is_due`
+  is inclusive of the past on purpose — a booking you missed still deserves
+  a route back — but that made a booking *for today* and one missed a month
+  ago score identically, and the order then fell through to the created-at
+  tiebreak and finally to **the first letter of the text**. Two tasks alike
+  in every way except when they were booked came out alphabetically.
+
+  Someone who misses bookings accumulates them, so without this their
+  backlog competes with today's plan and wins on spelling. The feature got
+  noisier for exactly the person who needs it most.
+
+  The booked day is now a **tiebreak** among work that is otherwise equal:
+  today's plan first, missed bookings keeping their own order, oldest
+  first. Missed bookings are not demoted or hidden — they still score the
+  full arrived-booking weight.
+
+  **What this changes in practice:** on a realistic list, a task booked for
+  today now comes before one that merely has a written first step, where
+  before the older capture won. Those two *tie* on score, so this only
+  settles what used to be settled by the alphabet — but it is a visible
+  difference in what the app suggests.
+
+- **A wrong version was tried first and rejected.** As a weighted score
+  term rather than a tiebreak, a booking for today beat a written first
+  step outright — a different and much larger claim, and one the module's
+  own docstring does not make. **The whole suite passed under both
+  versions**, which is why the difference had to be found by reading the
+  output rather than the result.
+
+- **A ranking test passed on the alphabet.**
+  `test_a_booked_task_that_is_due_comes_first` put an overdue booking
+  against a task with a first step and asserted the booking won. Both score
+  −3, so the tie fell to text sort — and "booked" precedes "plain". Renaming
+  the two fixtures reversed the result: the property it named was never
+  true. **Every fixture in that group is now named so the alphabet argues
+  against the thing being asserted**, which means passing can only be the
+  ranking's doing.
+
+- **An open question is recorded rather than answered.** `is_ready` and
+  `is_due` are both weight 3, so a written first step and an arrived
+  booking are *equal* — while the docstring lists them in an order that
+  reads like a priority. Which should win is the owner's call, so a test
+  now pins the current behaviour honestly (the tie is broken by age) and
+  says in its own docstring that it is describing, not endorsing.
+
+- 551 → 554 tests, Xvfb (`skipped=2`) and headless (`skipped=238`).
+  pyflakes clean, snapshot unchanged.
+
 ## 3.39.0 — the pop-out's clock could have frozen and nothing would say
 No behaviour changes. A second mutation sweep ran over ten promises the
 first one did not touch; **nine were caught** — the instance lock's
