@@ -144,6 +144,51 @@ def break_offer(message: str, break_minutes: int) -> str:
     return f"{message}\n\nTake a {break_minutes}-minute break now?"
 
 
+def momentum_view(sessions_today: int, minutes_today: int) -> str:
+    """The line under the fourteen-day strip.
+
+    A day with nothing on it says "No sessions yet today" rather than
+    "0 sessions today · 0 min". The zero is the shaming version: it reads
+    as a score you are losing, and it is the first thing you see on the
+    morning you most need not to be told that. "Yet" says the day is still
+    open, which is true.
+
+    The wording lived on SessionLog, in a module the wording snapshot does
+    not read — two sentences a person meets every session, watched by
+    nothing. Moving it here put them under the net.
+    """
+    if sessions_today == 0:
+        return "No sessions yet today"
+    return f"{plural(sessions_today, 'session')} today · {minutes_today} min"
+
+
+def replace_running_question(elapsed: int, *, mode: str = "focus",
+                             task_text: str = "") -> str:
+    """What is asked before a running block is swapped for another one.
+
+    Losing track that a block is already running is the exact failure mode
+    this app exists for, so it says so rather than silently mis-crediting
+    the log.
+
+    The focus wording once said "Drop it and start a new one?" — which
+    stopped being true when replacing a block started banking its minutes.
+    Telling someone they are about to lose the eight minutes they managed is
+    the fear that pins them inside a block they cannot work in, and it is
+    the opposite of what actually happens. ``elapsed`` is rounded by the
+    caller with the same arithmetic the timer banks with: a promise about
+    "those minutes" is worth nothing if it names a different figure.
+    """
+    if mode == "break":
+        return "A break is running.\n\nEnd it and start a session now?"
+    name = f'"{task_text}"' if task_text else "the current block"
+    return (
+        f"You are {plural(elapsed, 'minute')} into {name}.\n\n"
+        "Those minutes are kept, not lost — starting something "
+        "else banks them.\n\n"
+        "Start something else instead?"
+    )
+
+
 def finished_message(minutes: int, estimate: int = 0, actual: int = 0) -> str:
     """Finishing the task itself, plus the guess-versus-actual line.
 

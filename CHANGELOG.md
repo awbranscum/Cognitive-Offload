@@ -5,6 +5,46 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.32.0 — the midnight flake's twin, and two sentences nobody was watching
+Nothing on screen changes. A test that could only fail after 23:50 is
+fixed, and the last of the session wording moves under the net.
+
+- **The same wall-clock bug, pointing the other way.** 3.31.0 fixed a
+  test that assumed a 15-minute block never crosses midnight. Its twin
+  survived: `test_finish_time_is_shown_while_running_and_cleared_when_not`
+  asserted `^ends \d{2}:\d{2}$` — anchored, so the legitimate
+  " tomorrow" suffix broke it. A ten-minute block started at 23:50 or
+  later fails the suite. CI runners are UTC, and the previous run had
+  started at 23:47:14 UTC: under three minutes from going red for a
+  reason nobody would have found by reading the diff.
+
+  The assertion was relaxed, not deleted — it still requires a time
+  while running and nothing when paused. Which sentence appears is
+  pinned against a fixed clock in `test_presenter`, where it belongs.
+  Verified by shifting local time with a computed POSIX `TZ` offset and
+  running the whole suite at 23:50, 23:53, 23:57, 23:59, 00:02 and
+  12:00. The band is clean.
+
+- **Two sentences a person meets every session, watched by nothing.**
+  `SessionLog.summary()` — "No sessions yet today" and
+  "2 sessions today · 30 min" — lived in `sessions.py`, which the
+  wording extractor does not read. Not a blind spot in the net's logic,
+  but in its reach: a file was never added. The wording is now
+  `presenter.momentum_view`, and the rule underneath it has a test of
+  its own: an empty day must never render as a zero. "0 sessions today"
+  reads as a score you are losing, on the morning you least need to be
+  told that.
+
+- **`replace_running_question` moves too**, completing the session
+  wording. The promise that makes it non-shaming — "Those minutes are
+  kept, not lost" — now has a test asserting it is present and that
+  "Drop it" is not, because the snapshot cannot tell which branch of a
+  two-branch question is reached. Same reason the break/focus split and
+  the untitled-block fallback are pinned behaviourally.
+
+- 511 → 514 tests, all passing under Xvfb (`skipped=2`) and headless
+  (`skipped=225`). Snapshot 223 → 225 entries. pyflakes clean.
+
 ## 3.31.0 — the session's last words move, and a blind spot gets named
 Nothing on screen changes. The words a block ends with — the rotating
 finish message, the break offer, the finished-and-calibrated line, the

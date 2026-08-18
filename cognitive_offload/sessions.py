@@ -16,6 +16,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from .models import DATE_FORMAT, now_stamp, today_iso
+from .presenter import momentum_view
 
 # Enough history for the momentum strip and a year of looking back, while
 # keeping the file small.
@@ -185,12 +186,8 @@ class SessionLog:
         return sum(s.minutes for s in self.sessions if s.completed and s.day in recent)
 
     def summary(self) -> str:
-        """One honest line for the status bar."""
-        today = self.count_today()
-        if today == 0:
-            return "No sessions yet today"
-        minutes = self.minutes_today()
-        return f"{today} session{'s' if today != 1 else ''} today · {minutes} min"
+        """One honest line for the status bar. The words live in presenter."""
+        return momentum_view(self.count_today(), self.minutes_today())
 
 
 def _parse_day(value: str) -> date:

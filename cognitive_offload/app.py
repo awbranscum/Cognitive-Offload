@@ -1141,34 +1141,16 @@ class CognitiveOffloadApp(tk.Tk):
     def begin_focus(self, task: Task | None) -> None:
         """Warm-up ladder, then run the session."""
         if self._timer_running:
-            # Losing track that a block is already running is the exact failure
-            # mode this app exists for, so say so instead of silently
-            # mis-crediting the log.
-            if self._timer_mode == "break":
-                question = "A break is running.\n\nEnd it and start a session now?"
-            else:
-                current = self._focus_task()
-                name = f'"{current.text}"' if current else "the current block"
-                # The same rounding the timer banks with, so the number in
-                # the question is the number that gets logged. A promise
-                # about "those minutes" is worth nothing if it names a
-                # different figure — and the old floor division said "0
-                # minutes" for a block that would still bank one.
-                elapsed = max(1, round(
-                    (self._timer_total - self._timer_remaining) / 60))
-                # It used to say "Drop it and start a new one?" — which
-                # stopped being true when replacing a block started banking
-                # its minutes. Telling someone they are about to lose the
-                # eight minutes they managed is the exact fear that keeps
-                # them pinned in a block they cannot work in, and it is the
-                # opposite of what actually happens.
-                question = (
-                    f"You are {elapsed} minute{'s' if elapsed != 1 else ''} "
-                    f"into {name}.\n\n"
-                    "Those minutes are kept, not lost — starting something "
-                    "else banks them.\n\n"
-                    "Start something else instead?"
-                )
+            current = self._focus_task()
+            # The same rounding the timer banks with, so the number in the
+            # question is the number that gets logged — and the old floor
+            # division said "0 minutes" for a block that would still bank
+            # one. The wording itself lives in presenter.
+            elapsed = max(1, round(
+                (self._timer_total - self._timer_remaining) / 60))
+            question = presenter.replace_running_question(
+                elapsed, mode=self._timer_mode,
+                task_text=current.text if current else "")
             with self._ask_over_focus():
                 if not messagebox.askyesno("Something is already running", question):
                     return

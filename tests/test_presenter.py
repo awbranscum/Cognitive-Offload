@@ -165,6 +165,56 @@ class SessionEndWordingTests(unittest.TestCase):
                          "Break over. One more small block?")
 
 
+class MomentumViewTests(unittest.TestCase):
+    def test_an_empty_day_is_not_reported_as_a_zero(self):
+        """The design rule, not the wording: no zero, and the day stays open."""
+        text = presenter.momentum_view(0, 0)
+        self.assertEqual(text, "No sessions yet today")
+        self.assertNotIn("0", text)
+
+    def test_one_session_is_singular(self):
+        self.assertEqual(presenter.momentum_view(1, 15), "1 session today · 15 min")
+
+    def test_more_than_one_is_plural(self):
+        self.assertEqual(presenter.momentum_view(2, 30), "2 sessions today · 30 min")
+
+
+class ReplaceRunningQuestionTests(unittest.TestCase):
+    """Which question gets asked, which the wording snapshot cannot see.
+
+    Both sentences exist in the module either way, so a swapped branch or a
+    lost fallback would leave the snapshot byte-identical. That is what
+    these pin.
+    """
+
+    def test_a_break_is_asked_about_as_a_break(self):
+        text = presenter.replace_running_question(3, mode="break")
+        self.assertEqual(text,
+                         "A break is running.\n\nEnd it and start a session now?")
+        self.assertNotIn("minutes are kept", text,
+                         "a break has no banked minutes to promise about")
+
+    def test_a_running_block_names_the_task_and_the_minutes(self):
+        text = presenter.replace_running_question(8, task_text="write the letter")
+        self.assertIn("You are 8 minutes into \"write the letter\".", text)
+        self.assertIn("Start something else instead?", text)
+
+    def test_the_promise_that_the_minutes_survive_is_made(self):
+        """The whole point of the rewording. Losing it is a silent regression."""
+        text = presenter.replace_running_question(8, task_text="a thing")
+        self.assertIn("Those minutes are kept, not lost", text)
+        self.assertNotIn("Drop it", text)
+
+    def test_a_single_minute_is_singular(self):
+        self.assertIn("You are 1 minute into",
+                      presenter.replace_running_question(1, task_text="a thing"))
+
+    def test_a_nameless_block_is_still_described(self):
+        """An untitled block must not become 'You are 8 minutes into ""'."""
+        self.assertIn("into the current block",
+                      presenter.replace_running_question(8))
+
+
 class TaskListViewTests(unittest.TestCase):
     def test_counts_open_done_and_flagged(self):
         tasks = [make("a"), make("b", priority=1), make("c")]

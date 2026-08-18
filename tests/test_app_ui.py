@@ -1870,8 +1870,20 @@ class AppSmokeTests(unittest.TestCase):
         self.assertFalse(self.app.tasks[0].done)
 
     def test_finish_time_is_shown_while_running_and_cleared_when_not(self):
+        """Whether the line appears at all — not what it says.
+
+        The " tomorrow" suffix is optional here on purpose. This assertion
+        used to be anchored without it, so the suite failed for anyone
+        running it between 23:50 and midnight, when a ten-minute block
+        genuinely does end tomorrow. That is the same wall-clock assumption
+        already fixed in test_the_ends_line_says_tomorrow_across_midnight,
+        pointing the other way. Both halves of the suffix are pinned
+        against a fixed clock in test_presenter; this one only cares that
+        a running block shows a time and a paused one shows nothing.
+        """
         self.app.start_timer(minutes=10)
-        self.assertRegex(self.app.finish_var.get(), r"^ends \d{2}:\d{2}$")
+        self.assertRegex(self.app.finish_var.get(),
+                         r"^ends \d{2}:\d{2}( tomorrow)?$")
         self.app.pause_timer()
         self.assertEqual(self.app.finish_var.get(), "")
 
