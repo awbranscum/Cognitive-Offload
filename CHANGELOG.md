@@ -5,6 +5,47 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.42.0 — "20 mins" is now an estimate, not a discarded keystroke
+The time-estimate field understands what people actually type.
+
+- **Everything except a bare integer used to become "no guess".** Silently:
+  `"20 mins"`, `"20m"`, `"1h"`, `"~15"` and `"1.5"` all landed as **0**.
+
+  The label is *"About ⬚ minutes, at a guess"* with the word **minutes
+  printed to the right of the box**, so typing "20 mins" into it is the
+  natural thing to do — and it was the input most reliably thrown away.
+
+  The cost is invisible and arrives a week later. `estimate_minutes = 0`
+  means "no guess", so a discarded estimate is indistinguishable from a
+  blank field, and the calibration line — *"You guessed ~20 min; it took
+  about 35 across your sessions"* — then never appears, with nothing to
+  connect that silence to what was typed. Estimating exists here for
+  time-blindness calibration, so this quietly switched the feature off for
+  anyone who typed a unit.
+
+- **The fix understands more rather than complaining more.** The dialog
+  carried the comment *"junk is just 'no guess', never an error dialog"* —
+  a deliberate decision, and the right one: an optional guess is not worth
+  stopping someone with a modal. So no warning was added. Instead
+  `parse_estimate_input` reads a bare number, an optional `~` or "about",
+  and a unit — `m`, `min`, `mins`, `minutes`, `h`, `hr`, `hours` — while
+  anything it still cannot read stays a silent "no guess", exactly as
+  before. `"2 hours"` is 120; `"1.5h"` is 90; `"9999"` still clamps to the
+  same eight-hour ceiling the store uses.
+
+- **The persistence coercion was left exactly alone.** `models._as_minutes`
+  keeps its docstring, *"junk becomes no guess"*, because that is right
+  where it is used: a corrupt file must not crash. What was wrong was
+  reusing a persistence coercion as an **input validator** — silently
+  accepting junk from a file protects the user; silently discarding what
+  they just typed does not.
+
+- 555 → 562 tests, Xvfb (`skipped=2`) and headless (`skipped=241`). Pinned
+  at both layers, and the dialog test fails if the old `int()` coercion
+  comes back. A test also pins that unreadable input raises **no** modal,
+  so the decision that was kept cannot be undone by accident. pyflakes
+  clean, snapshot unchanged.
+
 ## 3.41.0 — a long task stops being cut off in the list
 The list can now show the whole of what you captured.
 

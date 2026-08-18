@@ -67,6 +67,58 @@ def parse_date_input(text: str) -> str | None:
         return None
 
 
+def parse_estimate_input(text: str) -> int | None:
+    """Turn what a person types into a minutes estimate, or ``None``.
+
+    The field is labelled "About ⬚ minutes, at a guess" with the word
+    *minutes* printed to the RIGHT of the box, so typing "20 mins" into it
+    is the natural thing to do — and that was the input most reliably
+    thrown away, along with "20m", "1h" and "~15". A guess that vanishes is
+    worse than no field at all: ``estimate_minutes = 0`` means "no guess",
+    so a discarded estimate is indistinguishable from a blank one, and the
+    calibration line ("You guessed ~20 min; it took about 35") then never
+    appears, with nothing to connect that silence to what was typed.
+
+    Deliberately forgiving rather than strict, and deliberately silent on
+    what it still cannot read. The dialog's own comment — "junk is just
+    'no guess', never an error dialog" — is a decision worth keeping: an
+    optional guess is not worth stopping someone with a modal. So this
+    understands more instead of complaining more, which removes most of the
+    loss without adding the dialog that was ruled out.
+
+    Returns ``None`` for text it cannot read, so a caller can tell that
+    apart from a real zero; the editor maps both to "no guess".
+    """
+    text = (text or "").strip().lower()
+    if not text:
+        return 0
+    if text.startswith("~"):
+        text = text[1:].strip()
+    if text.startswith("about "):
+        text = text[6:].strip()
+
+    unit, factor = "", 1
+    for suffix, scale in (("minutes", 1), ("minute", 1), ("mins", 1), ("min", 1),
+                          ("hours", 60), ("hour", 60), ("hrs", 60), ("hr", 60),
+                          ("m", 1), ("h", 60)):
+        if text.endswith(suffix):
+            unit, factor = suffix, scale
+            break
+    if unit:
+        text = text[: -len(unit)].strip()
+    if not text:
+        return None  # a bare "mins" says no number at all
+
+    try:
+        amount = float(text)
+    except ValueError:
+        return None
+    if amount < 0:
+        return None
+    # Same ceiling the store uses; a guess is a guess, not a workday plan.
+    return max(0, min(480, round(amount * factor)))
+
+
 def humanize_date(iso: str, on: str | None = None) -> str:
     """A date in the units a time-blind brain actually acts on.
 

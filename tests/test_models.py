@@ -216,6 +216,45 @@ class DateInputTests(unittest.TestCase):
             self.assertIsNone(parse_date_input(value))
 
 
+class EstimateInputTests(unittest.TestCase):
+    """What a person types into "About ⬚ minutes, at a guess"."""
+
+    def setUp(self):
+        from cognitive_offload.models import parse_estimate_input
+        self.parse = parse_estimate_input
+
+    def test_a_bare_number_is_minutes(self):
+        self.assertEqual(self.parse("20"), 20)
+        self.assertEqual(self.parse(" 90 "), 90)
+
+    def test_the_units_people_actually_type_are_understood(self):
+        """The label prints "minutes" to the RIGHT of the box, so typing the
+        unit as well is the natural thing to do — and it was the input most
+        reliably thrown away."""
+        for typed, expected in (("20 mins", 20), ("20m", 20), ("20 minutes", 20),
+                                ("1h", 60), ("2 hours", 120), ("1.5h", 90),
+                                ("~15", 15), ("about 25", 25)):
+            with self.subTest(typed=typed):
+                self.assertEqual(self.parse(typed), expected)
+
+    def test_an_empty_field_is_no_guess_not_a_failure(self):
+        self.assertEqual(self.parse(""), 0)
+        self.assertEqual(self.parse("   "), 0)
+
+    def test_it_keeps_the_same_ceiling_as_the_store(self):
+        self.assertEqual(self.parse("9999"), 480)
+        self.assertEqual(self.parse("40 hours"), 480)
+
+    def test_what_it_cannot_read_is_reported_rather_than_guessed(self):
+        """None, not 0 — so a caller can tell junk from a real zero. The
+        editor still maps both to "no guess" without a dialog, which is a
+        decision the dialog states in its own comment."""
+        for typed in ("soon", "half an hour", "mins", "-5", "later today"):
+            with self.subTest(typed=typed):
+                self.assertIsNone(self.parse(typed))
+        self.assertEqual(self.parse("0"), 0, "a typed zero is a real answer")
+
+
 class NoteTests(unittest.TestCase):
     def test_render_includes_timestamp(self):
         note = Note(text="idea", created_at="2024-05-05 09:00:00")

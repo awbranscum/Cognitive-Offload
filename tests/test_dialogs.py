@@ -125,6 +125,38 @@ class DialogCollectTests(unittest.TestCase):
         dialog.destroy()
 
     # -- the snooze exit -----------------------------------------------
+    def test_the_editor_keeps_an_estimate_typed_with_its_unit(self):
+        """"20 mins" used to be saved as no guess at all.
+
+        estimate_minutes = 0 means "no guess", so a discarded estimate is
+        indistinguishable from a blank field — and the calibration line
+        ("You guessed ~20 min; it took about 35") then never appears, with
+        nothing to connect that silence to what was typed.
+        """
+        from cognitive_offload.dialogs import TaskEditorDialog
+        for typed, expected in (("20 mins", 20), ("1h", 60), ("~15", 15)):
+            with self.subTest(typed=typed):
+                dialog = TaskEditorDialog(self.root, title="a task")
+                dialog.estimate_entry.delete(0, "end")
+                dialog.estimate_entry.insert(0, typed)
+                dialog.ok()
+                self.assertEqual(dialog.result["estimate_minutes"], expected)
+                dialog.destroy()
+
+    def test_an_unreadable_estimate_stays_a_silent_no_guess(self):
+        """The dialog's own decision, kept: "junk is just 'no guess', never
+        an error dialog". An optional guess is not worth a modal."""
+        from unittest import mock
+        from cognitive_offload.dialogs import TaskEditorDialog
+        dialog = TaskEditorDialog(self.root, title="a task")
+        dialog.estimate_entry.delete(0, "end")
+        dialog.estimate_entry.insert(0, "half an hour")
+        with mock.patch("cognitive_offload.dialogs.messagebox") as box:
+            dialog.ok()
+        self.assertEqual(dialog.result["estimate_minutes"], 0)
+        self.assertFalse(box.showwarning.called, "no modal over an optional guess")
+        dialog.destroy()
+
     def test_a_snoozed_task_offers_a_way_back_into_the_running(self):
         from datetime import date, timedelta
 

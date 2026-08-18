@@ -17,6 +17,7 @@ from .models import (
     Task,
     humanize_date,
     parse_date_input,
+    parse_estimate_input,
     today_iso,
 )
 from .queries import suggest_tasks
@@ -221,10 +222,15 @@ class TaskEditorDialog(ModalDialog):
             )
             self.date_entry.focus_set()
             return None
-        try:
-            estimate = max(0, min(480, int(self.estimate_entry.get().strip() or 0)))
-        except ValueError:
-            estimate = 0  # junk is just "no guess", never an error dialog
+        # "junk is just 'no guess', never an error dialog" — that decision
+        # stands. What changed is how much counts as junk: "20 mins", "20m",
+        # "1h" and "~15" all used to land here and vanish, which is the one
+        # thing worse than refusing them, because a discarded guess reads
+        # exactly like a blank field. parse_estimate_input understands them;
+        # what it still cannot read remains a silent "no guess".
+        estimate = parse_estimate_input(self.estimate_entry.get())
+        if estimate is None:
+            estimate = 0
         result = {
             "title": title,
             "content": self.content_text.get("1.0", "end").strip(),
