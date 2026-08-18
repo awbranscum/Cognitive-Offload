@@ -5,6 +5,56 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.38.0 — two promises nothing was guarding, found by breaking them
+No behaviour changes; no source file changed at all. Ten of the app's
+stated design promises were broken one at a time and the suite run against
+each. **Eight were caught** — plural, the no-zero momentum line, the
+empty-list branch, the after-midnight "tomorrow", the year on past dates,
+the "(0)" quadrant tab, undo registration on add, and the zero-pill day
+counter. This release closes the two that were not.
+
+- **A test guarding the snooze was checking one layer below where it
+  breaks.** `Task.snoozed_until` promises "Never filters the task list
+  itself", and a test is named for it —
+  `test_a_snoozed_task_leaves_the_suggestions_but_not_the_list`, whose own
+  comment reads "The list itself never hides it." It asserted on
+  `filter_tasks`.
+
+  But the screen does not read `filter_tasks`. `task_list_view` calls
+  **`visible_tasks`**, which wraps it — so a snooze filter added in the
+  wrapper, the one place someone would plausibly add it, left all 549
+  tests green. Shipped, that would make "Not today" take the task off your
+  list for a day: the "my work disappeared" moment v3.34.0 was written to
+  prevent.
+
+  The original assertion stays; two more join it, at `visible_tasks` and
+  through `task_list_view`, so a filter introduced anywhere between the
+  data and the rows is caught.
+
+- **The rounding promise was only ever tested where every rule agrees.**
+  v3.28.0 promised the replace-a-block question names the number that
+  actually gets banked. Both sides use `max(1, round(…))`. The two tests
+  covering it use 300 and 20 seconds — and **300 seconds is five minutes
+  exactly**, where `round` and floor division give the same answer. Swapping
+  one for the other was invisible, so the question could drift away from
+  the log unnoticed: the same defect, in the other direction.
+
+  The new test uses **342 seconds — 5.7 minutes, where `round` says 6 and
+  floor says 5** — and asserts the question and `bank_early` **agree**
+  rather than hard-coding six. The promise is the agreement; pinning the
+  arithmetic would only restate the implementation. It now catches a change
+  on *either* side, verified by flooring each in turn.
+
+- **The method is worth keeping**, and the harness is saved. Breaking a
+  promise on purpose and watching for red is the only way to tell a guard
+  from a decoration — it has now found three things this branch believed
+  were covered: the quadrant-to-tab pairing, the capture guard, and these
+  two. Every mutant restores from a pristine copy, because a run that hangs
+  takes its own cleanup down with it.
+
+- 549 → 551 tests, Xvfb (`skipped=2`) and headless (`skipped=238`).
+  pyflakes clean; the snapshot is unchanged, as no wording moved.
+
 ## 3.37.0 — a test that could not fail, and a key nobody was told about
 No behaviour changes. One test starts working for the first time, and the
 keyboard cheat-sheet stops being a promise nothing checks.

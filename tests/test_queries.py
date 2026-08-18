@@ -39,13 +39,25 @@ class SortTests(unittest.TestCase):
         self.assertEqual([t.text for t in sort_tasks([older, newer], "priority")], ["newer", "older"])
 
     def test_a_snoozed_task_leaves_the_suggestions_but_not_the_list(self):
+        """"Not today" excuses a task from suggestions, and nothing else.
+
+        Asserted at BOTH layers deliberately. This used to check
+        ``filter_tasks`` alone — but the screen reads ``visible_tasks``,
+        which wraps it, so a snooze filter added in the wrapper left every
+        test green. That is the one change someone would plausibly make,
+        and it would take the task off your list for a day: the "my work
+        disappeared" moment this app exists to prevent.
+        """
         dreaded = make("dreaded")
         dreaded.snoozed_until = "2024-06-02"
         other = make("other")
         ranked = rank_for_starting([dreaded, other], on="2024-06-01")
         self.assertEqual([t.text for t in ranked], ["other"])
-        # The list itself never hides it.
+        # The list itself never hides it — checked where the UI reads it.
         self.assertEqual(len(filter_tasks([dreaded, other])), 2)
+        self.assertEqual(
+            sorted(t.text for t in visible_tasks([dreaded, other])),
+            ["dreaded", "other"])
 
     def test_a_snooze_expires_silently_on_its_day(self):
         dreaded = make("dreaded")

@@ -165,6 +165,26 @@ class SessionEndWordingTests(unittest.TestCase):
                          "Break over. One more small block?")
 
 
+class SnoozeStaysOnTheListTests(unittest.TestCase):
+    """The end of the wire for "Not today".
+
+    queries.py pins this at its own two layers; this pins it where the
+    controller actually reads, so a filter introduced anywhere between
+    `filter_tasks` and the rows handed to the screen is caught.
+    """
+
+    def test_a_snoozed_task_still_has_a_row(self):
+        from cognitive_offload.models import Task
+        dreaded = Task(text="the dreaded one")
+        dreaded.snoozed_until = "2099-01-01"  # snoozed far into the future
+        other = Task(text="something else")
+        view = presenter.task_list_view([dreaded, other])
+        self.assertEqual(sorted(t.text for t in view.visible),
+                         ["something else", "the dreaded one"])
+        self.assertEqual(len(view.rows), 2,
+                         "a snoozed task keeps its row; only suggestions skip it")
+
+
 class EmptyMessageTests(unittest.TestCase):
     """Which sentence an empty list shows, which is the whole point.
 

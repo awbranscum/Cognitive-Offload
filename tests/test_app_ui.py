@@ -6,6 +6,7 @@ still runs on a headless box without X.
 
 import contextlib
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -1918,6 +1919,36 @@ class AppSmokeTests(unittest.TestCase):
         question = self._replace_question(seconds_in=20)
         self.assertIn("1 minute into", question)
         self.assertNotIn("0 minute", question)
+
+    def test_the_question_and_the_log_agree_on_a_part_minute(self):
+        """The promise, at a length where rounding rules actually differ.
+
+        Both existing checks use 300s and 20s. Five minutes is 300 seconds
+        exactly, where `round` and floor division give the same answer — so
+        swapping one for the other changed nothing any test could see, and
+        the number in the question was free to drift away from the number
+        in the log. That drift is the defect this promise was written for,
+        in the other direction.
+
+        342s is 5.7 minutes: `round` says 6, floor says 5. The assertion is
+        that the two sides AGREE, not that either equals 6 — the promise is
+        the agreement, and pinning the arithmetic would just re-state the
+        implementation.
+        """
+        question = self._replace_question(seconds_in=342)
+        asked = int(re.search(r"You are (\d+) minute", question).group(1))
+
+        # What the timer would actually bank for the same block.
+        from cognitive_offload.timer import FocusTimer
+        clock = FocusTimer()
+        clock.total = self.app._timer_total
+        clock.remaining = self.app._timer_total - 342
+        clock.running = True
+        _mode, banked = clock.bank_early(fallback_minutes=5)
+
+        self.assertEqual(asked, banked,
+                         "the question named a different number from the log")
+        self.assertEqual(asked, 6, "5.7 minutes rounds to 6, it does not floor to 5")
 
     def test_declining_the_replacement_leaves_the_block_running(self):
         """So "kept either way" is true on both branches, not just one."""
