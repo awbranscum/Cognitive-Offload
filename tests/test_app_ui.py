@@ -856,9 +856,20 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(window.task_var.get(), "deep work")
         self.assertIn("open it", window.step_var.get())
 
-        self.app._timer_deadline -= 60
-        self.app._tick_timer()
-        self.assertNotEqual(window.time_var.get(), "00:00")
+        # Not "the clock is not 00:00" — that passes for a clock frozen at
+        # its starting time, which is exactly what a broken sync produces.
+        # Assert the pop-out AGREES with the main window, across several
+        # ticks, so a change on either side is caught.
+        seen = []
+        for _ in range(3):
+            self.app._timer_deadline -= 60
+            self.app._tick_timer()
+            seen.append((self.app.timer_label.cget("text"), window.time_var.get()))
+        for main, popped in seen:
+            self.assertEqual(popped, main,
+                             "the pop-out drifted from the main window's clock")
+        self.assertEqual([m for m, _p in seen], ["14:00", "13:00", "12:00"],
+                         "and the clock has to actually count down")
 
         window.close()
         self.assertIsNone(self.app._focus_window)

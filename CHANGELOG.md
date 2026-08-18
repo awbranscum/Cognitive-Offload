@@ -5,6 +5,56 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.39.0 — the pop-out's clock could have frozen and nothing would say
+No behaviour changes. A second mutation sweep ran over ten promises the
+first one did not touch; **nine were caught** — the instance lock's
+certain/uncertain split, autosave blocking after unreadable records, the
+matrix undo helper's drop-before-restore ordering, the calibration line,
+NEXT UP excluding the block you are already in, "today" meaning today
+rather than "today or earlier", the warm-up plural, calm mode clearing
+filters before hiding them, and `is_due` staying inclusive of the past.
+Across both sweeps: twenty promises, seventeen guarded. This closes the
+one survivor.
+
+- **The pop-out's clock was never checked for counting down.** Making
+  `_sync_focus_window` read the block's *total* instead of its *remaining*
+  time left all 551 tests passing. What that looks like:
+
+        main window | pop-out
+        14:00       | 15:00
+        13:00       | 15:00
+        12:00       | 15:00
+
+  The pop-out freezes at its starting time while the main window counts
+  down — and the pop-out is the always-on-top window someone stares at
+  *during* a block. It exists so the countdown stays visible while you
+  work in another app, so a frozen clock is the feature failing silently
+  at the only moment it is used, with the main window looking fine.
+
+- **The test named "updates" was checking the wrong thing.**
+  `test_focus_window_opens_updates_and_closes` ticked the clock forward
+  and asserted `time_var != "00:00"` — which a clock stuck at 15:00
+  satisfies. It checked the string was not zero, never that it *changed*.
+  That is the same shape as the rounding test fixed in v3.38.0: a
+  predicate that cannot distinguish the implementations, sitting under a
+  name that claims it can.
+
+  It now ticks three times and asserts the pop-out **agrees with the main
+  window** at each tick, and that the main window actually counts down.
+  Asserting the agreement rather than either clock's value means a change
+  on **either** side is caught — verified both ways: breaking the pop-out's
+  sync fails it, and breaking the main window's label fails it too.
+
+- **One promise was checked and needed nothing.** The pop-out's
+  Pause/Resume button is already guarded — freezing its text fails
+  `test_pausing_updates_the_pop_out_button`. Worth stating, because the
+  useful result of a sweep is as often "this is covered" as "this is not",
+  and inventing a second test for it would have been noise.
+
+- 551 tests, unchanged in number; Xvfb (`skipped=2`) and headless
+  (`skipped=238`). pyflakes clean, snapshot unchanged, no source file
+  touched.
+
 ## 3.38.0 — two promises nothing was guarding, found by breaking them
 No behaviour changes; no source file changed at all. Ten of the app's
 stated design promises were broken one at a time and the suite run against
