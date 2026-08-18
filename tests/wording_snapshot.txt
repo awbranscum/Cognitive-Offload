@@ -224,9 +224,9 @@ dialogs.py | in-list | ShortcutsDialog | Add to scratchpad
 dialogs.py | in-list | ShortcutsDialog | Ctrl+1 / Ctrl+2
 dialogs.py | in-list | ShortcutsDialog | Ctrl+Enter (capture box)
 dialogs.py | in-list | ShortcutsDialog | Delete selected
-dialogs.py | in-list | ShortcutsDialog | Double click / Ctrl+D
 dialogs.py | in-list | ShortcutsDialog | Edit details
 dialogs.py | in-list | ShortcutsDialog | Enter (capture box)
+dialogs.py | in-list | ShortcutsDialog | Enter / Double click / Ctrl+D
 dialogs.py | in-list | ShortcutsDialog | Focus session on the selected task
 dialogs.py | in-list | ShortcutsDialog | Focus the capture box
 dialogs.py | in-list | ShortcutsDialog | Move through the list

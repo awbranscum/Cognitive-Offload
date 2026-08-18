@@ -678,7 +678,10 @@ class ShortcutsDialog(ModalDialog):
             ("Ctrl+B", "Send scratchpad lines to tasks"),
         ]),
         ("Tasks", [
-            ("Double click / Ctrl+D", "Edit details"),
+            # Enter was bound from the start and listed nowhere. It is the
+            # key a keyboard-first user reaches for, and the one editing
+            # route that needs no chord to remember.
+            ("Enter / Double click / Ctrl+D", "Edit details"),
             ("Space", "Toggle done"),
             ("Up / Down", "Move through the list"),
             ("Delete", "Delete selected"),

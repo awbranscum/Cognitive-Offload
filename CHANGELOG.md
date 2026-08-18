@@ -5,6 +5,52 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.37.0 — a test that could not fail, and a key nobody was told about
+No behaviour changes. One test starts working for the first time, and the
+keyboard cheat-sheet stops being a promise nothing checks.
+
+- **A test guarding capture passed with the guard deleted.**
+  `test_typing_in_the_capture_box_never_triggers_task_shortcuts` says in
+  its own docstring "capture must never fight your fingers": it types
+  `Delete`, `Ctrl+P`, `Ctrl+T` and `Ctrl+Up` into the capture box and
+  asserts nothing was deleted, prioritised or pinned. Removing the
+  while-typing guard entirely left it **passing**.
+
+  The cause was that `setUp` withdraws the window, and a withdrawn window
+  receives no key events at all — so "nothing happened" was true for the
+  wrong reason. The window is now mapped, focus is waited for, and **a
+  probe key is proved to arrive before any negative result is believed**;
+  if the display will not cooperate the test skips rather than pretends.
+  With the guard broken it now fails in a quarter of a second: priority
+  becomes 1 and the task becomes pinned, from four keystrokes of ordinary
+  typing.
+
+  What it protects earns the ceremony. Typing "Delete the old files" into
+  the capture box must not delete the selected task.
+
+  The dialogs are patched inside the test — not to weaken it, since with
+  the guard working none is ever reached, but so that a regression
+  **fails instead of hanging**: `Ctrl+T` opens a modal prompt, and a
+  blocked CI runner is a far worse signal than a red one. That was found
+  the hard way, by hanging.
+
+- **Enter opens the task editor, and the help never said so.** It has been
+  bound since the list widget was written. `Ctrl+D` and a double click
+  were documented; the key a keyboard-first user actually reaches for, and
+  the only editing route needing no chord to remember, was not. The row
+  now reads "Enter / Double click / Ctrl+D".
+
+- **The cheat-sheet is pinned in both directions**, in the idiom the
+  README fix established: every shortcut the help lists must be bound, and
+  every global binding must be listed. Both were already true — this
+  records it. Verified by corrupting each way: a row naming a key nothing
+  binds, and a binding the sheet never mentions. A help page is read by
+  someone who could not remember the key, which is exactly the person who
+  will not work out that it is wrong.
+
+- 546 → 549 tests, Xvfb (`skipped=2`) and headless (`skipped=237`).
+  pyflakes clean. Snapshot stays at 410 entries, one replaced.
+
 ## 3.36.0 — "1 line(s)", on the feature that matters most
 A small user-facing fix, and the clearest evidence yet that the coverage
 work was worth doing.

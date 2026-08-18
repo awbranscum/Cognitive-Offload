@@ -54,6 +54,44 @@ class AppSmokeTests(unittest.TestCase):
             pass  # on_close tests already tore the window down
 
     # -- helpers -------------------------------------------------------
+    def _really_focus(self, widget):
+        """Map the window and wait for X focus to actually land on ``widget``.
+
+        setUp withdraws the window, and a withdrawn window receives no key
+        events at all — so ``event_generate`` on one is a no-op that any
+        "nothing happened" assertion passes vacuously. Modelled on
+        test_dialogs._focus, which is where the suite's two legitimate
+        skips come from: if the display will not give us focus, say so
+        rather than pretend the key was delivered.
+        """
+        import time
+
+        self.app.deiconify()
+        for _ in range(100):
+            self.app.update()
+            if self.app.focus_get() is widget:
+                return True
+            widget.focus_force()
+            time.sleep(0.01)
+        return False
+
+    def _assert_key_delivery(self, widget):
+        """Prove a key actually arrives before trusting a negative result.
+
+        Without this, a broken guard and an undelivered event look
+        identical — which is exactly how the test below passed for its
+        whole life with the guard removed.
+        """
+        landed = []
+        token = "<Key-F9>"
+        widget.bind(token, lambda _e: landed.append(True), add=True)
+        try:
+            widget.event_generate(token)
+            self.app.update()
+        finally:
+            widget.unbind(token)
+        return bool(landed)
+
     def capture(self, text):
         self.app.capture_entry.insert(0, text)
         self.app.add_task_from_capture()
@@ -280,6 +318,72 @@ class AppSmokeTests(unittest.TestCase):
             self.assertGreater(len(dialog.body.winfo_children()), 4)
         finally:
             dialog.destroy()
+
+    # -- the cheat-sheet has to stay true ------------------------------
+    #
+    # A shortcuts dialog is a promise, and the README taught this branch
+    # that promises drift. These pin the property in both directions:
+    # everything listed is bound, and everything bound is listed.
+
+    #: how a row's accelerator label maps onto a tk sequence
+    KEY_SEQUENCES = {
+        "Ctrl+G": "<Control-Key-g>", "Ctrl+R": "<Control-Key-r>",
+        "Ctrl+N": "<Control-Key-n>", "Ctrl+B": "<Control-Key-b>",
+        "Ctrl+P": "<Control-Key-p>", "Ctrl+T": "<Control-Key-t>",
+        "Ctrl+M": "<Control-Key-m>", "Ctrl+Z": "<Control-Key-z>",
+        "Ctrl+F": "<Control-Key-f>", "Ctrl+S": "<Control-Key-s>",
+        "Ctrl+O": "<Control-Key-o>", "Ctrl+D": "<Control-Key-d>",
+        "Ctrl+Up": "<Control-Key-Up>", "Ctrl+1": "<Control-Key-1>",
+        "Ctrl+2": "<Control-Key-2>", "Escape": "<Key-Escape>",
+        "F1": "<Key-F1>",
+        # Named keys whose tk spelling is not the label: the sheet says what
+        # is printed on the keyboard, tk says what X calls it.
+        "Enter": "<Key-Return>", "Ctrl+Enter": "<Control-Key-Return>",
+        "Space": "<Key-space>", "Delete": "<Key-Delete>",
+        "Up": "<Key-Up>", "Down": "<Key-Down>",
+    }
+
+    def test_every_shortcut_the_help_lists_is_actually_bound(self):
+        """A cheat-sheet that lies is worse than no cheat-sheet.
+
+        It is read by someone who could not remember the key — exactly the
+        person who will not work out that the sheet is wrong.
+        """
+        from cognitive_offload.dialogs import ShortcutsDialog
+        bound = set(self.app.bind_all())
+        bound |= set(self.app.capture_entry.bind())
+        bound |= set(self.app.task_list.canvas.bind())
+        missing = []
+        for _section, rows in ShortcutsDialog.SHORTCUTS:
+            for accelerator, _what in rows:
+                for part in accelerator.split(" / "):
+                    key = part.split(" (")[0].strip()
+                    if key == "Double click":
+                        continue  # a mouse gesture, checked by on_activate
+                    sequence = self.KEY_SEQUENCES.get(key, f"<Key-{key}>")
+                    if sequence not in bound:
+                        missing.append(f"{accelerator!r} -> {sequence}")
+        self.assertEqual(missing, [], "the help lists a shortcut nothing binds")
+
+    def test_every_global_shortcut_is_in_the_help(self):
+        """The other direction: a key that works but is written down
+        nowhere may as well not exist, for the person this app is for."""
+        from cognitive_offload.dialogs import ShortcutsDialog
+        listed = {self.KEY_SEQUENCES.get(part.split(" (")[0].strip())
+                  for _s, rows in ShortcutsDialog.SHORTCUTS
+                  for accelerator, _w in rows
+                  for part in accelerator.split(" / ")}
+        # tk binds these itself on every Tk app; they are not ours to document.
+        tk_own = {"<<NextWindow>>", "<<PrevWindow>>", "<Alt-Key>", "<Key-F10>"}
+        undocumented = sorted(set(self.app.bind_all()) - listed - tk_own)
+        self.assertEqual(undocumented, [],
+                         "a global shortcut is bound but not in the help")
+
+    def test_enter_on_a_selected_task_opens_the_editor(self):
+        """The row added because the key worked and the sheet was silent."""
+        self.capture("write the letter")
+        self.select(0)
+        self.assertIn("<Key-Return>", self.app.task_list.canvas.bind())
 
     def test_change_folder_migrates_the_lock_and_the_logs(self):
         new = Path(self._tmp.name) / "elsewhere"
@@ -1124,17 +1228,41 @@ class AppSmokeTests(unittest.TestCase):
         self.assertNotEqual(str(cell["frame"].cget("background")), hover_colour)
 
     def test_typing_in_the_capture_box_never_triggers_task_shortcuts(self):
-        """The while-typing guard: capture must never fight your fingers."""
+        """The while-typing guard: capture must never fight your fingers.
+
+        This test used to pass with the guard deleted. It generated its
+        keys into a window setUp had withdrawn, so nothing was delivered
+        and "nothing happened" was true for the wrong reason — for its
+        whole life it could not fail. The window is now mapped, focus is
+        waited for, and a probe key is proved to arrive before any
+        negative result is believed.
+
+        What it protects is worth the ceremony: typing "Delete the old
+        files" into the capture box must not delete the selected task, and
+        Ctrl+P/T/Up must not fire mid-word.
+        """
         self.capture("precious task")
         self.select(0)
-        self.app.capture_entry.focus_set()
+        if not self._really_focus(self.app.capture_entry):
+            self.skipTest("could not obtain X focus")
+        if not self._assert_key_delivery(self.app.capture_entry):
+            self.skipTest("key events are not being delivered")
         # Keys that are destructive shortcuts when the list has focus.
-        for sequence in ("<Delete>", "<Control-p>", "<Control-t>", "<Control-Up>"):
-            self.app.capture_entry.event_generate(sequence)
-        self.app.update()
+        # The dialogs are patched not to weaken the test — with the guard
+        # working none of them is ever reached — but so that a regression
+        # FAILS instead of hanging: Ctrl+T opens a modal prompt, and a
+        # blocked CI runner is a far worse signal than a red one.
+        with mock.patch("cognitive_offload.app.PromptDialog") as prompt, \
+                mock.patch("cognitive_offload.app.messagebox"):
+            prompt.return_value.show.return_value = None
+            for sequence in ("<Delete>", "<Control-p>", "<Control-t>",
+                             "<Control-Up>"):
+                self.app.capture_entry.event_generate(sequence)
+            self.app.update()
         self.assertEqual([t.text for t in self.app.tasks], ["precious task"])
         self.assertEqual(self.app.tasks[0].priority, 0)
         self.assertFalse(self.app.tasks[0].pinned)
+        self.assertFalse(prompt.called, "Ctrl+T opened a dialog mid-word")
 
     def test_opening_a_file_with_unreadable_records_warns_and_blocks(self):
         import json as _json
