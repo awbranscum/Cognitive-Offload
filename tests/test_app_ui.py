@@ -1497,8 +1497,105 @@ class AppSmokeTests(unittest.TestCase):
 
     def test_the_window_floor_is_a_size_the_app_works_at(self):
         from cognitive_offload.theme import px
+        # Measured against the layout rather than chosen: nothing overflows
+        # its card down to 1100x670 in the worst legitimate state, so this
+        # keeps 20-30px of clearance. The old floor was 1160x790, and 790 is
+        # taller than a 768px laptop screen — which is the bug.
         self.assertEqual(self.app.wm_minsize(),
-                         (px(self.app, 1160), px(self.app, 790)))
+                         (px(self.app, 1120), px(self.app, 700)))
+
+    def _sized_for(self, width, height):
+        """(opening size, floor) for a screen of this size.
+
+        Against the pure helper rather than a real window: a withdrawn
+        window reports 1x1 for its geometry, and standing up one X display
+        per resolution is what made this bug invisible for so long.
+        """
+        from cognitive_offload.app import window_bounds
+        from cognitive_offload.theme import px
+
+        return window_bounds(
+            screen=(width, height),
+            design=(px(self.app, 1240), px(self.app, 880)),
+            floor=(px(self.app, 1120), px(self.app, 700)),
+            margin=(px(self.app, 16), px(self.app, 72)),
+        )
+
+    def test_the_window_never_opens_bigger_than_the_screen(self):
+        """It opened 880 tall on a 768px laptop — 113px past the bottom edge,
+        taking the whole toolbar, the whole footer, the status bar and the
+        only route into the week review with it."""
+        for width, height in ((1024, 768), (1280, 720), (1366, 768),
+                              (1440, 900), (1920, 1080)):
+            with self.subTest(screen=f"{width}x{height}"):
+                (opened_w, opened_h), _floor = self._sized_for(width, height)
+                self.assertLessEqual(opened_h, height,
+                                     "opens taller than the screen")
+                self.assertLessEqual(opened_w, width,
+                                     "opens wider than the screen")
+
+    def test_the_floor_is_never_taller_than_the_screen_can_show(self):
+        """The half that made the old bug unrecoverable: the floor was 790,
+        which is itself taller than a 768px screen, so dragging the corner
+        stopped while the window was still overflowing."""
+        for width, height in ((1024, 768), (1280, 720), (1366, 768)):
+            with self.subTest(screen=f"{width}x{height}"):
+                _opened, (floor_w, floor_h) = self._sized_for(width, height)
+                self.assertLess(floor_h, height,
+                                "cannot be resized to fit the screen")
+                self.assertLess(floor_w, width)
+
+    def test_a_big_screen_still_gets_the_designed_size(self):
+        """Fitting small screens must not shrink the app for everyone else."""
+        from cognitive_offload.theme import px
+
+        (opened_w, opened_h), floor = self._sized_for(1920, 1080)
+        self.assertEqual((opened_w, opened_h),
+                         (px(self.app, 1240), px(self.app, 880)))
+        self.assertEqual(floor, (px(self.app, 1120), px(self.app, 700)))
+
+    def test_the_room_left_for_a_taskbar_is_real(self):
+        """A window that fills the screen exactly still hides its footer under
+        the taskbar, and the footer is where Undo lives.
+
+        Asserted unconditionally. The first version of this test only checked
+        when `opened_h < height`, which is false in precisely the case that
+        matters — a margin of zero makes the window exactly screen-height and
+        skipped the assertion instead of failing it.
+        """
+        for width, height in ((1024, 768), (1280, 720), (1366, 768)):
+            with self.subTest(screen=f"{width}x{height}"):
+                (_opened_w, opened_h), _floor = self._sized_for(width, height)
+                self.assertLessEqual(
+                    opened_h, height - 40,
+                    "no room left for a taskbar: the footer, and Undo with "
+                    "it, would sit underneath it",
+                )
+
+    def test_the_window_really_takes_the_size_it_worked_out(self):
+        """Drives the real window, not just the arithmetic.
+
+        `window_bounds` being correct says nothing about whether
+        `_fit_to_screen` uses its answer — replacing the geometry call with
+        the old unclamped constant left every other test in this group
+        passing, which is the wrong-layer trap one level up.
+        """
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        for width, height in ((1366, 768), (1280, 720)):
+            with self.subTest(screen=f"{width}x{height}"):
+                with mock.patch.object(type(self.app), "winfo_screenwidth",
+                                       return_value=width), \
+                     mock.patch.object(type(self.app), "winfo_screenheight",
+                                       return_value=height):
+                    self.app._fit_to_screen()
+                self.app.update()
+                self.assertLessEqual(self.app.winfo_height(), height - 40)
+                self.assertLessEqual(self.app.winfo_width(), width)
+                floor_w, floor_h = self.app.wm_minsize()
+                self.assertLess(floor_h, height)
+                self.assertLess(floor_w, width)
+        self.app._fit_to_screen()  # put it back for the rest of the suite
 
     def test_px_carries_design_pixels_to_the_screens_dpi(self):
         from cognitive_offload.theme import px
@@ -1515,7 +1612,7 @@ class AppSmokeTests(unittest.TestCase):
         """At the app's own minimum, with a session running, the list and
         the search entry must both still exist — they didn't."""
         self.app.deiconify()  # withdrawn windows don't lay out
-        self.app.geometry("1160x790")
+        self.app.geometry("1120x700")  # the floor
         # The worst legitimate state, not the demo state: a title long
         # enough to wrap in NEXT UP, plus a wrapping first step. Short
         # titles made this test pass while real ones clipped the toolbar.

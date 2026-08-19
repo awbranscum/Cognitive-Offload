@@ -63,21 +63,30 @@ AUTOSAVE_SECONDS = 30
 # Said at the end of a session. Deliberately flat and factual: the point is
 # that the time is banked, not that you have been a good boy.
 
+def window_bounds(screen: tuple, design: tuple, floor: tuple,
+                  margin: tuple) -> tuple:
+    """Opening size and minimum size for a screen of this size.
+
+    Pure, so the interesting cases can be tested without one X display per
+    resolution — which is why the bug it fixes survived so long: every test
+    ran on a screen big enough to hide it.
+
+    Returns ``(opening, minimum)``. Both are capped by the room the screen
+    leaves after ``margin`` (a title bar and a taskbar). When the screen
+    cannot show even the floor, **the screen wins**: a control clipped by a
+    few pixels is still readable and still clickable, while a control below
+    the bottom edge of a window that refuses to shrink is neither.
+    """
+    room = tuple(max(1, s - m) for s, m in zip(screen, margin))
+    return (tuple(min(d, r) for d, r in zip(design, room)),
+            tuple(min(f, r) for f, r in zip(floor, room)))
+
+
 class CognitiveOffloadApp(tk.Tk):
     def __init__(self, config: Config | None = None):
         super().__init__()
         self.title(f"{APP_TITLE} {__version__}")
-        self.geometry(f"{px(self, 1240)}x{px(self, 880)}")
-        # A minimum size is a declaration that the app works there — in the
-        # worst legitimate state, not the demo state. Both numbers are
-        # measured at 96 DPI, plus slack for platform font metrics: 790
-        # fits a running session with a NEXT UP title and first step that
-        # each wrap to two lines (778 before the toolbar leaves the card);
-        # 1160 fits the single-row search-and-filter bar without clipping
-        # its last control (1140 is the break-even). px() carries the same
-        # measurements to HiDPI screens, where fonts grow but these
-        # numbers otherwise would not.
-        self.minsize(px(self, 1160), px(self, 790))
+        self._fit_to_screen()
 
         self.config_store = config or Config().load()
         self.state_store = StateStore(self.config_store.state_file)
@@ -199,6 +208,46 @@ class CognitiveOffloadApp(tk.Tk):
     # ------------------------------------------------------------------
     # construction
     # ------------------------------------------------------------------
+    def _fit_to_screen(self) -> None:
+        """Open at the designed size, but never bigger than the screen.
+
+        Both numbers used to be absolute, and neither was ever compared to
+        the screen. The window opened 880 tall with a floor of 790 — so on a
+        1366x768 laptop it opened 113px past the bottom edge and **could not
+        be resized to fit**, because 790 is itself taller than 768. Thirteen
+        controls sat off-screen: the whole task toolbar, the whole footer
+        including Undo, the status bar (where most of what this app says is
+        actually said), and the momentum strip — which with its label is the
+        only way into the week review.
+
+        The floors below are measured against the layout rather than chosen.
+        In the worst legitimate state — a running session with a NEXT UP
+        title and first step that each wrap — nothing overflows its card down
+        to 1100x670, so 1120x700 keeps 20-30px of clearance. The old floor
+        was 1160x790: about right on width, and ~110px taller than the layout
+        needs, which is the whole of the bug on a 768px screen.
+
+        The width number came out of a second measurement, because the first
+        one used ``reqwidth > width`` and reported 930 — a widget can be
+        given exactly the width it asked for and still sit past its card's
+        right edge, which is what "Show done" does at 1060.
+
+        When the screen cannot show even that, the screen wins. A button
+        clipped by a few pixels is still readable and still clickable; a
+        button below the bottom edge of an unresizable window is neither.
+        """
+        (width, height), floor = window_bounds(
+            screen=(self.winfo_screenwidth(), self.winfo_screenheight()),
+            design=(px(self, 1240), px(self, 880)),
+            floor=(px(self, 1120), px(self, 700)),
+            # Room for a title bar and a taskbar. Generous rather than exact:
+            # guessing 20px too small costs a little space, guessing 20px too
+            # large puts the footer — and Undo with it — under the taskbar.
+            margin=(px(self, 16), px(self, 72)),
+        )
+        self.geometry(f"{width}x{height}")
+        self.minsize(*floor)
+
     def _build_ui(self) -> None:
         container = ttk.Frame(self)
         container.pack(fill="both", expand=True)

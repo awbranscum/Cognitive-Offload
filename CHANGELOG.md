@@ -5,6 +5,73 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.47.0 — The window now fits the screen it is on
+The app opened at a fixed 1240x880 with a floor of 1160x790, and **neither
+number was ever compared to the screen**. On a 1366x768 laptop it opened
+113px past the bottom edge — and could not be resized to fit, because the
+floor of 790 is itself taller than 768.
+
+- **Thirteen controls sat off-screen**, measured: the whole task toolbar
+  (Priority, Tag, Edit, Pin, To matrix, Delete, Clear done), the whole footer
+  (Save, Open, Export, **Undo**), the **status bar**, and the **momentum
+  label**. 1024x768 was 22px too tall, 1280x720 was 70px, 1366x768 was 23px.
+  `px()` never shrinks below its design size, so a low-DPI screen got no
+  relief and a HiDPI panel scaled the numbers **up**.
+
+- **What that cost is worse than the list suggests.** The status bar carries
+  ~73 of the app's messages, so the app was simply silent there.
+  `delete_selected` writes *"Deleted N tasks. Ctrl+Z undoes it."* into that
+  invisible bar while the Undo button sat in the invisible footer — the
+  safety net advertised where it could not be read and offered where it could
+  not be clicked. And the momentum label and strip are the week review's
+  **only** two entry points, so the dialog v3.43.0 had just made fit could
+  not be opened at all.
+
+- **The window now sizes itself from the screen**, capped at the designed
+  1240x880 and floored at a measured 1120x700, with room left for a title bar
+  and a taskbar. When a screen cannot show even the floor, **the screen
+  wins**: a button clipped by a few pixels is still readable and still
+  clickable, while a button below the bottom edge of a window that refuses to
+  shrink is neither. Measured after: 1366x768, 1024x768 and 1920x1080 are
+  completely clean with nothing off the bottom; 1280x720 clips 18px off the
+  bottom of the toolbar buttons in the worst legitimate state, which is the
+  deliberate trade.
+
+- **The floor is measured, not chosen.** In the worst legitimate state — a
+  running session with a NEXT UP title and first step that each wrap —
+  nothing overflows its card down to **1100x670**, so 1120x700 keeps 20-30px
+  of clearance. The old 790 was ~110px above what the layout needs, and that
+  slack is the entire bug on a 768px screen.
+
+- **The width number took two measurements.** The first used
+  `reqwidth > width` and reported 930; the second, against the parent card's
+  right edge, reported 1100. A widget can be given exactly the width it asked
+  for and still sit past its card — which is what "Show done" does at 1060.
+  The first measurement was a predicate that never fired where it mattered,
+  and the existing floor test is what caught it.
+
+- **The codebase half-knew this already.**
+  `test_the_window_floor_is_a_size_the_app_works_at` pinned the floor as an
+  exact equality, and its sibling proved the app *works* at 1160x790. Neither
+  ever asked whether that floor is a size a **screen can show** — the test
+  name says it: *a size the app works at*, not a size that fits. Standing
+  lesson one level up, and the third time this codebase has hit the shape
+  after the focus pop-out and the week review.
+
+- **The sizing is now a pure function**, `window_bounds`, so the interesting
+  resolutions are tested by arithmetic rather than by standing up an X
+  display each — which is exactly why this survived so long: every test ran
+  on a screen big enough to hide it.
+
+- 651 → 656 tests, Xvfb (`skipped=2`) and headless (`skipped=269`). **Six
+  mutants, and two of them initially survived** — both test defects worth
+  recording. Replacing the geometry call with the old constant passed
+  everything, because the tests checked `window_bounds` and never that
+  `_fit_to_screen` **uses** its answer: the wrong-layer trap one level up.
+  And dropping the taskbar allowance to zero passed because that test only
+  asserted `if opened_h < height`, which is false in precisely the case that
+  matters. Both are fixed and both now fail against their mutants.
+
 ## 3.46.0 — Moving a task between the tabs no longer loses part of it
 Two docstrings promised totality and neither kept it. `add_from_task` said it
 moved a task *"without dropping any fields"*; `to_task` said it kept *"every
