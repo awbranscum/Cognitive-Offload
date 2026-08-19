@@ -359,6 +359,38 @@ class MatrixEditorTests(unittest.TestCase):
         self.assertEqual(task.handed_to, "Mum")
         self.assertEqual(task.follow_up_on, _in_days(4))
 
+    def test_replacing_a_wait_with_an_agent_says_who_it_replaced(self):
+        """Newest-holder-wins is right; doing it silently is not. Before the
+        editor could mark a wait this needed one agent's task handed to
+        another; now the person you were waiting on can be replaced by a
+        click that never mentions them."""
+        from unittest import mock as _mock
+
+        task = self.app.matrix.create("delegate", "Chase the claim")
+        self.app.matrix.set_handoff(task, "Mum", date.today().isoformat(),
+                                    _in_days(3))
+        self._select("delegate")
+        with _mock.patch("cognitive_offload.app.HandoffDialog") as ask, \
+             _mock.patch("cognitive_offload.app.HandoffDoneDialog"):
+            ask.return_value.show.return_value = {
+                "target": "codex", "note": "", "follow_up_days": 3}
+            self.app.hand_off_matrix_task("delegate")
+        self.assertIn("Was out with Mum", self.app.status_var.get())
+        self.assertIn("Codex", self.app.status_var.get())
+
+    def test_a_first_handoff_says_nothing_about_anyone_else(self):
+        from unittest import mock as _mock
+
+        self.app.matrix.create("delegate", "Chase the claim")
+        self._select("delegate")
+        with _mock.patch("cognitive_offload.app.HandoffDialog") as ask, \
+             _mock.patch("cognitive_offload.app.HandoffDoneDialog"):
+            ask.return_value.show.return_value = {
+                "target": "codex", "note": "", "follow_up_days": 3}
+            self.app.hand_off_matrix_task("delegate")
+        self.assertNotIn("Was out with", self.app.status_var.get())
+        self.assertIn("Handed to Codex", self.app.status_var.get())
+
     def test_it_survives_being_written_out_and_read_back(self):
         """The in-memory object is not the thing that comes back; the file is."""
         self.app.matrix.create("schedule", "Chase the claim")

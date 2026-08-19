@@ -797,6 +797,7 @@ class MatrixStore:
             repeat=task.repeat, snoozed_until=task.snoozed_until,
             handed_to=task.handed_to, handed_off_on=task.handed_off_on,
             follow_up_on=task.follow_up_on,
+            steps=list(task.steps), steps_done=task.steps_done,
         )
         created.path = self._new_path(category, created)
         self._write(created)

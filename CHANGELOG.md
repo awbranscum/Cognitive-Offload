@@ -5,6 +5,66 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.52.0 — A task can be a plan instead of a wall
+A task held exactly **one** step. The moment it was done the task was a blank
+wall again, so every transition charged a fresh decision — the one thing this
+app's own rules say not to charge for. "Write the report" is a wall; "open
+last year's, copy the headings, fill in the numbers" is three things you can
+start.
+
+- **The rest of the plan**, one step per line, in the task editor on both
+  tabs. Optional; a task with no plan behaves in every way exactly as it did.
+  What you paste in is run through the same coercion the scratchpad uses, so
+  bullets, checkboxes and the `[timestamp]` prefix quick capture writes are
+  all stripped for you.
+- **Ticking a step off** moves you down the plan, and the status line says
+  what is *next* rather than how many are left: a count of what remains is a
+  debt, and the next step is a way in.
+- **The row says where you are** — `→ copy the headings across · step 2 of 4`
+  — in the slot the first step already occupied, so it costs no new pixels.
+  It counts what exists and never what is missing.
+- **A repeating task with steps is a routine.** The plan carries into the next
+  round; your place in it does not, so next week's bins start at step one.
+  That is not a separate feature, it is what these two fields already mean
+  together.
+
+**The design constraint was `first_step`, not the plan.** It has forty-seven
+references across seven modules and it is what `is_ready` reads, which is what
+the whole "where do I start?" ranking scores highest. A derived `next_step`
+would have been a forty-seven-site refactor; a second field holding "what
+next" would have been a second source of truth, which is the exact shape of
+bug the last four releases have been fixing.
+
+So there is no second answer. A task with a plan **defines** `first_step` as
+`steps[steps_done]`, one function says so, and **not one of the forty-seven
+readers changed**. `steps_done` is a cursor rather than a tick-list precisely
+because a repeat has to hand the whole plan to its next round — steps consumed
+destructively could not come back. Editing the step box on a task with a plan
+writes through to the plan; a file whose `first_step` has drifted from its
+plan is repaired on load rather than believed; and a plan that shrinks to one
+step collapses back into a plain first step, because "step 1 of 1" is a
+control that tells you nothing.
+
+Both `dataclasses.fields()` completeness nets refused the change until every
+new field was classified, which is what they are for. One of them refused
+`first_step` as plain setup — correctly, since a plan makes it derived — and
+that argument is now a third category in `tests/test_repeat_rounds.py` with
+its reason written down.
+
+### Two things found while building it
+- **A window shorter than its content stops drawing widgets.** v3.51.0 fixed
+  that for Save by capping the height and pinning the button row. Capping
+  alone left everything else exposed: on the 1366x768 laptop this app
+  supports on purpose, the editor's ceiling is 614px against content wanting
+  828, and measured at that size the details box and the tag row were **not
+  drawn** — nine controls missing at 520. A ceiling without a scrollbar is a
+  quieter version of the bug the ceiling was added to fix. The editor's form
+  now scrolls, with Save and Cancel outside it; a form that fits shows no
+  scrollbar at all and looks exactly as it did.
+- **Handing an already-waiting task to an agent said nothing about who had
+  it.** Newest-holder-wins is right; the silence was not. It now says *"Was
+  out with Mum; now out with Codex."*
+
 ## 3.51.0 — Waiting on a person, and a Save button you can reach
 The Delegate quadrant got a way to hand a task to an AI agent in v3.44.0, and
 with it the whole *waiting* treatment: a badge, a line under the title saying

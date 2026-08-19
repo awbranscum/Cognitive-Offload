@@ -139,6 +139,15 @@ reinstall from python.org).
 - Sort by priority, creation date, alphabetically, or by completion time.
   Priority sorting keeps open work at the top: unfinished first, pinned first,
   then flagged, then newest.
+- **Break a task into steps.** A task can carry a plan — one step per line in
+  the editor — and the row shows where in it you are (`→ copy the headings
+  across · step 2 of 4`). Ticking a step off moves you down the list and the
+  status line names the next one, so finishing a step is never followed by
+  deciding what to do. There is still only one "what next" on a task: with a
+  plan, the first step **is** the step you are on, so everything that already
+  read the first step — the row, the start dialog, the ranking — keeps
+  working without knowing plans exist. A repeating task with steps is a
+  routine: the plan comes back each round, your place in it does not.
 - **Waiting on someone.** Say who has a task and when you will check back, in
   the task editor on either tab. It keeps its badge, its place in the list and
   its place in every search — and stops being offered as the next thing to

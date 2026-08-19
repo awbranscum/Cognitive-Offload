@@ -26,13 +26,23 @@ from cognitive_offload.rows import task_row
 CARRIED = {
     "text": "the task is the same task",
     "description": "notes about the task, not about one round of it",
-    "first_step": "the way in does not change between rounds",
     "kind": "how it feels to start does not change",
     "tags": "how you file it does not change",
     "priority": "flagged is a property of the task",
     "pinned": "pinned is a property of the task",
     "estimate_minutes": "the guess is about the work, not the round",
     "repeat": "it would stop repeating after one round",
+    "steps": "the plan describes the task, so every round gets the whole of "
+             "it — this is exactly why the model keeps a cursor instead of "
+             "consuming steps, since steps popped off could not come back",
+}
+# Neither carried nor reset: worked out from the two above. `first_step` is
+# ordinary setup on a task with no plan, and *is* `steps[steps_done]` on a
+# task with one — so a round that resets the cursor moves it, and a round of
+# a task without a plan does not touch it. This category exists because the
+# net refused to accept it as plain setup, which was the correct answer.
+DERIVED = {
+    "first_step": "the way in, which the plan defines when there is a plan",
 }
 # Decided per round, never inherited.
 PER_ROUND = {
@@ -40,6 +50,9 @@ PER_ROUND = {
     "handed_to": "the next round was never handed to anyone",
     "handed_off_on": "as above",
     "follow_up_on": "as above",
+    "steps_done": "how far down the plan you got last week says nothing about "
+                  "this week; next round starts at step one, which is what "
+                  "makes a repeating task with steps a routine",
 }
 # Neither: the next round is a new, unfinished record on its own day.
 FRESH = {
@@ -62,6 +75,9 @@ def a_repeating_task(**kw) -> Task:
         pinned=True,
         estimate_minutes=5,
         repeat="weekly",
+        steps=["wheel it to the kerb", "put the food caddy on top",
+               "bring the bin back in"],
+        steps_done=1,
         scheduled_for="2026-08-21",
         snoozed_until="2026-08-20",
         handed_to="Claude Desktop",
@@ -77,7 +93,7 @@ class ClassificationTests(unittest.TestCase):
         """The guard that catches the next one. A field added to Task must be
         put in exactly one of the three lists above — which is a decision
         someone has to make, not a default they can drift past."""
-        classified = set(CARRIED) | set(PER_ROUND) | set(FRESH)
+        classified = set(CARRIED) | set(DERIVED) | set(PER_ROUND) | set(FRESH)
         actual = {f.name for f in dataclasses.fields(Task)}
         self.assertEqual(
             actual - classified, set(),
@@ -88,17 +104,31 @@ class ClassificationTests(unittest.TestCase):
                          "classified but no longer a field on Task")
 
     def test_no_field_is_in_two_lists(self):
-        self.assertEqual(len(CARRIED) + len(PER_ROUND) + len(FRESH),
-                         len({*CARRIED, *PER_ROUND, *FRESH}))
+        self.assertEqual(
+            len(CARRIED) + len(DERIVED) + len(PER_ROUND) + len(FRESH),
+            len({*CARRIED, *DERIVED, *PER_ROUND, *FRESH}))
 
     def test_the_code_and_this_file_agree_on_what_is_per_round(self):
-        """The app clears `PER_ROUND_FIELDS`; this file says which they are.
+        """The app resets `PER_ROUND_FIELDS`; this file says which they are.
         Two lists of the same thing is how the original bug happened, so they
         are asserted equal rather than both maintained by hand."""
         self.assertEqual(set(PER_ROUND_FIELDS), set(PER_ROUND))
 
+    def test_each_reset_value_matches_the_type_of_its_field(self):
+        """`PER_ROUND_FIELDS` became a mapping when a numeric field joined it.
+        A list of names could only ever blank things to "", which would have
+        put a string where an int belongs and been found much later, by
+        something else."""
+        for name, blank in PER_ROUND_FIELDS.items():
+            field = {f.name: f for f in dataclasses.fields(Task)}[name]
+            default = (field.default_factory() if field.default_factory
+                       is not dataclasses.MISSING else field.default)
+            with self.subTest(field=name):
+                self.assertIs(type(blank), type(default))
+
     def test_every_classification_carries_a_reason(self):
-        for reason in [*CARRIED.values(), *PER_ROUND.values(), *FRESH.values()]:
+        for reason in [*CARRIED.values(), *DERIVED.values(),
+                       *PER_ROUND.values(), *FRESH.values()]:
             self.assertTrue(reason.strip())
 
 
@@ -130,9 +160,28 @@ class NextRoundTests(unittest.TestCase):
     def test_per_round_state_does_not(self):
         for name in sorted(PER_ROUND):
             with self.subTest(field=name):
-                self.assertEqual(getattr(self.next, name), "",
+                self.assertEqual(getattr(self.next, name),
+                                 PER_ROUND_FIELDS[name],
                                  f"{name} was inherited by a round it was "
                                  f"never set in")
+
+    def test_a_task_with_no_plan_carries_its_first_step_unchanged(self):
+        """The derived case is the exception, not the rule: with no plan
+        `first_step` is ordinary setup and must survive the round exactly as
+        `kind` and `estimate_minutes` do."""
+        plain = a_repeating_task(steps=[], steps_done=0,
+                                 first_step="wheel it to the kerb")
+        self.assertEqual(plain.next_instance("2026-08-19").first_step,
+                         "wheel it to the kerb")
+
+    def test_the_next_round_starts_at_the_top_of_its_plan(self):
+        """Not just the cursor: `first_step` is defined as the step the
+        cursor points at, and the resets happen after construction — so
+        without a re-fix the new round would show last week's final step
+        while claiming to be at step one."""
+        self.assertEqual(self.next.steps, self.task.steps)
+        self.assertEqual(self.next.steps_done, 0)
+        self.assertEqual(self.next.first_step, self.task.steps[0])
 
     def test_the_next_round_is_a_new_unfinished_record(self):
         self.assertNotEqual(self.next.id, self.task.id)

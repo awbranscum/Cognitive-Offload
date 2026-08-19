@@ -53,15 +53,30 @@ def _shared_badges(item) -> list[Badge]:
     return badges
 
 
-def _step_or_summary(first_step: str, body: str) -> str:
+def _step_or_summary(item, body: str) -> str:
     """The line under a task title, in one place for both tabs.
 
     This module's whole reason for existing is that these two subtitles were
     copy-pasted; the drift then arrived exactly as predicted, when the matrix
     copy moved inside a conditional and fell off the wording snapshot while
     the identical string in the main list kept it looking covered.
+
+    A task with a plan says where in it you are. That is the whole visible
+    difference between a task and a wall: "step 2 of 5" is evidence you are
+    part-way through something, on the row, without opening anything. It
+    counts what exists, never what is missing, and it appears only when
+    there is a plan to be part-way through.
     """
+    first_step = getattr(item, "first_step", "")
     if first_step:
+        steps = getattr(item, "steps", None) or []
+        # `if steps:` and not `len(steps) > 1:` — the model collapses a plan
+        # of one back into a plain first step, so the longer test could never
+        # tell a different story here. A branch no fixture can reach is a
+        # branch nothing can check.
+        if steps:
+            place = f"step {getattr(item, 'steps_done', 0) + 1} of {len(steps)}"
+            return f"→ {first_step} · {place}"
         return f"→ {first_step}"
     body = (body or "").strip()
     return body.splitlines()[0][:80] if body else ""
@@ -73,8 +88,7 @@ def _subtitle(item, body: str) -> str:
     The waiting line wins: the first step belongs to whoever has the task
     now, and showing it would read as something still on your own plate.
     """
-    return waiting_line(item) or _step_or_summary(
-        getattr(item, "first_step", ""), body)
+    return waiting_line(item) or _step_or_summary(item, body)
 
 
 def task_row(task: Task) -> Row:

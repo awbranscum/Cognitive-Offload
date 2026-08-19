@@ -729,6 +729,7 @@ class CognitiveOffloadApp(tk.Tk):
             snoozed_until=task.snoozed_until,
             handed_to=task.handed_to,
             follow_up_on=task.follow_up_on,
+            rest_of_plan=task.rest_of_plan,
             window_title="Edit task",
             with_tags=True,
         ).show()
@@ -738,7 +739,13 @@ class CognitiveOffloadApp(tk.Tk):
         task.text = result["title"]
         task.description = result["content"]
         task.tags = result["tags"]
-        task.first_step = result["first_step"]
+        # set_current_step rather than a plain assignment: on a task with a
+        # plan the step box IS the current line of it, and writing only to
+        # first_step would leave the two disagreeing until the next load
+        # silently reverted the edit.
+        task.set_current_step(result["first_step"])
+        task.set_rest(result.get("rest_of_plan", task.rest_of_plan))
+        advanced = bool(result.get("step_done")) and task.advance_step()
         task.kind = result["kind"]
         task.scheduled_for = result["scheduled_for"]
         task.estimate_minutes = result.get("estimate_minutes", task.estimate_minutes)
@@ -754,8 +761,14 @@ class CognitiveOffloadApp(tk.Tk):
             task.follow_up_on = result.get("check_back", "")
         self.refresh_tasks()
         self.mark_dirty()
-        self.set_status(f"Waiting on {waiting_on}. Ctrl+Z undoes it."
-                        if waiting_on else "Task updated.")
+        if waiting_on:
+            self.set_status(f"Waiting on {waiting_on}. Ctrl+Z undoes it.")
+        elif advanced:
+            # Says what is next, not how many are left: a count of what
+            # remains is a debt, and the next step is a way in.
+            self.set_status(f"Next: {task.first_step}")
+        else:
+            self.set_status("Task updated.")
 
     def promote_selected(self) -> None:
         """Pin the selection above everything open (or unpin it again).
@@ -951,6 +964,9 @@ class CognitiveOffloadApp(tk.Tk):
         try:
             created = self.matrix.create(category, result["title"], result["content"])
             created.first_step = result["first_step"]
+            created.set_rest(result.get("rest_of_plan", []))
+            # step_done cannot be set on a task that did not exist a moment
+            # ago: the dialog draws no checkbox with nothing to move on from.
             created.kind = result["kind"]
             # The dialog offers a guess and a repeat, so it has to keep them.
             # It did not: a new quadrant task filled in as "about 25 minutes,
@@ -996,6 +1012,7 @@ class CognitiveOffloadApp(tk.Tk):
             snoozed_until=task.snoozed_until,
             handed_to=task.handed_to,
             follow_up_on=task.follow_up_on,
+            rest_of_plan=task.rest_of_plan,
             window_title="Edit matrix task",
         ).show()
         if not result:
@@ -1005,7 +1022,9 @@ class CognitiveOffloadApp(tk.Tk):
         before = [task.copy()]
         waiting_on = result.get("waiting_on", "")
         try:
-            task.first_step = result["first_step"]
+            task.set_current_step(result["first_step"])
+            task.set_rest(result.get("rest_of_plan", task.rest_of_plan))
+            advanced = bool(result.get("step_done")) and task.advance_step()
             task.kind = result["kind"]
             task.scheduled_for = result["scheduled_for"]
             task.estimate_minutes = result.get("estimate_minutes", task.estimate_minutes)
@@ -1026,8 +1045,12 @@ class CognitiveOffloadApp(tk.Tk):
             return
         self._undo_matrix_change("edit matrix task", before, [task.id])
         self.refresh_matrix()
-        self.set_status(f"Waiting on {waiting_on}. Ctrl+Z undoes it."
-                        if waiting_on else "Matrix task updated.")
+        if waiting_on:
+            self.set_status(f"Waiting on {waiting_on}. Ctrl+Z undoes it.")
+        elif advanced:
+            self.set_status(f"Next: {task.first_step}")
+        else:
+            self.set_status("Matrix task updated.")
 
     def hand_off_matrix_task(self, category: str) -> None:
         """Write a brief for an agent, and mark the task as waiting.
@@ -1065,6 +1088,12 @@ class CognitiveOffloadApp(tk.Tk):
 
         before = [task.copy()]
         handed_on = today_iso()
+        # Who had it a moment ago. Newest-holder-wins is the right behaviour;
+        # doing it in silence is not — before the editor could mark a wait,
+        # the only way to reach this was to hand an agent's task to another
+        # agent, and now anyone you were waiting on can be replaced by a
+        # click that never mentions them.
+        previous = task.handed_to
         try:
             self.matrix.set_handoff(
                 task, target.label, handed_on,
@@ -1083,7 +1112,11 @@ class CognitiveOffloadApp(tk.Tk):
         self._undo_matrix_change("hand a task over", before, [task.id])
         self.refresh_matrix()
         HandoffDoneDialog(self, target, path, command).show()
-        self.set_status(f"Handed to {target.label}. Ctrl+Z undoes it.")
+        if previous and previous != target.label:
+            self.set_status(f"Was out with {previous}; now out with "
+                            f"{target.label}. Ctrl+Z undoes it.")
+        else:
+            self.set_status(f"Handed to {target.label}. Ctrl+Z undoes it.")
 
     def take_back_matrix_task(self, category: str) -> None:
         """Clear the waiting mark. Not a failure, and never described as one."""

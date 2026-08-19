@@ -45,6 +45,20 @@ def _labels(widget):
     return found
 
 
+def _controls(widget):
+    """Every widget that a person could need to see or reach."""
+    from tkinter import ttk
+
+    kinds = (ttk.Label, ttk.Entry, ttk.Button, ttk.Checkbutton, ttk.Combobox,
+             ttk.Radiobutton, tk.Text)
+    found = []
+    for child in widget.winfo_children():
+        if isinstance(child, kinds):
+            found.append(child)
+        found.extend(_controls(child))
+    return found
+
+
 def _buttons(widget):
     """Every ttk.Button anywhere inside, at any depth."""
     from tkinter import ttk
@@ -97,6 +111,7 @@ class ReachableSaveTests(unittest.TestCase):
         return self._opened(
             with_tags=True, snoozed_until="2099-01-01",
             content="They said four to six weeks.",
+            rest_of_plan=["reread the rejection letter", "ring them"],
             first_step="find the reference number in the confirmation email")
 
     def test_save_is_drawn_at_all(self):
@@ -123,16 +138,52 @@ class ReachableSaveTests(unittest.TestCase):
                                 min(dialog.winfo_reqheight(),
                                     dialog._max_height))
 
-    def test_a_ceiling_takes_the_room_from_the_notes_not_from_the_buttons(self):
-        """On a screen too short for the content something has to give. It
-        must be the box you can scroll, not the button you cannot reach."""
+    def test_a_window_too_short_for_the_form_scrolls_instead_of_dropping_it(self):
+        """The general form of the bug, not just its first symptom.
+
+        Capping the height fixed Save and left everything else exposed: Tk's
+        answer to a window shorter than its content is to stop placing
+        widgets, so on the 1366x768 laptop this app supports on purpose the
+        editor's ceiling is 614 against content wanting 828 — measured, the
+        details box and the tag row were not drawn at 614, and nine controls
+        were missing at 520. A ceiling without a scrollbar is a quieter
+        version of the bug the ceiling was added to fix.
+        """
+        for height in (700, 614, 520):
+            dialog = self._fullest()
+            dialog.geometry(f"520x{height}")
+            dialog.update()
+            with self.subTest(window=height):
+                missing = [type(w).__name__ for w in _controls(dialog)
+                           if not w.winfo_ismapped()]
+                self.assertEqual(missing, [], "widgets were never placed")
+                self.assertTrue(dialog._vbar.winfo_ismapped(),
+                                "no scrollbar, so the overflow is unreachable")
+
+    def test_save_does_not_scroll_away_with_the_form(self):
+        """The button row has to sit OUTSIDE the scrolling area. Inside it,
+        Save is merely somewhere in a long page — which is the same failure
+        as not drawing it, dressed up as a feature. Checked at the top of
+        the scroll, where a row packed inside the form is furthest away.
+        """
         dialog = self._fullest()
         dialog.geometry("520x520")
         dialog.update()
+        dialog._canvas.yview_moveto(0)
+        dialog.update()
         [save] = [b for b in _buttons(dialog) if b.cget("text") == "Save"]
         self.assertTrue(save.winfo_ismapped())
-        self.assertLess(dialog.content_text.winfo_height(), 154,
-                        "the notes box did not give up the room")
+        top = save.winfo_rooty() - dialog.winfo_rooty()
+        self.assertLessEqual(top + save.winfo_height(), dialog.winfo_height())
+        self.assertGreater(top, dialog._canvas.winfo_height() - 4,
+                           "Save is inside the scrolling form")
+
+    def test_a_form_that_fits_shows_no_scrollbar_at_all(self):
+        """The other half: the scrollbar is for the case that needs it. A
+        permanent one on a dialog that fits is a control that does nothing,
+        which is exactly what this app spends its effort removing."""
+        dialog = self._fullest()
+        self.assertFalse(dialog._vbar.winfo_ismapped())
 
     def test_every_dialog_with_a_button_row_still_draws_it(self):
         """The row moved out of the body for every dialog, not just this one."""

@@ -56,6 +56,10 @@ OUTPUT_EXEMPT = {
         "a task that does not exist yet cannot be excused from suggestions, "
         "so the dialog never draws the control and always returns False",
     ("add_matrix_task", "take_back"): "as above — nothing to take back yet",
+    ("add_matrix_task", "step_done"):
+        "the tick-off checkbox is drawn only when there is a step after this "
+        "one, and a task being created has no plan yet, so it always returns "
+        "False",
 }
 
 

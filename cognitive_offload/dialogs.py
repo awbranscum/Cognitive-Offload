@@ -31,7 +31,7 @@ from .handoff import (
     follow_up_date,
     target_for,
 )
-from .queries import suggest_tasks
+from .queries import split_lines, suggest_tasks
 from .storage import CATEGORIES, CATEGORY_KEYS
 from .theme import SIZE_BASE, SIZE_LG, SIZE_SM, font, px, style_text, tokens
 
@@ -66,6 +66,11 @@ class ModalDialog(tk.Toplevel):
         self._max_height = None
         self.body = ttk.Frame(self, padding=12)
         self.body.pack(fill="both", expand=True)
+        #: the frame packed directly on the window. A subclass may replace
+        #: ``self.body`` with something nested (see TaskEditorDialog, which
+        #: puts a scrolling canvas in between), and the button row still has
+        #: to pack against the WINDOW rather than inside whatever that is.
+        self._outer = self.body
         self.protocol("WM_DELETE_WINDOW", self.cancel)
         # "or \"break\"" stops the global Escape binding from also pausing a
         # running session behind the dialog.
@@ -96,10 +101,10 @@ class ModalDialog(tk.Toplevel):
         body is re-packed to take the rest: whatever else has to give, the
         way out of the dialog does not.
         """
-        row = ttk.Frame(self.body.master, padding=(12, 0, 12, 12))
-        self.body.pack_forget()
+        row = ttk.Frame(self, padding=(12, 0, 12, 12))
+        self._outer.pack_forget()
         row.pack(side="bottom", fill="x")
-        self.body.pack(fill="both", expand=True)
+        self._outer.pack(fill="both", expand=True)
         ttk.Button(row, text="Cancel", style="Outline.TButton", command=self.cancel).pack(side="right")
         ttk.Button(row, text=ok_text, style="Default.TButton", command=self.ok).pack(
             side="right", padx=(0, 8)
@@ -166,6 +171,7 @@ class TaskEditorDialog(ModalDialog):
         snoozed_until: str = "",
         handed_to: str = "",
         follow_up_on: str = "",
+        rest_of_plan: list[str] | None = None,
         window_title: str = "Task",
         with_tags: bool = False,
     ):
@@ -179,6 +185,7 @@ class TaskEditorDialog(ModalDialog):
         # worse.
         super().__init__(parent, window_title, size=(520, None))
         self._max_height = int(self.winfo_screenheight() * 0.8)
+        self._make_scrollable()
         ttk.Label(self.body, text="Title").pack(anchor="w")
         self.title_entry = ttk.Entry(self.body)
         self.title_entry.pack(fill="x", pady=(2, 10))
@@ -196,6 +203,39 @@ class TaskEditorDialog(ModalDialog):
             wraplength=px(self, 470),
             justify="left",
         ).pack(anchor="w", pady=(2, 10))
+
+        # The plan, under the step it heads. The step box owns ONE line and
+        # this owns the rest, so neither can overwrite the other's — which is
+        # why the model keeps the current step out of `rest_of_plan` rather
+        # than showing the whole list twice and picking a winner.
+        rest = list(rest_of_plan or [])
+        ttk.Label(self.body, text="The rest of the plan").pack(anchor="w")
+        self.plan_text = tk.Text(self.body, height=3, wrap="word", undo=True)
+        style_text(self.plan_text)
+        # Not expand=True: pack squeezes the LATER slave when the window is
+        # short, so making this one expand as well changed nothing except to
+        # imply it shares the loss. It does not — see FINDING AR.
+        self.plan_text.pack(fill="x", pady=(2, 0))
+        self.plan_text.insert("1.0", "\n".join(rest))
+        plan_hint = (
+            "One step per line, in order. Optional — and only the top one has "
+            "to be any good."
+        )
+        ttk.Label(self.body, text=plan_hint, style="Muted.TLabel",
+                  wraplength=px(self, 470), justify="left").pack(
+            anchor="w", pady=(2, 10))
+
+        # Ticking a step off is the only thing that moves you down the plan,
+        # and it lives here rather than on the list because it is a decision
+        # about the task, not about the screen.
+        self.step_done_var = None
+        if rest:
+            self.step_done_var = tk.BooleanVar(value=False)
+            ttk.Checkbutton(
+                self.body,
+                text=f"Done — move on to \"{rest[0]}\"",
+                variable=self.step_done_var,
+            ).pack(anchor="w", pady=(0, 10))
 
         row = ttk.Frame(self.body)
         row.pack(fill="x")
@@ -291,7 +331,9 @@ class TaskEditorDialog(ModalDialog):
                 anchor="w", pady=(2, 10))
 
         ttk.Label(self.body, text="Details").pack(anchor="w")
-        self.content_text = tk.Text(self.body, height=8, wrap="word", undo=True)
+        # Six lines rather than eight: the plan box above took two, and the
+        # details box was the more generously sized of the pair.
+        self.content_text = tk.Text(self.body, height=6, wrap="word", undo=True)
         style_text(self.content_text)
         self.content_text.pack(fill="both", expand=True, pady=(2, 10))
         self.content_text.insert("1.0", content)
@@ -306,6 +348,81 @@ class TaskEditorDialog(ModalDialog):
         self.button_row("Save")
         self.title_entry.focus_set()
         self.title_entry.bind("<Return>", lambda _e: self.step_entry.focus_set())
+
+    def _make_scrollable(self) -> None:
+        """Put a scrolling canvas between the window and the form.
+
+        This dialog is the one that grows. It is already the tallest in the
+        app and it gains a row every time a task learns something new, and
+        the app supports a 1366x768 laptop on purpose — `_fit_to_screen`
+        exists because the main window used to open 113px past the bottom of
+        one. Measured on that screen the fullest editor wants 828px against a
+        614px ceiling, and Tk's answer to a window shorter than its content
+        is to stop placing widgets: at 614 the details box and the tag row
+        were simply not drawn, at 520 nine controls were missing.
+
+        A ceiling without a scrollbar is just a quieter version of the bug
+        this dialog was fixed for one release ago. Content that fits looks
+        exactly as it did — the canvas is sized to the form and the scrollbar
+        stays hidden.
+        """
+        host = self.body
+        self._canvas = tk.Canvas(host, highlightthickness=0, borderwidth=0,
+                                 background=tokens().background)
+        self._vbar = ttk.Scrollbar(host, orient="vertical",
+                                   command=self._canvas.yview)
+        self._canvas.configure(yscrollcommand=self._on_scrolled)
+        self._canvas.pack(side="left", fill="both", expand=True)
+        form = ttk.Frame(self._canvas)
+        self._form_window = self._canvas.create_window((0, 0), window=form,
+                                                       anchor="nw")
+        self._canvas.bind(
+            "<Configure>",
+            lambda e: self._canvas.itemconfigure(self._form_window, width=e.width))
+        form.bind("<Configure>", lambda _e: self._canvas.configure(
+            scrollregion=self._canvas.bbox("all")))
+        for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            # On the window, so the wheel works wherever the pointer is.
+            self.bind(sequence, self._on_wheel)
+        # Everything built from here lands in the scrolling form instead.
+        self.body = form
+
+    def _on_scrolled(self, first: str, last: str) -> None:
+        """Show the scrollbar only when there is something to scroll to."""
+        if float(first) <= 0.0 and float(last) >= 1.0:
+            self._vbar.pack_forget()
+        else:
+            self._vbar.pack(side="right", fill="y")
+        self._vbar.set(first, last)
+
+    def _on_wheel(self, event):
+        if getattr(event, "num", None) == 4:
+            delta = -1
+        elif getattr(event, "num", None) == 5:
+            delta = 1
+        else:
+            delta = -1 if event.delta > 0 else 1
+        self._canvas.yview_scroll(delta, "units")
+
+    def _fit_to_content(self) -> None:
+        """Ask for the height the form wants, then let the ceiling bite.
+
+        The canvas is what stands between the window and the form, so it is
+        the thing that has to *request* the form's full height — otherwise
+        the window fits itself to a canvas of no particular size. Once the
+        ceiling caps the window, the canvas is the widget that gives, and
+        the scrollbar covers the difference.
+        """
+        self.update_idletasks()
+        self._canvas.configure(height=self.body.winfo_reqheight())
+        # Tk recomputes the window's requested height from its children in an
+        # idle task, and the base class reads that number — so without this
+        # the first fit sizes the window to the canvas's OLD height and only
+        # a second call gets it right.
+        self.update_idletasks()
+        super()._fit_to_content()
+        self.update_idletasks()
+        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
 
     def _warn_about_date(self, entry) -> None:
         """One sentence, both date fields. Said twice it would drift once."""
@@ -358,6 +475,11 @@ class TaskEditorDialog(ModalDialog):
             "take_back": bool(self.unwait_var and self.unwait_var.get()),
             "waiting_on": waiting_on,
             "check_back": check_back,
+            # split_lines already strips bullets, checkboxes and the "[time]"
+            # prefix quick capture adds, which is exactly what someone pastes
+            # in here from a note they made earlier.
+            "rest_of_plan": split_lines(self.plan_text.get("1.0", "end")),
+            "step_done": bool(self.step_done_var and self.step_done_var.get()),
         }
         if self.tags_entry is not None:
             tags = [t.strip().lower() for t in self.tags_entry.get().split(",")]
