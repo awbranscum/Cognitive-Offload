@@ -69,17 +69,28 @@ def _step_or_summary(item, body: str) -> str:
     """
     first_step = getattr(item, "first_step", "")
     if first_step:
-        steps = getattr(item, "steps", None) or []
-        # `if steps:` and not `len(steps) > 1:` — the model collapses a plan
-        # of one back into a plain first step, so the longer test could never
-        # tell a different story here. A branch no fixture can reach is a
-        # branch nothing can check.
-        if steps:
-            place = f"step {getattr(item, 'steps_done', 0) + 1} of {len(steps)}"
-            return f"→ {first_step} · {place}"
-        return f"→ {first_step}"
+        place = plan_place(item)
+        return f"→ {first_step} · {place}" if place else f"→ {first_step}"
     body = (body or "").strip()
     return body.splitlines()[0][:80] if body else ""
+
+
+def plan_place(item) -> str:
+    """"step 2 of 4", or "" for a task with no plan.
+
+    Said in one place because two screens say it now — the row and the
+    session-end dialog — and this module exists precisely because the last
+    sentence that lived in two places drifted.
+
+    `if steps:` and not `len(steps) > 1:` — the model collapses a plan of one
+    back into a plain first step, so the longer test could never tell a
+    different story. A branch no fixture can reach is a branch nothing can
+    check.
+    """
+    steps = getattr(item, "steps", None) or []
+    if not steps:
+        return ""
+    return f"step {getattr(item, 'steps_done', 0) + 1} of {len(steps)}"
 
 
 def _subtitle(item, body: str) -> str:

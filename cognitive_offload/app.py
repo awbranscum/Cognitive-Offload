@@ -52,7 +52,7 @@ from .storage import (
     category_label,
     display_path,
 )
-from .rows import focus_caption, matrix_row, sort_label
+from .rows import focus_caption, matrix_row, plan_place, sort_label
 from .theme import apply_theme, px, style_text, tokens
 from .timer import FocusTimer
 from .undo import UndoStack
@@ -1730,19 +1730,31 @@ class CognitiveOffloadApp(tk.Tk):
                 answer = SessionEndDialog(self, message, task.text,
                                           self.config_store.break_minutes,
                                           first_step=task.first_step,
-                                          parked=parked).show() or {}
+                                          parked=parked,
+                                          rest_of_plan=task.rest_of_plan,
+                                          place=plan_place(task)).show() or {}
                 choice = answer.get("choice", "carry_on")
                 next_step = answer.get("next_step", "")
+                step_done = bool(answer.get("step_done"))
             else:
+                step_done = False
                 choice = "break" if messagebox.askyesno(
                     "Session finished",
                     presenter.break_offer(message, self.config_store.break_minutes),
                 ) else "carry_on"
 
-        if task is not None and choice != "done" and next_step:
+        if task is not None and choice != "done" and (next_step or step_done):
             # Tomorrow's start is already written, while it is still obvious.
             self.push_undo("hand off")
-            task.first_step = next_step
+            # Reword first, then move on — the same order as the task editor,
+            # because the dialog now asks the same question it does: the box
+            # holds what THIS step says, not a description of the next one.
+            # The old blank field conflated the two, so on a task with a plan
+            # the honest answer overwrote the wrong line.
+            if next_step:
+                task.set_current_step(next_step)
+            if step_done:
+                task.advance_step()
             self.refresh_tasks()
             self.mark_dirty()
 

@@ -194,6 +194,50 @@ class TheInvariantTests(unittest.TestCase):
         self.assertTrue(planned().is_ready)
 
 
+class FindingItAgainTests(unittest.TestCase):
+    """Search read the title, the details, the CURRENT step and the tags —
+    so a plan's later steps were invisible to it. The app says out loud that
+    a task stays "in every search"; a step you typed and cannot find teaches
+    you to distrust the whole box."""
+
+    def setUp(self):
+        self.task = Task(text="Write the quarterly report",
+                         description="for the board")
+        self.task.set_rest(PLAN[:2] + ["ring the insurance company about the excess"])
+
+    def test_a_step_you_have_not_reached_yet_is_findable(self):
+        self.assertTrue(self.task.matches("insurance"))
+
+    def test_a_step_you_have_already_passed_is_still_findable(self):
+        self.task.advance_step()
+        self.task.advance_step()
+        self.assertTrue(self.task.matches(PLAN[0]))
+
+    def test_the_things_that_always_matched_still_do(self):
+        for term in ("quarterly", "board", PLAN[0], "QUARTERLY"):
+            with self.subTest(term=term):
+                self.assertTrue(self.task.matches(term))
+
+    def test_it_has_not_started_matching_everything(self):
+        for term in ("mortgage", "zzz"):
+            with self.subTest(term=term):
+                self.assertFalse(self.task.matches(term))
+
+    def test_a_task_with_no_plan_is_unaffected(self):
+        plain = Task(text="Bins", first_step="wheel it to the kerb")
+        self.assertTrue(plain.matches("kerb"))
+        self.assertFalse(plain.matches("insurance"))
+
+    def test_the_visible_list_finds_it_too(self):
+        """The wiring, not just the predicate: `filter_tasks` is what the
+        search box actually calls."""
+        from cognitive_offload.queries import visible_tasks
+
+        other = Task(text="Book the dentist")
+        found = visible_tasks([self.task, other], search="insurance")
+        self.assertEqual([t.text for t in found], ["Write the quarterly report"])
+
+
 class WhatTheRowSaysTests(unittest.TestCase):
     def test_a_task_with_a_plan_says_where_in_it_you_are(self):
         task = planned(first_step=PLAN[0])
@@ -481,3 +525,166 @@ class FieldCoverageTests(unittest.TestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+
+@unittest.skipUnless(_display_available(), "tkinter display not available")
+class SessionEndTests(unittest.TestCase):
+    """The end of a block asks a task with a plan a different question.
+
+    Two things can have happened in the last fifteen minutes — you finished
+    this step, or you did not — and one blank field labelled "where does it
+    pick up next time?" conflated them. On a task with a plan it invited a
+    description of the NEXT step while the cursor was still on this one, so
+    typing the honest answer overwrote the wrong line.
+    """
+
+    def setUp(self):
+        from cognitive_offload.theme import apply_theme
+
+        self.root = tk.Tk()
+        self.root.withdraw()
+        apply_theme(self.root, "light")
+        self.addCleanup(self.root.destroy)
+
+    def _dialog(self, **kw):
+        from cognitive_offload.dialogs import SessionEndDialog
+
+        kw.setdefault("first_step", PLAN[0])
+        dialog = SessionEndDialog(self.root, "15 minutes banked.",
+                                  "Write the quarterly report", 5, **kw)
+        self.addCleanup(dialog.destroy)
+        return dialog
+
+    def _labels(self, dialog):
+        from tkinter import ttk
+
+        found = []
+
+        def walk(widget):
+            for child in widget.winfo_children():
+                if isinstance(child, (ttk.Label, ttk.Checkbutton)):
+                    found.append(child.cget("text"))
+                walk(child)
+
+        walk(dialog)
+        return found
+
+    def test_a_task_with_no_plan_is_asked_exactly_what_it_always_was(self):
+        dialog = self._dialog()
+        self.assertEqual(dialog.next_entry.get(), "")
+        self.assertIsNone(dialog.step_done_var)
+        text = " ".join(self._labels(dialog))
+        self.assertIn("Where does it pick up next time?", text)
+        self.assertIn(f"was: {PLAN[0]}", text)
+
+    def test_a_task_with_a_plan_is_shown_the_step_it_is_on(self):
+        """Prefilled, so accepting it unchanged means what it looks like:
+        nothing. A blank box at the tired end of a block is a question; a
+        filled one is a confirmation."""
+        dialog = self._dialog(rest_of_plan=PLAN[1:], place="step 1 of 4")
+        self.assertEqual(dialog.next_entry.get(), PLAN[0])
+        text = " ".join(self._labels(dialog))
+        self.assertIn("What does this step say now?", text)
+        self.assertIn("step 1 of 4", text)
+        self.assertNotIn("was:", text)
+        # "Leave it blank" is an invitation on an empty box and a lie on a
+        # filled one: blanking a prefilled step changes nothing.
+        self.assertNotIn("Leave it blank", text)
+        self.assertIn("leaving it as it is is an answer", text)
+
+    def test_the_tick_box_appears_and_names_the_step_it_moves_to(self):
+        dialog = self._dialog(rest_of_plan=PLAN[1:], place="step 1 of 4")
+        self.assertIsNotNone(dialog.step_done_var)
+        self.assertTrue(any(PLAN[1] in text for text in self._labels(dialog)))
+
+    def test_the_last_step_offers_no_tick_box(self):
+        """There is nowhere to move on to, and a checkbox that does nothing
+        is worse than no checkbox."""
+        dialog = self._dialog(rest_of_plan=[], place="step 4 of 4")
+        self.assertIsNone(dialog.step_done_var)
+
+    def test_every_way_out_reports_whether_the_step_was_finished(self):
+        for method in ("_keep_step", "cancel"):
+            dialog = self._dialog(rest_of_plan=PLAN[1:], place="step 1 of 4")
+            dialog.step_done_var.set(True)
+            getattr(dialog, method)()
+            with self.subTest(exit=method):
+                self.assertTrue(dialog.result["step_done"])
+
+
+@unittest.skipUnless(_display_available(), "tkinter display not available")
+class SessionEndThroughTheAppTests(unittest.TestCase):
+    def setUp(self):
+        from cognitive_offload.app import CognitiveOffloadApp
+        from cognitive_offload.storage import Config
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name)
+        config = Config(root / "config.json")
+        config.db_path = root / "db"
+        config.matrix_db_path = root / "matrix"
+        self.app = CognitiveOffloadApp(config=config)
+        self.app.withdraw()
+        self.addCleanup(self._destroy)
+        self.app.capture_entry.insert(0, "Write the quarterly report")
+        self.app.add_task_from_capture()
+        self.task = self.app.tasks[0]
+        self.task.first_step = PLAN[0]
+        self.task.set_rest(PLAN[1:])
+        self.app._focus_task_id = self.task.id
+
+    def _destroy(self):
+        try:
+            self.app.destroy()
+        except tk.TclError:
+            pass
+
+    def _finish(self, **answer):
+        answer.setdefault("choice", "carry_on")
+        answer.setdefault("next_step", "")
+        answer.setdefault("step_done", False)
+        with mock.patch("cognitive_offload.app.SessionEndDialog") as dialog:
+            dialog.return_value.show.return_value = answer
+            self.app._finish_session(15)
+            return dialog.call_args
+
+    def test_the_dialog_is_told_where_in_the_plan_the_task_is(self):
+        call = self._finish()
+        self.assertEqual(call.kwargs["rest_of_plan"], PLAN[1:])
+        self.assertEqual(call.kwargs["place"], "step 1 of 4")
+        self.assertEqual(call.kwargs["first_step"], PLAN[0])
+
+    def test_ticking_the_box_moves_the_task_on(self):
+        self._finish(step_done=True)
+        self.assertEqual(self.task.steps_done, 1)
+        self.assertEqual(self.task.first_step, PLAN[1])
+
+    def test_typing_rewords_the_step_you_were_on_not_a_later_one(self):
+        """The bug the redesign exists for: the old field described the NEXT
+        step while the cursor was still on this one."""
+        self._finish(next_step="open the one from last quarter")
+        self.assertEqual(self.task.steps[0], "open the one from last quarter")
+        self.assertEqual(self.task.steps[1], PLAN[1], "a later step was rewritten")
+        self.assertEqual(self.task.steps_done, 0)
+
+    def test_rewording_and_finishing_do_both_in_the_right_order(self):
+        self._finish(next_step="open last quarter's instead", step_done=True)
+        self.assertEqual(self.task.steps[0], "open last quarter's instead")
+        self.assertEqual(self.task.steps_done, 1)
+        self.assertEqual(self.task.first_step, PLAN[1])
+
+    def test_answering_nothing_changes_nothing(self):
+        before = (list(self.task.steps), self.task.steps_done)
+        self._finish()
+        self.assertEqual((list(self.task.steps), self.task.steps_done), before)
+
+    def test_marking_the_task_done_does_not_also_walk_the_plan(self):
+        self._finish(choice="done", step_done=True)
+        self.assertTrue(self.task.done)
+        self.assertEqual(self.task.steps_done, 0)
+
+    def test_undo_reaches_it(self):
+        self._finish(step_done=True)
+        self.app.undo()
+        self.assertEqual(self.app.tasks[0].steps_done, 0)

@@ -130,6 +130,12 @@ class Brief:
     estimate_minutes: int = 0
     tags: tuple = ()
     note: str = ""
+    #: the whole plan, and how far down it the person had got. Sending only
+    #: the step they were on was the same hand-written-list rot that this
+    #: file's three predecessors caught: an agent handed a task broken into
+    #: four steps received one of them and no hint the rest existed.
+    steps: tuple = ()
+    steps_done: int = 0
     created_on: str = field(default_factory=today_iso)
 
     def filename(self, suffix: str) -> str:
@@ -152,6 +158,8 @@ def build_brief(task, note: str = "", today: str | None = None) -> Brief:
         due=getattr(task, "scheduled_for", "") or "",
         estimate_minutes=int(getattr(task, "estimate_minutes", 0) or 0),
         tags=tuple(getattr(task, "tags", ()) or ()),
+        steps=tuple(getattr(task, "steps", ()) or ()),
+        steps_done=int(getattr(task, "steps_done", 0) or 0),
         note=note.strip(),
         created_on=today,
     )
@@ -173,6 +181,28 @@ def _lines_common(brief: Brief) -> list[str]:
     return out
 
 
+def _plan_lines(brief: "Brief") -> list[str]:
+    """The plan as a checklist, with the step to start at marked.
+
+    A checklist because both a person and an agent read one the same way,
+    and the steps already done are shown rather than dropped: they are the
+    difference between "do this job" and "carry on from here", and an agent
+    that redoes step one is doing damage, not work.
+    """
+    out = []
+    for index, step in enumerate(brief.steps):
+        if index < brief.steps_done:
+            out.append(f"- [x] {step}")
+        elif index == brief.steps_done:
+            out.append(f"- [ ] {step}{START_HERE}")
+        else:
+            out.append(f"- [ ] {step}")
+    return out
+
+
+#: marks the step to pick up at, in the one place it is said.
+START_HERE = "  ← start here"
+
 # Said once, in one place, so the markdown and the JSON cannot drift into
 # asking for different things.
 REPORT_BACK = (
@@ -192,6 +222,10 @@ def render_markdown(brief: Brief) -> str:
     facts = _lines_common(brief)
     if facts:
         parts += ["## What I know", ""] + [f"- {line}" for line in facts] + [""]
+    if brief.steps:
+        # Only when there is one: an empty heading is noise in a document
+        # whose whole job is being quick to read.
+        parts += ["## The plan", ""] + _plan_lines(brief) + [""]
     parts += ["## Handing it over", "", REPORT_BACK, ""]
     parts += [f"_Handed over on {brief.created_on} from Cognitive Offload "
               f"(task {brief.task_id[:8]})._", ""]
@@ -212,6 +246,8 @@ def render_json(brief: Brief) -> str:
             "due": brief.due,
             "estimate_minutes": brief.estimate_minutes,
             "tags": list(brief.tags),
+            "steps": list(brief.steps),
+            "steps_done": brief.steps_done,
             "instructions": REPORT_BACK,
         },
         indent=2,

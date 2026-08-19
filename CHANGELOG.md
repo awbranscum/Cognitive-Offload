@@ -5,6 +5,61 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.53.0 — The plan reaches the rest of the app
+v3.52.0 gave a task a plan. This is the pass that asks where a plan needs to
+be visible and finds four places it was not — two of them defects in v3.52.0
+itself, which is the whole argument for auditing a release from outside it.
+
+- **Search reads every step.** It read the title, the details, the step you
+  are *on* and the tags — so a task whose third step said "ring the insurance
+  company about the excess" did not match "insurance". This app says out loud
+  that a task stays "in every search" and that hiding one is the thing it will
+  not do; a step you typed and cannot find is the search box teaching you to
+  distrust it.
+
+- **A handoff brief sends the whole plan**, as a checklist, with the steps
+  already done ticked and the one to pick up at marked. It used to send only
+  the step you were on, which is the difference between "do this job" and
+  "carry on from here" — an agent that redoes step one is doing damage rather
+  than work. The JSON carries `steps` and `steps_done` as data.
+
+  **The guard matters more than the fix.** `build_brief` was a *fourth*
+  hand-written list of fields read off a model, after the two conversions, the
+  per-round resets and the editor's three call sites — and it had gone stale
+  on schedule. `tests/test_handoff.py` is now keyed on
+  `dataclasses.fields(MatrixTask)`: every field either reaches the agent or is
+  named as deliberately not sent, with a reason. Which quadrant you filed it
+  in, how it feels to start, your flag, your pin, a "not today" and how often
+  it repeats are all decisions about *your* day rather than about the work,
+  and the list now says so instead of leaving it unwritten.
+
+- **The end of a session asks a task with a plan a different question.** Two
+  things can have happened in the last fifteen minutes — you finished this
+  step, or you did not — and one blank field labelled *"Where does it pick up
+  next time?"* conflated them: on a task with a plan it invited a description
+  of the **next** step while the cursor was still on this one, so typing the
+  honest answer overwrote the wrong line. A planned task now sees the step it
+  is on, already filled in, with its place underneath and the same *"Done —
+  move on to X"* checkbox the editor has. Accepting it unchanged does nothing,
+  editing rewords, ticking moves on. A task without a plan is untouched.
+
+  The hint changed with it, because "Leave it blank if you would rather not
+  decide now" is an invitation on an empty box and a lie on a filled one.
+
+### Two things v3.52.0's scrolling editor got wrong
+- **The wheel scrolled the notes box *and* the whole dialog.** A `Text`'s own
+  class binding scrolls it and does not return "break", so the event carried
+  on to the window binding as well — measured, one notch moved the text and
+  slid the form by the same amount. Scrolling your own notes now moves your
+  notes. Over a half-empty box the wheel still moves the form, because a
+  wheel that dies in the middle of a dialog is its own small bug.
+- **Tab could put the cursor somewhere you cannot see.** Focus moves by widget
+  order, not by what is on screen: on a 614px window — the ceiling a 1366x768
+  laptop gives this dialog — it walked into the details box at y=583 and the
+  tag row at y=732, both below the bottom edge. You typed and nothing
+  appeared. The form now follows the keyboard, in both directions, and leaves
+  itself alone when focus lands on Save, which is not in the scrolling area.
+
 ## 3.52.0 — A task can be a plan instead of a wall
 A task held exactly **one** step. The moment it was done the task was a blank
 wall again, so every transition charged a fresh decision — the one thing this

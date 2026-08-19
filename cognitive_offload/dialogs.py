@@ -382,8 +382,13 @@ class TaskEditorDialog(ModalDialog):
         form.bind("<Configure>", lambda _e: self._canvas.configure(
             scrollregion=self._canvas.bbox("all")))
         for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
-            # On the window, so the wheel works wherever the pointer is.
+            # On the window, so the wheel works wherever the pointer is. Tk
+            # puts the toplevel in every child's bindtags, so one binding
+            # covers the lot.
             self.bind(sequence, self._on_wheel)
+        # Same trick for focus: tabbing must not put the cursor in a box
+        # that is scrolled out of sight.
+        self.bind("<FocusIn>", lambda e: self._scroll_into_view(e.widget))
         # Everything built from here lands in the scrolling form instead.
         self.body = form
 
@@ -395,7 +400,30 @@ class TaskEditorDialog(ModalDialog):
             self._vbar.pack(side="right", fill="y")
         self._vbar.set(first, last)
 
+    def _scrolls_itself(self, widget) -> bool:
+        """Is the pointer over something that will handle the wheel itself?
+
+        A ``Text``'s own class binding scrolls it and does **not** return
+        "break", so the event carries on to the window binding as well —
+        measured, one notch over the notes box moved the text AND slid the
+        whole form by the same amount. Only true while the widget actually
+        has somewhere to scroll: over a half-empty notes box the wheel
+        should still move the form, or it dies in the middle of the dialog
+        for no reason the person can see.
+        """
+        while widget is not None and widget is not self:
+            if isinstance(widget, tk.Text):
+                try:
+                    first, last = widget.yview()
+                except tk.TclError:
+                    return False
+                return not (first <= 0.0 and last >= 1.0)
+            widget = getattr(widget, "master", None)
+        return False
+
     def _on_wheel(self, event):
+        if self._scrolls_itself(self.winfo_containing(event.x_root, event.y_root)):
+            return
         if getattr(event, "num", None) == 4:
             delta = -1
         elif getattr(event, "num", None) == 5:
@@ -403,6 +431,34 @@ class TaskEditorDialog(ModalDialog):
         else:
             delta = -1 if event.delta > 0 else 1
         self._canvas.yview_scroll(delta, "units")
+
+    def _scroll_into_view(self, widget) -> None:
+        """Bring a widget that has just taken focus into the visible part.
+
+        Tab moves focus by widget order, not by what is on screen, so on a
+        window short enough to scroll it walked straight into the details
+        box and the tag row while both were below the bottom edge — you type
+        and nothing appears. Same arithmetic as `RowList.see`.
+
+        Widgets outside the form are skipped, which is how Save and Cancel
+        stay put: they are deliberately packed on the window, not in the
+        scrolling area.
+        """
+        if widget is None:
+            return
+        inside = str(widget).startswith(f"{self.body}.")
+        if not inside:
+            return
+        self.update_idletasks()
+        top = widget.winfo_rooty() - self.body.winfo_rooty()
+        bottom = top + widget.winfo_height()
+        room = self._canvas.winfo_height()
+        total = max(1, self.body.winfo_height())
+        seen_from = self._canvas.canvasy(0)
+        if top < seen_from:
+            self._canvas.yview_moveto(top / total)
+        elif bottom > seen_from + room:
+            self._canvas.yview_moveto(max(0.0, (bottom - room) / total))
 
     def _fit_to_content(self) -> None:
         """Ask for the height the form wants, then let the ceiling bite.
@@ -788,7 +844,8 @@ class SessionEndDialog(ModalDialog):
     """
 
     def __init__(self, parent: tk.Misc, message: str, task_text: str, break_minutes: int = 5,
-                 first_step: str = "", parked: int = 0):
+                 first_step: str = "", parked: int = 0,
+                 rest_of_plan: list[str] | None = None, place: str = ""):
         super().__init__(parent, "Session finished")
         self.resizable(False, False)
         ttk.Label(self.body, text=message, font=font(SIZE_LG, "bold"),
@@ -808,15 +865,49 @@ class SessionEndDialog(ModalDialog):
         # The hand-off. Right now you know what comes next; tomorrow you will
         # be looking at a first step you already did. Optional, and skipping
         # it costs nothing.
-        ttk.Label(self.body, text="Where does it pick up next time?").pack(anchor="w")
+        # A task with a plan is asked a different question, because on one
+        # the honest answer is already written down. Two things can have
+        # happened in the last fifteen minutes — you finished this step, or
+        # you did not — and the old single blank field conflated them: it
+        # invited a description of the NEXT step while the cursor was still
+        # on this one, so typing the honest answer overwrote the wrong line.
+        rest = list(rest_of_plan or [])
+        self.step_done_var = None
+        has_plan = bool(rest) or bool(place)
+        if has_plan:
+            ttk.Label(self.body, text="What does this step say now?").pack(anchor="w")
+        else:
+            ttk.Label(self.body,
+                      text="Where does it pick up next time?").pack(anchor="w")
         self.next_entry = ttk.Entry(self.body, width=44)
         self.next_entry.pack(fill="x", pady=(4, 2))
-        if first_step:
+        if has_plan:
+            # Prefilled, so accepting it unchanged means exactly what it
+            # looks like: nothing. A blank box at the tired end of a block is
+            # a question; a filled one is a confirmation.
+            self.next_entry.insert(0, first_step)
+            if place:
+                ttk.Label(self.body, text=place, style="Muted.TLabel",
+                          wraplength=px(self, 380), justify="left").pack(anchor="w")
+        elif first_step:
             ttk.Label(self.body, text=f"was: {first_step}", style="Muted.TLabel",
                       wraplength=px(self, 380), justify="left").pack(anchor="w")
-        ttk.Label(self.body, text="Leave it blank if you would rather not decide now.",
-                  style="Muted.TLabel", wraplength=px(self, 380), justify="left").pack(
+        # Two hints, because the field means two different things. "Leave it
+        # blank" is an invitation on an empty box and a lie on a filled one:
+        # blanking a prefilled step changes nothing, so the sentence would be
+        # offering an action that does not exist.
+        hint = ("Change it if it needs changing — leaving it as it is is an "
+                "answer." if has_plan
+                else "Leave it blank if you would rather not decide now.")
+        ttk.Label(self.body, text=hint, style="Muted.TLabel",
+                  wraplength=px(self, 380), justify="left").pack(
             anchor="w", pady=(0, 14))
+        if rest:
+            self.step_done_var = tk.BooleanVar(value=False)
+            ttk.Checkbutton(
+                self.body, text=f"Done — move on to \"{rest[0]}\"",
+                variable=self.step_done_var,
+            ).pack(anchor="w", pady=(0, 10))
 
         for label, value, style in (
             ("It's finished — mark it done", "done", "Default.TButton"),
@@ -846,7 +937,11 @@ class SessionEndDialog(ModalDialog):
         self._choose("carry_on")
 
     def _choose(self, value: str) -> None:
-        self.result = {"choice": value, "next_step": self.next_entry.get().strip()}
+        self.result = {
+            "choice": value,
+            "next_step": self.next_entry.get().strip(),
+            "step_done": bool(self.step_done_var and self.step_done_var.get()),
+        }
         self.destroy()
 
     def cancel(self, _event=None):
@@ -857,7 +952,9 @@ class SessionEndDialog(ModalDialog):
             step = self.next_entry.get().strip()
         except tk.TclError:
             pass
-        self.result = {"choice": "carry_on", "next_step": step}
+        self.result = {"choice": "carry_on", "next_step": step,
+                       "step_done": bool(self.step_done_var
+                                         and self.step_done_var.get())}
         self.destroy()
 
 

@@ -178,6 +178,173 @@ class ReachableSaveTests(unittest.TestCase):
         self.assertGreater(top, dialog._canvas.winfo_height() - 4,
                            "Save is inside the scrolling form")
 
+    def _wheel_over(self, dialog, widget, up: bool = False):
+        """One wheel notch delivered where the widget actually is.
+
+        Root coordinates matter: `_on_wheel` asks `winfo_containing` what is
+        under the pointer, and an event generated without them reports a
+        position where the widget is not — which is a probe measuring itself
+        rather than the app.
+        """
+        dialog.update()
+        widget.event_generate("<Button-4>" if up else "<Button-5>", x=8, y=8,
+                              rootx=widget.winfo_rootx() + 8,
+                              rooty=widget.winfo_rooty() + 8)
+        dialog.update()
+
+    def test_the_wheel_over_the_notes_box_scrolls_the_notes_and_nothing_else(self):
+        """A `Text`'s own class binding scrolls it and does NOT return
+        "break", so the event carried on to the window binding as well —
+        measured, one notch over the notes box moved the text AND slid the
+        whole form by the same amount. Scrolling your own notes should not
+        move the dialog out from under you."""
+        dialog = self._fullest()
+        dialog.geometry("520x520")
+        dialog.update()
+        dialog.content_text.delete("1.0", "end")
+        dialog.content_text.insert("1.0", "\n".join(f"line {i}" for i in range(40)))
+        # Both at the BOTTOM, then scroll UP: the form could move and the
+        # notes box could move, so only the guard decides which does. Parked
+        # at the end of the form and scrolling down, the form cannot move
+        # anyway and this passed with the guard deleted.
+        dialog._canvas.yview_moveto(1.0)
+        dialog.content_text.yview_moveto(1.0)
+        dialog.update()
+        before_form = dialog._canvas.yview()[0]
+        before_text = dialog.content_text.yview()[0]
+        self.assertGreater(before_form, 0.0, "the form has nowhere to scroll up to")
+        self.assertGreater(before_text, 0.0, "the notes box has nowhere to scroll up to")
+        self._wheel_over(dialog, dialog.content_text, up=True)
+        self.assertEqual(dialog._canvas.yview()[0], before_form,
+                         "the form moved as well as the notes box")
+        self.assertLess(dialog.content_text.yview()[0], before_text,
+                        "the notes box did not scroll")
+
+    def test_the_wheel_anywhere_else_scrolls_the_form(self):
+        """The guard must not eat the wheel everywhere. Over anything that
+        does not scroll itself, the form is what moves."""
+        dialog = self._fullest()
+        dialog.geometry("520x520")
+        dialog._canvas.yview_moveto(0)
+        dialog.update()
+        self._wheel_over(dialog, dialog.title_entry)
+        self.assertGreater(dialog._canvas.yview()[0], 0.0)
+
+    def test_a_box_with_nothing_to_scroll_does_not_swallow_the_wheel(self):
+        """Over a half-empty notes box the wheel should still move the form,
+        or it dies in the middle of the dialog for no reason anyone can see."""
+        dialog = self._fullest()
+        dialog.content_text.delete("1.0", "end")
+        dialog.content_text.insert("1.0", "one line")
+        dialog.update()
+        self.assertFalse(dialog._scrolls_itself(dialog.content_text))
+        self.assertFalse(dialog._scrolls_itself(dialog.title_entry))
+        self.assertFalse(dialog._scrolls_itself(None))
+        dialog.content_text.insert("1.0", "\n".join(f"line {i}" for i in range(40)))
+        dialog.update()
+        self.assertTrue(dialog._scrolls_itself(dialog.content_text))
+
+    def _with_focus(self, height):
+        """A mapped dialog that really receives focus events, or a skip.
+
+        setUp withdraws the root, and a withdrawn window is never given the
+        X focus — so `focus_set()` records a preference and no `FocusIn` is
+        ever delivered. Every assertion below would then pass by measuring
+        nothing. Proven rather than assumed, the same way test_app_ui proves
+        a key arrives before concluding anything from one.
+        """
+        self.root.deiconify()
+        self.addCleanup(self.root.withdraw)
+        dialog = self._fullest()
+        dialog.geometry(f"520x{height}")
+        dialog.update()
+        # With no window manager X focus follows the POINTER, so whether
+        # these tests run at all came down to where the pointer happened to
+        # be sitting: inside the dialog on a 1024x768 display, outside it on
+        # a 1600x1200 one, where they silently skipped. Put it somewhere
+        # deliberate instead.
+        dialog.event_generate("<Motion>", warp=True, x=10, y=10)
+        dialog.update()
+        seen = []
+        dialog.bind("<FocusIn>", lambda e: seen.append(e.widget), add="+")
+        dialog.title_entry.focus_set()
+        dialog.update()
+        dialog.step_entry.focus_set()
+        dialog.update()
+        if not seen:
+            self.skipTest("this display will not deliver focus events")
+        return dialog
+
+    def test_tabbing_never_puts_the_cursor_somewhere_you_cannot_see(self):
+        """Tab moves focus by widget order, not by what is on screen. On a
+        window short enough to scroll it walked straight into the details box
+        at y=583 and the tag row at y=732, both below a 614px window — you
+        type and nothing appears.
+
+        Measured against the WINDOW rather than the canvas: the button row is
+        deliberately outside the scrolling area, and a canvas-relative check
+        calls that a failure.
+        """
+        for height in (614, 520):
+            dialog = self._with_focus(height)
+            current = dialog.title_entry
+            current.focus_set()
+            dialog.update()
+            with self.subTest(window=height):
+                for _ in range(16):
+                    nxt = current.tk_focusNext()
+                    if nxt is None or nxt is dialog.title_entry:
+                        break
+                    nxt.focus_set()
+                    dialog.update()
+                    current = nxt
+                    top = nxt.winfo_rooty() - dialog.winfo_rooty()
+                    self.assertGreaterEqual(top, 0, f"{nxt} is above the window")
+                    self.assertLessEqual(
+                        top + nxt.winfo_height(), dialog.winfo_height(),
+                        f"{nxt} took focus below the bottom edge")
+
+    def test_focus_scrolls_back_up_as_well_as_down(self):
+        """Shift-Tab is a real key. A handler that only ever scrolls forward
+        leaves the cursor above the top edge instead of below the bottom.
+
+        Focus has to be moved away and back: re-focusing the widget that
+        already holds it generates no event at all, so the obvious version of
+        this test asserts against a handler that never ran.
+        """
+        dialog = self._with_focus(520)
+        dialog.tags_entry.focus_set()          # somewhere near the bottom
+        dialog.update()
+        self.assertGreater(dialog._canvas.canvasy(0), 0,
+                           "the form did not scroll down to the tag row")
+        dialog.title_entry.focus_set()         # ...and back to the top
+        dialog.update()
+        top = dialog.title_entry.winfo_rooty() - dialog.winfo_rooty()
+        self.assertGreaterEqual(top, 0)
+        self.assertLessEqual(top + dialog.title_entry.winfo_height(),
+                             dialog.winfo_height())
+
+    def test_the_buttons_are_left_where_they_are(self):
+        """They sit outside the form on purpose, so nothing about focus or
+        the wheel may drag them into the scrolling area."""
+        dialog = self._fullest()
+        [save] = [b for b in _buttons(dialog) if b.cget("text") == "Save"]
+        self.assertFalse(str(save).startswith(f"{dialog.body}."))
+
+    def test_tabbing_to_save_does_not_jerk_the_form(self):
+        """Save is not in the form, so nothing about it needs bringing into
+        view — and scrolling anyway means the page lurches under you at the
+        exact moment you are reaching for the button."""
+        dialog = self._with_focus(520)
+        dialog.step_entry.focus_set()
+        dialog.update()
+        parked = dialog._canvas.yview()[0]
+        [save] = [b for b in _buttons(dialog) if b.cget("text") == "Save"]
+        save.focus_set()
+        dialog.update()
+        self.assertEqual(dialog._canvas.yview()[0], parked,
+                         "focusing Save scrolled the form for no reason")
+
     def test_the_scrollbar_appears_exactly_when_it_is_needed(self):
         """The other half: a permanent scrollbar on a dialog that fits is a
         control that does nothing, which is what this app spends its effort
@@ -611,7 +778,9 @@ class DialogCollectTests(unittest.TestCase):
                                       first_step="the old step")
             dialog.next_entry.insert(0, "the new step")
             dialog._choose(choice)
-            self.assertEqual(dialog.result, {"choice": choice, "next_step": "the new step"})
+            self.assertEqual(dialog.result, {"choice": choice,
+                                             "next_step": "the new step",
+                                             "step_done": False})
 
     def _focus(self, dialog, widget):
         """Push X focus onto ``widget`` and wait for it to actually arrive."""
@@ -638,7 +807,9 @@ class DialogCollectTests(unittest.TestCase):
         dialog.next_entry.event_generate("<Return>")
         self.root.update()
         self.assertEqual(dialog.result,
-                         {"choice": "carry_on", "next_step": "reread the last paragraph"})
+                         {"choice": "carry_on",
+                          "next_step": "reread the last paragraph",
+                          "step_done": False})
 
     def test_enter_is_bound_to_the_entry_not_the_whole_dialog(self):
         # The old dialog-wide <Return> → "done" binding is the bug: it fired
@@ -652,7 +823,9 @@ class DialogCollectTests(unittest.TestCase):
         dialog.next_entry.insert(0, "reread the last paragraph")
         dialog._keep_step()
         self.assertEqual(dialog.result,
-                         {"choice": "carry_on", "next_step": "reread the last paragraph"})
+                         {"choice": "carry_on",
+                          "next_step": "reread the last paragraph",
+                          "step_done": False})
 
     def test_enter_elsewhere_in_the_dialog_chooses_nothing(self):
         from cognitive_offload.dialogs import SessionEndDialog

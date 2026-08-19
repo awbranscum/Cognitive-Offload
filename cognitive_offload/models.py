@@ -590,11 +590,18 @@ class Task:
         return True
 
     def matches(self, term: str) -> bool:
-        """Case-insensitive search across title, description and tags."""
+        """Case-insensitive search across everything the person wrote.
+
+        Including **every step of the plan**, not just the one you are on.
+        A step is something you typed, and this app says out loud that a task
+        stays "in every search" and that hiding one is the thing it will not
+        do — so searching for a step and getting nothing back is not a small
+        gap, it is the search box teaching you to distrust it.
+        """
         term = term.strip().lower()
         if not term:
             return True
-        haystack = (self.text, self.description, self.first_step)
+        haystack = (self.text, self.description, self.first_step, *self.steps)
         if any(term in part.lower() for part in haystack):
             return True
         return any(term in tag for tag in self.tags)

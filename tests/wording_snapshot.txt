@@ -242,6 +242,8 @@ dialogs.py | dialog-title | __init__ | This week
 dialogs.py | dialog-title | __init__ | Where do I start?
 dialogs.py | heading= | __init__ | Move task to:
 dialogs.py | heading= | __init__ | Move {} tasks to:
+dialogs.py | hint= | __init__ | Change it if it needs changing — leaving it as it is is an answer.
+dialogs.py | hint= | __init__ | Leave it blank if you would rather not decide now.
 dialogs.py | in-list | ShortcutsDialog | Add a tag
 dialogs.py | in-list | ShortcutsDialog | Add as task
 dialogs.py | in-list | ShortcutsDialog | Add to scratchpad
@@ -289,12 +291,12 @@ dialogs.py | text= | __init__ | Close
 dialogs.py | text= | __init__ | Dates can be "today", "tomorrow", a weekday like "fri", or 2026-08-01. The minutes are a guess, and a guess is plenty — nothing holds you to it.
 dialogs.py | text= | __init__ | Details
 dialogs.py | text= | __init__ | Done — move on to "{}"
+dialogs.py | text= | __init__ | Done — move on to "{}"
 dialogs.py | text= | __init__ | Excused from suggestions until {} — put it back in the running now
 dialogs.py | text= | __init__ | Feels like
 dialogs.py | text= | __init__ | First move
 dialogs.py | text= | __init__ | Handing over
 dialogs.py | text= | __init__ | Keep the timer floating over my work
-dialogs.py | text= | __init__ | Leave it blank if you would rather not decide now.
 dialogs.py | text= | __init__ | Name the smallest physical action. You are only committing to this.
 dialogs.py | text= | __init__ | Nothing is sent anywhere. A brief is written to a file and the command to run it goes on your clipboard — so you can read it, change it, or not use it at all.
 dialogs.py | text= | __init__ | On your clipboard
@@ -315,6 +317,7 @@ dialogs.py | text= | __init__ | Title
 dialogs.py | text= | __init__ | To
 dialogs.py | text= | __init__ | Waiting on
 dialogs.py | text= | __init__ | What can you face right now?
+dialogs.py | text= | __init__ | What does this step say now?
 dialogs.py | text= | __init__ | Where does it pick up next time?
 dialogs.py | text= | __init__ | Working on
 dialogs.py | text= | __init__ | Written for {}
@@ -338,16 +341,21 @@ dialogs.py | text= | button_row | Cancel
 dialogs.py | waiting= | __init__ | Out with {}
 dialogs.py | waiting_hint= | __init__ | A person or an agent — anyone but you. It keeps its place in the list and in every search, and stops being offered as the next thing to start until the day you check back. Blank means three days from now.
 handoff.py | REPORT_BACK= | <module> | When you are done, reply with what you did, anything you could not do, and anything you need from me. Ask before doing anything that spends money, sends a message to another person, or cannot be undone.
+handoff.py | START_HERE= | <module> |   ← start here
 handoff.py | arg | _lines_common | Rough size: about {} minutes, as guessed by a human who is bad at guessing.
 handoff.py | arg | _lines_common | Start with: {}
 handoff.py | arg | _lines_common | Wanted by: {} ({})
+handoff.py | arg | _plan_lines | - [ ] {}
+handoff.py | arg | _plan_lines | - [ ] {}{}
+handoff.py | arg | _plan_lines | - [x] {}
 handoff.py | in-list | render_markdown | # {}
 handoff.py | in-list | render_markdown | ## Detail
 handoff.py | in-list | render_markdown | ## Handing it over
+handoff.py | in-list | render_markdown | ## The plan
 handoff.py | in-list | render_markdown | ## What I know
 handoff.py | in-list | render_markdown | _Handed over on {} from Cognitive Offload (task {})._
 handoff.py | returns | command_for | {}  # (brief written to {})
-handoff.py | returns | render_json | {source task_id handed_over_on title note detail first_step due estimate_minutes tags instructions cognitive-offload}\n
+handoff.py | returns | render_json | {source task_id handed_over_on title note detail first_step due estimate_minutes tags steps steps_done instructions cognitive-offload}\n
 main_tab.py | arg | _build_capture_card | Anything in your head — it does not have to be tidy.
 main_tab.py | arg | _build_capture_card | Quick capture
 main_tab.py | arg | _build_focus_card | Focus session
@@ -446,12 +454,12 @@ rows.py | arg | _shared_badges | booked {}
 rows.py | arg | _shared_badges | check back
 rows.py | arg | _shared_badges | ~{} min
 rows.py | line= | waiting_line | Waiting on {an agent}
-rows.py | place= | _step_or_summary | step {steps_done} of {}
 rows.py | returns | _step_or_summary | → {}
 rows.py | returns | _step_or_summary | → {} · {}
 rows.py | returns | focus_caption | Free focus
 rows.py | returns | focus_caption | Free focus — {}
 rows.py | returns | focus_caption | {}\n→ {}
+rows.py | returns | plan_place | step {steps_done} of {}
 rows.py | subtitle= | task_row | done {}
 storage.py | arg | <module> | [^A-Za-z0-9._ -]+
 storage.py | arg | _new_path | The matrix folder is missing: {} (moved or unmounted?)

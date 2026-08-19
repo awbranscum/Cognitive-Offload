@@ -147,7 +147,10 @@ reinstall from python.org).
   plan, the first step **is** the step you are on, so everything that already
   read the first step — the row, the start dialog, the ranking — keeps
   working without knowing plans exist. A repeating task with steps is a
-  routine: the plan comes back each round, your place in it does not.
+  routine: the plan comes back each round, your place in it does not. Every
+  step is searchable, and handing the task to an agent sends the whole plan
+  with the finished steps ticked. At the end of a focus session the app asks
+  what the step you were on says now, and offers to move you to the next one.
 - **Waiting on someone.** Say who has a task and when you will check back, in
   the task editor on either tab. It keeps its badge, its place in the list and
   its place in every search — and stops being offered as the next thing to
