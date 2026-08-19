@@ -11,8 +11,8 @@
 # deliberate, regenerate with
 #     python tests/wording.py --update
 # and review the diff as a change to what the app SAYS.
+app.py | IDLE_CAPTION= | CognitiveOffloadApp | Nothing picked yet
 app.py | arg | __init__ | {} {}
-app.py | arg | _apply_state | Nothing picked yet
 app.py | arg | _finish_session | finish task
 app.py | arg | _finish_session | hand off
 app.py | arg | _sync_focus_window | Break — step away
@@ -40,7 +40,6 @@ app.py | arg | matrix_to_tasks | import from matrix
 app.py | arg | move_matrix_tasks | move between quadrants
 app.py | arg | promote_selected | pin it
 app.py | arg | refresh_matrix | {}: {}
-app.py | arg | reset_timer | Nothing picked yet
 app.py | arg | send_scratch_line_to_tasks | Sent {lines} to the task list.
 app.py | arg | send_selected_to_matrix | send it to the matrix
 app.py | arg | send_selected_to_matrix | send to matrix
@@ -219,7 +218,6 @@ app.py | text= | reset_timer | Start
 app.py | text= | start_timer | Pause
 app.py | title= | _claim_instance_lock | Already open
 app.py | title= | _claim_instance_lock | Already running?
-app.py | value= | __init__ | Nothing picked yet
 app.py | value= | __init__ | Ready.
 app.py | window_title= | add_matrix_task | New task – {}
 app.py | window_title= | edit_matrix_task | Edit matrix task
@@ -427,6 +425,8 @@ models.py | returns | humanize_date | {} {%b} {}
 models.py | returns | render | [{}] {}
 presenter.py | BREAK_OVER_CAPTION= | <module> | Break over. One more small block?
 presenter.py | NOTHING_HERE= | <module> | Nothing here. Capture a thought above — or take the win and stop.
+presenter.py | finished= | resume_line |  — you finished “{step}”
+presenter.py | following= | resume_line | \nNext: {}
 presenter.py | footer= | today_view | \n\nPlus {} focus session{s} — {} minutes.
 presenter.py | in-list | <module> | Session finished. The hard part was starting, and you did that.
 presenter.py | in-list | <module> | That's {minutes} minutes on it. Banked.
@@ -434,6 +434,7 @@ presenter.py | in-list | <module> | {minutes} minutes done — that counts, howe
 presenter.py | line= | timer_view | break ends {%H:%M}
 presenter.py | line= | timer_view | ends {%H:%M}
 presenter.py | name= | replace_running_question | the current block
+presenter.py | opening= | resume_line | Last time: {minute} on {}
 presenter.py | returns | batch_status | {} {}
 presenter.py | returns | batch_status | {} {} of {} {}s — the rest failed
 presenter.py | returns | break_offer | {}\n\nTake a {}-minute break now?

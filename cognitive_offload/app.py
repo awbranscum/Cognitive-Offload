@@ -132,7 +132,7 @@ class CognitiveOffloadApp(tk.Tk):
         self.show_done_var = tk.BooleanVar(value=self.config_store.show_done)
         self.status_var = tk.StringVar(value="Ready.")
         self.counts_var = tk.StringVar(value="")
-        self.focus_task_var = tk.StringVar(value="Nothing picked yet")
+        self.focus_task_var = tk.StringVar(value=self.IDLE_CAPTION)
         self.momentum_var = tk.StringVar(value="")
         self.due_var = tk.StringVar(value="")
         self.today_var = tk.StringVar(value="")
@@ -600,6 +600,24 @@ class CognitiveOffloadApp(tk.Tk):
         self.record_step_done(item)
         return item.advance_step()
 
+    #: what the focus card says when nothing is running and there is nothing
+    #: to remember either. Three places used to spell it out; one of them is
+    #: now the fallback for the other two.
+    IDLE_CAPTION = "Nothing picked yet"
+
+    def set_idle_focus_caption(self) -> None:
+        """Fill the idle focus card with what you were last doing.
+
+        The slot said "Nothing picked yet" — three words of dead text in the
+        most prominent place on the screen, at the exact moment someone is
+        trying to remember what they were on. Replacing dead text costs no
+        pixels, which is the only kind of addition this screen can afford
+        after v3.48.0 spent a release taking things off it.
+        """
+        self.focus_task_var.set(
+            presenter.resume_line(self.session_log, self.steps_log, self.tasks)
+            or self.IDLE_CAPTION)
+
     def record_step_done(self, item) -> None:
         """Write down the step about to be ticked, before it moves.
 
@@ -615,6 +633,11 @@ class CognitiveOffloadApp(tk.Tk):
         self.steps_log.append({
             "step": step,
             "task": getattr(item, "text", None) or getattr(item, "title", "") or "",
+            # The id as well as the title: the title is what the week review
+            # shows, and the id is what "what was I doing?" joins on. Matching
+            # on a title that the person has since reworded would quietly
+            # drop the one line that answers the question.
+            "task_id": getattr(item, "id", "") or "",
             "done_at": now_stamp(),
         })
         self.mark_dirty()
@@ -2061,7 +2084,7 @@ class CognitiveOffloadApp(tk.Tk):
         banked = self.finish_session_early(interactive=False)
         self._stop_ticking()
         self._focus_task_id = None
-        self.focus_task_var.set("Nothing picked yet")
+        self.set_idle_focus_caption()
         self.timer.reset(self._minutes())
         self.timer_button.config(text="Start")
         self._update_timer_label()
@@ -2248,11 +2271,14 @@ class CognitiveOffloadApp(tk.Tk):
         self._timer_remaining = self._timer_total
         if self._focus_task_id and not any(t.id == self._focus_task_id for t in data["tasks"]):
             self._focus_task_id = None
-            self.focus_task_var.set("Nothing picked yet")
+            self.focus_task_var.set(self.IDLE_CAPTION)
         self._undo_stack.clear()
         self._dirty = False
         self.refresh_all()
         self._update_timer_label()
+        if not self._focus_task_id:
+            # After the logs are loaded, not before: this reads them.
+            self.set_idle_focus_caption()
 
     def save_state(self, silent: bool = False) -> bool:
         try:

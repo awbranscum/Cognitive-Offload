@@ -2907,7 +2907,13 @@ class AppSmokeTests(unittest.TestCase):
         self.assertIsNotNone(self.app._focus_task_id)
         self.app.reset_timer()
         self.assertIsNone(self.app._focus_task_id)
-        self.assertEqual(self.app.focus_task_var.get(), "Nothing picked yet")
+        # The card no longer claims a task is in progress. What it says
+        # instead depends on whether there is anything to remember: with a
+        # session just banked it is the resume line, and with nothing it is
+        # the idle caption. Both are "not focused on anything".
+        caption = self.app.focus_task_var.get()
+        self.assertTrue(caption == self.app.IDLE_CAPTION
+                        or caption.startswith("Last time:"), caption)
 
     def test_starting_a_second_session_asks_before_dropping_the_first(self):
         self.capture("first")

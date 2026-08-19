@@ -573,6 +573,11 @@ class StateStore:
                 steps.append({
                     "step": record["step"],
                     "task": record.get("task") if isinstance(record.get("task"), str) else "",
+                    # Absent from anything written before v3.56.0, which is
+                    # fine: an entry with no id simply never matches, and a
+                    # record of what happened does not need to be joinable.
+                    "task_id": (record.get("task_id")
+                                if isinstance(record.get("task_id"), str) else ""),
                     "done_at": record.get("done_at") or "",
                 })
 

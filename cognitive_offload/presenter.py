@@ -478,6 +478,73 @@ def today_view(tasks: list, completed_log: list | None = None,
     body = "Finished today:\n\n" + "\n".join(lines) + footer
     return TodayView(titles=titles, sessions=sessions, minutes=minutes, body=body)
 
+# Each of the three pieces the resume line quotes back -- the task, the step
+# you finished, the step that comes next -- is text the user typed, and the
+# user can type a paragraph. The line sits above the timer in a narrow card,
+# so an unbounded piece is not merely ugly: at the window's minimum size a
+# nine-line caption pushed "Where do I start?" and the whole task list off the
+# bottom of the panel. Forty characters is enough to recognise a task you were
+# working on an hour ago, which is all this line is for.
+RESUME_PIECE_LIMIT = 40
+
+
+def short(text: str, limit: int = RESUME_PIECE_LIMIT) -> str:
+    """``text`` cut to ``limit`` characters, on a word boundary where one is
+    near enough to the end that using it does not throw away half the line."""
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit].rstrip()
+    space = cut.rfind(" ")
+    if space >= limit - 12:
+        cut = cut[:space].rstrip()
+    return cut + "\u2026"
+
+
+def resume_line(session_log=None, steps_log: list | None = None,
+                tasks: list | None = None) -> str:
+    """"What was I doing?", answered from the record rather than from memory.
+
+    An interruption costs the context, not the intention — you know you were
+    working, you have lost *what on*. Every piece of the answer was already
+    being written down: the session log knows what you were on and for how
+    long, the step log knows which step you actually finished, and the task
+    itself knows what comes next.
+
+    Three rules shape the sentence.
+
+    **It never counts the days.** "Last time", never "six days ago": an
+    elapsed-time figure on a task you have been avoiding is a reproach, and
+    this app does not keep that kind of score.
+
+    **It never asks anything.** It is a sentence, not an offer — the point of
+    reading it is to be spared a decision, and a prompt at that moment would
+    put one back.
+
+    **It says nothing rather than something empty.** No sessions, or a task
+    since deleted or finished, and the caller keeps whatever it had.
+    """
+    sessions = getattr(session_log, "sessions", None) or []
+    last = next((s for s in reversed(sessions) if s.task_id), None)
+    if last is None:
+        return ""
+    task = next((t for t in (tasks or []) if t.id == last.task_id), None)
+    if task is None or task.done:
+        return ""
+    minutes = max(0, int(getattr(last, "minutes", 0) or 0))
+    step = next((e for e in reversed(steps_log or [])
+                 if isinstance(e, dict) and e.get("task_id") == task.id
+                 and (e.get("step") or "").strip()), None)
+    # Each sentence is its own assignment rather than a `+=`, because the
+    # wording extractor cannot see an appended string — two sentences nearly
+    # shipped unwatched that way once already.
+    opening = f"Last time: {plural(minutes, 'minute')} on {short(task.text)}"
+    finished = (f" — you finished \u201c{short(step['step'])}\u201d"
+                if step else "")
+    following = (f"\nNext: {short(task.first_step)}"
+                 if task.first_step else "")
+    return f"{opening}{finished}.{following}"
+
 
 def week_view(tasks: list, completed_log: list | None = None,
               session_log=None, today: date | None = None,

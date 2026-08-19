@@ -5,6 +5,50 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.56.0 — "What was I doing?", answered from the record
+An interruption costs the context, not the intention: you know you were
+working, you have lost *what on*. Every piece of the answer was already being
+written down and none of it was ever said out loud.
+
+- **The focus card now remembers.** Where it used to read "Nothing picked
+  yet" — three words of dead text in the most prominent place on the screen,
+  at the exact moment someone is trying to remember — it now says what you
+  were last on, how long you spent, the step you actually finished, and the
+  step that comes next. Nothing was collected to make this work: the session
+  log knew the task, the step log knew the step, the task knew its plan.
+
+  Three rules shape the sentence, and each is tested rather than trusted.
+  **It never counts the days** — "Last time", never "six days ago", because
+  an elapsed-time figure on a task you have been avoiding is a reproach.
+  **It never asks anything** — the point of reading it is to be spared a
+  decision, and a prompt at that moment would put one back. **It says nothing
+  rather than something empty** — no sessions, or a task since deleted or
+  finished, and the card keeps its quiet caption.
+
+  It costs no pixels when there is nothing to say, which is the only kind of
+  addition this screen can afford after v3.48.0 spent a release taking things
+  off it.
+
+- **Steps now record which task they belonged to.** The step log stored the
+  task's *title*, so two tasks with the same words were the same task and a
+  renamed task lost its history. Entries written before this release have no
+  id and are read as belonging to nothing rather than guessed at.
+
+- **The line is bounded, because the text in it is yours.** The three pieces
+  it quotes back are text you typed, and the capture box exists precisely so
+  you can type a paragraph into it. Rendered at the window's smallest size, a
+  nine-line caption pushed the filter row, the task list and "Where do I
+  start?" off the bottom of the panel — where nothing scrolls to reach them.
+  Forty characters is enough to recognise a task you were on an hour ago,
+  which is all this line is for.
+
+- **A new net over the plan.** `tests/test_first_step_writes.py` reads the
+  source and finds every assignment to `first_step` anywhere in the app,
+  requiring each one to either go through `set_current_step` or be named with
+  a reason. A direct write is silently reverted by the next load — the test
+  demonstrates that rather than describing it — and a site added next year
+  fails the suite the day it appears.
+
 ## 3.55.0 — The other half of the wheel fix, and a door that hid itself
 Three things, all of them consequences of the last release rather than new
 ground — which is the argument for auditing a release from outside it.

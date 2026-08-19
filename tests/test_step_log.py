@@ -34,8 +34,17 @@ PLAN = ["open last year's report", "copy the headings across",
         "fill in this year's numbers", "send it to Dana"]
 
 
-def entry(step, task="Write the quarterly report", day="2026-08-19"):
-    return {"step": step, "task": task, "done_at": f"{day}T10:00:00"}
+def entry(step, task="Write the quarterly report", day="2026-08-19",
+          task_id=""):
+    """One step-log record, in the shape the store reads back.
+
+    `task_id` joins the record to the live task for "what was I doing?";
+    the title is what the week review shows. Entries written before the id
+    existed simply carry an empty one and never match, which is correct — a
+    record of what happened does not have to be joinable.
+    """
+    return {"step": step, "task": task, "task_id": task_id,
+            "done_at": f"{day}T10:00:00"}
 
 
 class ReadingTheLogTests(unittest.TestCase):
