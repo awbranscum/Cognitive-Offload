@@ -287,7 +287,7 @@ class RowList(ttk.Frame):
             subtitle.configure(wraplength=wrap)
         return {"frame": frame, "mark": mark, "title": title, "badges": badges,
                 "subtitle": subtitle, "separator": separator, "cells": cells,
-                "visible": True}
+                "visible": True, "row_has_badges": False}
 
     def _apply_row(self, cell: dict, index: int, row: Row) -> None:
         t = tokens()
@@ -310,10 +310,14 @@ class RowList(ttk.Frame):
             font=font(theme.SIZE_BASE, "normal" if row.done else "bold"),
         )
         cell["badges"].set_badges(row.badges, background=bg)
+        cell["row_has_badges"] = bool(row.badges)
         if row.badges:
             cell["badges"].grid()
         else:
             cell["badges"].grid_remove()
+        # After the badges, because how wide they are decides how much room
+        # the title has left on the same line.
+        self._fit_title(cell)
         cell["subtitle"].configure(text=row.subtitle, background=bg,
                                    foreground=t.muted_foreground)
         if row.subtitle:
@@ -500,9 +504,42 @@ class RowList(ttk.Frame):
         self.canvas.itemconfigure(self._window, width=event.width)
         self._rewrap(event.width)
 
-    #: room a title has after the marker column, the padding and a little
-    #: slack for a badge strip sitting to its right
+    #: room taken by the marker column and the row padding. It does NOT
+    #: include the badge strip: that sits on the title's own line and is
+    #: between zero and ~430px wide **depending on the row**, so it is
+    #: subtracted per row in _fit_title rather than guessed at here.
     TEXT_INSET = 2 * ROW_PAD_X + 40
+    #: gap between the title and the badge strip beside it (matches the
+    #: padx the strip is gridded with)
+    BADGE_GAP = 8
+    #: a title never wraps narrower than this, however many badges a row
+    #: carries: past this point the badges are the thing that should give.
+    MIN_WRAP = 80
+
+    def _fit_title(self, cell: dict) -> None:
+        """Wrap this row's title in the room its own badges leave it.
+
+        One wraplength for the whole pool was wrong, and wrong in a way that
+        looked fine: the title wraps at whatever it is told, is then given
+        only what the badges leave, and Tk **clips the difference** — a Label
+        wraps at ``wraplength`` and does not re-wrap to fit its allocation.
+        So the same 129-character title showed 100% of itself on a bare row
+        and 41% on a fully-badged one, ending mid-word, with the missing
+        words simply absent.
+
+        Which punished using the app properly: every badge is something you
+        added by filling the task in, so the tasks you had invested most in
+        were the ones that lost their words.
+        """
+        room = getattr(self, "_wrap_at", None)
+        if not room:
+            return
+        badges = cell["badges"]
+        # winfo_reqwidth is right here and winfo_width is not: _draw ends with
+        # configure(width=...), so the requested width is correct immediately,
+        # while the allocated one is a layout pass behind.
+        taken = badges.winfo_reqwidth() + self.BADGE_GAP if cell["row_has_badges"] else 0
+        cell["title"].configure(wraplength=max(self.MIN_WRAP, room - taken))
 
     def _rewrap(self, width: int) -> None:
         """Let a long task use as many lines as it needs.
@@ -519,13 +556,15 @@ class RowList(ttk.Frame):
         has wrapped its task and step labels all along; this is the same
         treatment for the surface people actually work in.
         """
-        room = max(80, width - self.TEXT_INSET)
+        room = max(self.MIN_WRAP, width - self.TEXT_INSET)
         if room == getattr(self, "_wrap_at", None):
             return
         self._wrap_at = room
         for cell in self._pool:
-            cell["title"].configure(wraplength=room)
+            # The subtitle spans both columns, so it keeps the full room; only
+            # the title shares its line with the badges.
             cell["subtitle"].configure(wraplength=room)
+            self._fit_title(cell)
 
     def _on_wheel(self, event):
         if getattr(event, "num", None) == 4:

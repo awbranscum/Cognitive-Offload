@@ -275,6 +275,12 @@ def next_occurrence(repeat: str, scheduled_for: str = "", on: str | None = None)
     return date(year, month, day).isoformat()
 
 
+# Fields that belong to the round they were set in, not to the task itself,
+# and so are cleared when a repeat books its next round. Everything else on a
+# Task is setup you did once and should carry forward.
+PER_ROUND_FIELDS = ("snoozed_until", "handed_to", "handed_off_on", "follow_up_on")
+
+
 def _is_waiting(item) -> bool:
     """Out with someone (or something) else, and not back yet.
 
@@ -405,8 +411,14 @@ class Task:
         nxt.completed_at = None
         nxt.scheduled_for = when
         # A snooze belongs to the round it was taken in; carrying it forward
-        # would silently excuse the next one too.
-        nxt.snoozed_until = ""
+        # would silently excuse the next one too. The handoff marks are the
+        # same shape and were missed when they were added: the next round
+        # arrived already claiming to be out with an agent that had never
+        # been given it, and every round after that inherited the claim.
+        # `tests/test_repeat_rounds` now classifies every field so the next
+        # one added has to be decided rather than silently inherited.
+        for field_name in PER_ROUND_FIELDS:
+            setattr(nxt, field_name, "")
         return nxt
 
 

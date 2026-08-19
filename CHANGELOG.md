@@ -5,6 +5,72 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.49.0 — Two regressions this branch caused itself
+Both were introduced by earlier work in the arc that has just merged, and
+both were found by the research habit rather than by a failing test.
+
+- **A long title was being clipped again, on any row carrying badges.**
+  v3.41.0 fixed *"a 137-character task showed about 78 characters: not
+  scrolled off, not shortened with an ellipsis — absent, ending mid-word"*.
+  It came back through the badge strip. `RowList._rewrap` applied **one**
+  `wraplength` to the whole row pool, computed from the row width and a
+  constant `TEXT_INSET` whose own comment budgeted *"a little slack for a
+  badge strip sitting to its right"* — 40px of slack against a strip that
+  reaches 430px. The title wrapped at the full width, was then given only
+  what the badges left, and Tk clipped the difference: a Label wraps at
+  `wraplength` and does **not** re-wrap to fit its allocation.
+
+  Measured on the same 129-character title, only the badge load changing:
+  100% visible with no badges, 91% with a feel set, 81% once booked, 68% with
+  an estimate, 52% repeating, **41% fully badged**. The loss began at the
+  *second* badge, and it punished using the app properly — every badge is
+  something you added by filling the task in, so the tasks you had invested
+  most in were the ones that lost their words. Two tasks differing only in
+  badges rendered differently.
+
+  The wrap width is now worked out **per row**, from that row's own badges,
+  in `_fit_title`. Every badge load is back to 100%: the badged row takes
+  more lines, never fewer words.
+
+- **The handoff marks leaked into every future round of a repeating task.**
+  `Task.next_instance` clears the state that belonged to the round just
+  finished, with the comment *"A snooze belongs to the round it was taken in;
+  carrying it forward would silently excuse the next one too."* v3.46.0 added
+  the three handoff fields to `Task` and **did not extend that rule**. So
+  finishing a repeating task that had been handed to an agent booked the next
+  round already claiming to be out with that agent — and every round after
+  inherited the claim, because each copies the last.
+
+  The harm was checked rather than assumed, and the first hypothesis was
+  wrong. *Always*: every future round displayed a handoff that never
+  happened. *Additionally*, only when the stale check-back date was still
+  ahead of the new round's own date, the round was also excluded from the
+  suggestion slot — measured, a **daily** repeat handed over with a 30-day
+  check-back was silently not offered for 30 consecutive rounds, while a
+  weekly repeat with a 3-day check-back was unaffected.
+
+- **Both fixes leave a guard behind, because both diseases were the same.**
+  A hand-written list with nothing checking it against the model.
+  `tests/test_repeat_rounds.py` is keyed on `dataclasses.fields(Task)` and
+  requires every field to be classified as *setup, carried forward*,
+  *per-round, reset*, or *fresh each round* — with a reason — so the next
+  field added has to be decided rather than silently inherited. It also
+  asserts the code's own `PER_ROUND_FIELDS` matches the classification, since
+  two hand-maintained lists of the same thing is exactly how this happened.
+
+- 667 → 683 tests, Xvfb (`skipped=2`) and headless (`skipped=279`). **Seven
+  promises broken on purpose; two initially survived and both were weak
+  tests of mine.** A no-badge row was asserted to be *wider than before*
+  rather than *the full width*, which a sticky flag satisfied while still
+  being wrong. And the choice of `winfo_reqwidth` over `winfo_width` survived
+  because every test called `update()` first — which fires a `<Configure>`
+  that quietly re-fits the row and hides the bug. Measured at the moment the
+  row is applied, the strip's allocated width is **1** while its requested
+  width is **188**, so reading the wrong one leaves the title ~187px too wide
+  and clips 6–18% of it. Nothing guarantees that corrective `<Configure>`
+  arrives — it only fires when the geometry actually changes — so the test
+  now reads the decision with no layout pass in between.
+
 ## 3.48.0 — Fewer things to decide about, at the moment you have least to spend
 Counted rather than guessed: the first screen of a brand-new install offered
 **32 clickable controls** before a single task existed — and about half of

@@ -1350,6 +1350,137 @@ class AppSmokeTests(unittest.TestCase):
         # Short rows must not pay for it.
         self.assertEqual(lines(short_label), 1)
 
+    def test_a_long_task_keeps_every_word_however_many_badges_it_carries(self):
+        """The v3.41.0 fix came back through the badge strip.
+
+        The badges sit on the title's own line and are 0-430px wide depending
+        on the row, but one wraplength was applied to the whole pool. So the
+        title wrapped at the full row width, was given only what the badges
+        left, and Tk clipped the difference — a Label wraps at ``wraplength``
+        and does not re-wrap to fit its allocation. Measured before: the same
+        129-character title showed 100% of itself on a bare row and **41%**
+        on a fully-badged one, ending mid-word.
+        """
+        from cognitive_offload.models import today_iso
+
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        long_text = ("call the insurance company back about the rejected claim "
+                     "and ask for a supervisor and get the appeal deadline in "
+                     "writing this time")
+        self.capture(long_text)
+        task = self.app.tasks[0]
+        task.first_step = "ring them"
+        task.kind = "admin"
+        task.scheduled_for = today_iso()
+        task.estimate_minutes = 10
+        task.repeat = "weekly"
+        task.pinned = True
+        self.app.refresh_tasks()
+        self.app.update()
+
+        title = self.app.task_list._pool[0]["title"]
+        self.assertGreater(len(title.cget("text")), 100, "fixture got shorter")
+        # Every word fits in the room it was given: a Label that needs more
+        # width than it has is showing less text than it holds.
+        self.assertLessEqual(
+            title.winfo_reqwidth(), title.winfo_width(),
+            "the title is clipped — it wrapped wider than the badges left it",
+        )
+
+    def test_badges_take_their_room_from_the_title_not_from_the_words(self):
+        """The same task, with and without badges: the badged one must take
+        MORE lines, never fewer words."""
+        import tkinter.font as tkfont
+
+        from cognitive_offload.models import today_iso
+
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        long_text = ("call the insurance company back about the rejected claim "
+                     "and ask for a supervisor")
+        self.capture(long_text)   # bare
+        self.capture(long_text)   # will carry badges
+        badged = self.app.tasks[0]
+        badged.kind = "admin"
+        badged.scheduled_for = today_iso()
+        badged.estimate_minutes = 10
+        badged.pinned = True
+        self.app.refresh_tasks()
+        self.app.update()
+
+        def lines(label):
+            metrics = tkfont.Font(font=label.cget("font")).metrics("linespace")
+            return max(1, round(label.winfo_reqheight() / metrics))
+
+        titles = [self.app.task_list._pool[i]["title"] for i in range(2)]
+        wide, narrow = max(titles, key=lambda w: w.cget("wraplength")), \
+                       min(titles, key=lambda w: w.cget("wraplength"))
+        self.assertLess(narrow.cget("wraplength"), wide.cget("wraplength"),
+                        "the badged row got the same wrap width as the bare one")
+        self.assertGreaterEqual(lines(narrow), lines(wide),
+                                "the badged row lost lines instead of gaining them")
+        for label in titles:
+            self.assertLessEqual(label.winfo_reqwidth(), label.winfo_width(),
+                                 label.cget("text")[:40])
+
+    def test_the_wrap_width_is_right_before_any_further_layout_pass(self):
+        """Measured the moment the row is applied, with no update() after.
+
+        The badge strip's *requested* width is correct as soon as its badges
+        are set; its allocated width is still 1 until the geometry manager
+        runs. Reading the allocated one leaves the title ~187px too wide, and
+        a later <Configure> quietly re-fits it — so a test that calls
+        update() first sees the corrected value and passes over the bug.
+        Nothing guarantees that <Configure> arrives: it only fires when the
+        geometry actually changes.
+        """
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        self.capture("call the insurance company back about the rejected claim")
+        self.app.update()          # settle the list once, deliberately
+        task = self.app.tasks[0]
+        task.kind = "admin"
+        task.pinned = True
+        task.estimate_minutes = 10
+        self.app.refresh_tasks()   # ...and now NO update(): read the decision
+
+        cell = self.app.task_list._pool[0]
+        expected = (self.app.task_list._wrap_at
+                    - cell["badges"].winfo_reqwidth()
+                    - self.app.task_list.BADGE_GAP)
+        self.assertEqual(cell["title"].cget("wraplength"), expected,
+                         "the title was wrapped against the badge strip's "
+                         "allocated width instead of its requested width")
+
+    def test_a_row_that_loses_its_badges_gets_its_width_back(self):
+        """Rows come from a pool, so a cell that carried badges is reused for
+        one that does not."""
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        self.capture("call the insurance company back about the rejected claim")
+        task = self.app.tasks[0]
+        task.kind = "admin"
+        task.pinned = True
+        task.estimate_minutes = 10
+        self.app.refresh_tasks()
+        self.app.update()
+        narrow = self.app.task_list._pool[0]["title"].cget("wraplength")
+
+        task.kind = ""
+        task.pinned = False
+        task.estimate_minutes = 0
+        task.first_step = ""
+        self.app.refresh_tasks()
+        self.app.update()
+        # The FULL room, not merely "wider than before": a sticky
+        # has-badges flag still subtracts the empty strip's 1px and passed a
+        # greater-than check while being wrong.
+        self.assertEqual(self.app.task_list._pool[0]["title"].cget("wraplength"),
+                         self.app.task_list._wrap_at,
+                         "a row with no badges did not get the full width back")
+        self.assertGreater(self.app.task_list._wrap_at, narrow)
+
     def test_focus_window_grows_to_keep_its_controls_when_the_title_wraps(self):
         """A four-line title used to push Pause and the Park row clean off
         the fixed-height window — the re-fit only ran while the title was
