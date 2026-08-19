@@ -219,7 +219,23 @@ class OnTheFocusCardTests(unittest.TestCase):
         task = self.app.tasks[0]
         task.first_step = first_step
         self.app.session_log.sessions.append(a_session(task.id, task=task.text))
+        self._elsewhere()
         return task
+
+    def _elsewhere(self):
+        """Something booked for today, which outranks a merely warm task.
+
+        Without it the strip names the same task the card does, the card
+        rightly stops repeating the step, and every assertion about "Next:"
+        below would be testing the suppression instead of the line.
+        """
+        self.app.capture_entry.insert(0, "Ring the insurance company")
+        self.app.add_task_from_capture()
+        other = [t for t in self.app.tasks
+                 if t.text == "Ring the insurance company"][0]
+        other.set_current_step("find the policy number")
+        other.scheduled_for = presenter.today_iso()
+        self.app.refresh_all()
 
     def test_an_empty_app_still_says_the_quiet_thing(self):
         self.app.set_idle_focus_caption()
@@ -259,16 +275,16 @@ class OnTheFocusCardTests(unittest.TestCase):
                 "estimate_minutes": 0, "repeat": "", "clear_snooze": False,
                 "take_back": False, "waiting_on": "", "check_back": "",
                 "rest_of_plan": ["copy the headings across"], "step_done": True}
-            self.app.task_list.selection_set(0)
+            # By row rather than by index 0: the fixture now holds a second
+            # task so the strip has something else to name, and which of them
+            # sorts first is not this test's business.
+            self.app.task_list.selection_set(self.app._visible.index(task))
             self.app.edit_selected_details()
         self.app.set_idle_focus_caption()
         caption = self.app.focus_task_var.get()
         self.assertIn("you finished", caption)
         self.assertIn("open last year's report", caption)
 
-
-if __name__ == "__main__":  # pragma: no cover
-    unittest.main()
 
 
 class LengthTests(unittest.TestCase):
@@ -552,6 +568,15 @@ class PutDownThroughTheRealButtonsTests(unittest.TestCase):
         self.task.set_current_step("copy the headings across")
         self.app.session_log.sessions.append(
             a_session(self.task.id, task=self.task.text))
+        # A booking for today outranks a merely warm task, so the strip names
+        # the OTHER one: without that the card stops repeating the step on its
+        # own account and every assertion here would pass for the wrong reason.
+        self.app.capture_entry.insert(0, "Ring the insurance company")
+        self.app.add_task_from_capture()
+        other = [t for t in self.app.tasks
+                 if t.text == "Ring the insurance company"][0]
+        other.set_current_step("find the policy number")
+        other.scheduled_for = presenter.today_iso()
         self.app.refresh_all()
 
     def _destroy(self):
@@ -567,8 +592,13 @@ class PutDownThroughTheRealButtonsTests(unittest.TestCase):
     def test_before_anything_the_card_points_at_the_step(self):
         self.assertIn("Next: copy the headings across", self._caption())
 
-    def test_not_today_takes_the_pointing_away(self):
+    def _put_it_down(self):
+        """Snooze the task this class is about, not whatever the strip names."""
+        self.app._next_task_id = self.task.id
         self.app.snooze_next()
+
+    def test_not_today_takes_the_pointing_away(self):
+        self._put_it_down()
         caption = self._caption()
         self.assertNotIn("Next:", caption)
         self.assertIn("Write the quarterly report", caption)
@@ -576,6 +606,123 @@ class PutDownThroughTheRealButtonsTests(unittest.TestCase):
     def test_undoing_not_today_gives_it_back(self):
         # "Not today" pushes an undo entry, so the card has to come back with
         # the task rather than stay quiet until the next restart.
-        self.app.snooze_next()
+        self._put_it_down()
         self.app.undo()
         self.assertIn("Next: copy the headings across", self._caption())
+
+
+class NotTwiceTests(unittest.TestCase):
+    """The card does not repeat what NEXT UP is already showing.
+
+    The ranking warms recently-worked tasks on purpose and scores "already
+    names its first step" highest, which a task you are mid-plan on always
+    is — so the card and NEXT UP naming the same task is the *ordinary* case.
+    When they agree, the card's second line was the same step NEXT UP showed
+    two hundred pixels below, in larger type, with a button beside it.
+    """
+
+    def setUp(self):
+        self.task = Task(text="Write the quarterly report")
+        self.task.set_current_step("copy the headings across")
+        self.log = FakeLog([a_session(self.task.id)])
+
+    def _line(self, shown_as_next=""):
+        return presenter.resume_line(self.log, [], [self.task],
+                                     shown_as_next=shown_as_next)
+
+    def test_with_no_strip_up_the_line_says_what_comes_next(self):
+        self.assertIn("Next: copy the headings across", self._line())
+
+    def test_the_step_is_not_said_twice(self):
+        self.assertNotIn("Next:", self._line(shown_as_next=self.task.id))
+
+    def test_what_it_keeps_is_what_next_up_does_not_carry(self):
+        # The minutes and the finished step are nowhere else on the screen.
+        line = presenter.resume_line(
+            self.log, [a_step(self.task.id, step="open last year's report")],
+            [self.task], shown_as_next=self.task.id)
+        self.assertEqual(
+            line,
+            "Last time: 20 minutes on Write the quarterly report — "
+            "you finished “open last year's report”.")
+
+    def test_a_different_task_on_the_strip_changes_nothing(self):
+        self.assertIn("Next:", self._line(shown_as_next="some-other-id"))
+
+
+@unittest.skipUnless(_display_available(), "tkinter display not available")
+class NotTwiceOnTheScreenTests(unittest.TestCase):
+    def setUp(self):
+        from cognitive_offload.app import CognitiveOffloadApp
+        from cognitive_offload.storage import Config
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name)
+        config = Config(root / "config.json")
+        config.db_path = root / "db"
+        config.matrix_db_path = root / "matrix"
+        self.app = CognitiveOffloadApp(config=config)
+        self.app.withdraw()
+        self.addCleanup(self._destroy)
+
+    def _destroy(self):
+        try:
+            self.app.destroy()
+        except tk.TclError:
+            pass
+
+    def _add(self, text, step, **fields):
+        self.app.capture_entry.insert(0, text)
+        self.app.add_task_from_capture()
+        task = [t for t in self.app.tasks if t.text == text][0]
+        task.set_current_step(step)
+        for name, value in fields.items():
+            setattr(task, name, value)
+        return task
+
+    def _caption(self):
+        self.app.refresh_all()
+        self.app.set_idle_focus_caption()
+        return self.app.focus_task_var.get()
+
+    def test_the_ordinary_case_says_the_step_once(self):
+        task = self._add("Write the quarterly report", "copy the headings across")
+        self.app.session_log.sessions.append(a_session(task.id, task=task.text))
+        caption = self._caption()
+        self.assertEqual(self.app.next_title_var.get(), task.text)
+        self.assertNotIn("Next:", caption)
+        self.assertIn("Last time: 20 minutes on", caption)
+
+    def test_a_strip_naming_something_else_leaves_the_line_alone(self):
+        task = self._add("Write the quarterly report", "copy the headings across")
+        # A booking for today outranks a merely warm task, so the strip names
+        # the other one and the card is the only place saying where you were.
+        self._add("Ring the insurance company", "find the policy number",
+                  scheduled_for=presenter.today_iso())
+        self.app.session_log.sessions.append(a_session(task.id, task=task.text))
+        caption = self._caption()
+        self.assertEqual(self.app.next_title_var.get(),
+                         "Ring the insurance company")
+        self.assertIn("Next: copy the headings across", caption)
+
+    def test_a_strip_that_is_not_on_screen_suppresses_nothing(self):
+        """The trap this is keyed to avoid.
+
+        The strip steps out of sight while a block runs, but the ranking goes
+        on agreeing — so a suppression keyed on the ranking rather than on
+        what is displayed would drop the line for a box that is not there.
+        """
+        task = self._add("Write the quarterly report", "copy the headings across")
+        self.app.session_log.sessions.append(a_session(task.id, task=task.text))
+        self.app._timer_running = True
+        self.app._timer_mode = "focus"
+        self.app.refresh_next_up()
+        self.assertFalse(self.app._next_up_shown)
+        self.assertEqual(self.app._next_task_id, task.id)
+        self.app.set_idle_focus_caption()
+        self.assertIn("Next: copy the headings across",
+                      self.app.focus_task_var.get())
+
+if __name__ == "__main__":  # pragma: no cover
+    unittest.main()

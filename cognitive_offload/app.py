@@ -133,6 +133,7 @@ class CognitiveOffloadApp(tk.Tk):
         self.status_var = tk.StringVar(value="Ready.")
         self.counts_var = tk.StringVar(value="")
         self.focus_task_var = tk.StringVar(value=self.IDLE_CAPTION)
+        self._next_up_shown = False
         self.momentum_var = tk.StringVar(value="")
         self.due_var = tk.StringVar(value="")
         self.today_var = tk.StringVar(value="")
@@ -418,6 +419,7 @@ class CognitiveOffloadApp(tk.Tk):
                                       exclude=exclude)
         if view is None:
             self._next_task_id = None
+            self._next_up_shown = False
             self.next_title_var.set("")
             self.next_step_var.set("")
             if getattr(self, "next_frame", None) is not None:
@@ -425,6 +427,10 @@ class CognitiveOffloadApp(tk.Tk):
             return
 
         self._next_task_id = view.task_id
+        # Tracked rather than read back off the widget: a withdrawn window
+        # reports every widget unmapped, so asking `winfo_ismapped` would make
+        # anything keyed on this quietly never fire.
+        self._next_up_shown = getattr(self, "next_frame", None) is None
         self.next_title_var.set(view.title)
         self.next_step_var.set(view.step)
         if getattr(self, "next_frame", None) is not None:
@@ -442,8 +448,10 @@ class CognitiveOffloadApp(tk.Tk):
             # goes away, the deliberate keystroke does not.
             if self._timer_running and self._timer_mode == "focus":
                 self.next_frame.grid_remove()
+                self._next_up_shown = False
             else:
                 self.next_frame.grid()
+                self._next_up_shown = True
 
     def next_task(self) -> Task | None:
         return next((t for t in self.tasks if t.id == self._next_task_id), None)
@@ -615,7 +623,9 @@ class CognitiveOffloadApp(tk.Tk):
         after v3.48.0 spent a release taking things off it.
         """
         self.focus_task_var.set(
-            presenter.resume_line(self.session_log, self.steps_log, self.tasks)
+            presenter.resume_line(
+                self.session_log, self.steps_log, self.tasks,
+                shown_as_next=self._next_task_id if self._next_up_shown else "")
             or self.IDLE_CAPTION)
 
     def record_step_done(self, item) -> None:

@@ -21,6 +21,7 @@ from .models import (
     parse_date_input,
     parse_estimate_input,
     repeat_label,
+    snooze_is_live,
     today_iso,
 )
 from .handoff import (
@@ -279,7 +280,7 @@ class TaskEditorDialog(ModalDialog):
         # The one exit from "Not today" besides waiting: visible only while
         # a snooze is actually in effect, and still no badge on the list.
         self.unsnooze_var = None
-        if snoozed_until and snoozed_until > today_iso():
+        if snooze_is_live(snoozed_until):
             self.unsnooze_var = tk.BooleanVar(value=False)
             ttk.Checkbutton(
                 self.body,

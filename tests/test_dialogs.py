@@ -565,6 +565,27 @@ class DialogCollectTests(unittest.TestCase):
         self.assertFalse(dialog.collect()["clear_snooze"])
         dialog.destroy()
 
+    def test_a_snooze_that_has_run_out_shows_no_chrome_either(self):
+        """The checkbox offers to end something that has already ended.
+
+        It reads "Excused from suggestions until <date>", so on a spent date
+        it is both an untrue sentence and a control that does nothing. The
+        rule was written out inline here for a while and nothing tested it:
+        replacing it with `if snoozed_until:` passed the whole suite.
+        """
+        from datetime import date, timedelta
+
+        from cognitive_offload.dialogs import TaskEditorDialog
+
+        for label, days in (("yesterday", -1), ("today", 0)):
+            with self.subTest(label):
+                spent = (date.today() + timedelta(days=days)).isoformat()
+                dialog = TaskEditorDialog(self.root, title="t",
+                                          snoozed_until=spent)
+                self.assertIsNone(dialog.unsnooze_var)
+                self.assertFalse(dialog.collect()["clear_snooze"])
+                dialog.destroy()
+
     def test_the_editor_offers_a_way_out_of_a_handoff_only_while_one_is_on(self):
         """Built like the snooze exit above it: carrying the waiting mark onto
         the main list without this would leave a task marked as out with

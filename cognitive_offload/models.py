@@ -409,6 +409,17 @@ def _is_waiting(item) -> bool:
     return bool(getattr(item, "handed_to", "") or getattr(item, "handed_off_on", ""))
 
 
+def snooze_is_live(snoozed_until: str, on: str | None = None) -> bool:
+    """Is this "not today" date still in the future?
+
+    Takes the date rather than the task, because the task editor holds the
+    value as a plain string and had written the comparison out for itself.
+    That inline copy is how the rule ends up with two answers.
+    """
+    value = (snoozed_until or "").strip()
+    return bool(value) and value > (on or today_iso())
+
+
 def _is_snoozed(item, on: str | None = None) -> bool:
     """Put down until a later day — "not today", and still not today.
 
@@ -418,8 +429,7 @@ def _is_snoozed(item, on: str | None = None) -> bool:
     most prominent thing on the screen go on naming a task the list itself
     had agreed to stop naming.
     """
-    snoozed = getattr(item, "snoozed_until", "")
-    return bool(snoozed) and snoozed > (on or today_iso())
+    return snooze_is_live(getattr(item, "snoozed_until", ""), on)
 
 
 def _is_put_down(item, on: str | None = None) -> bool:

@@ -5,6 +5,51 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.58.0 — Said once, and not about what you set aside
+Two more places where a rule the app already had was not being asked, found
+by following v3.57.0's fix to its other readers.
+
+- **"Booked for today" no longer counts a task you have put down.** Press
+  "Not today" on something booked for today and the banner went on saying
+  *"1 booked for today →"* — the app contradicting, in the second-most
+  prominent slot on the screen, the statement you had just made. The more
+  recent of your two statements is the one that means something. A task out
+  with someone else was the same error the suggestion slot already avoids:
+  the banner's click selects it and says *"Booked for today: X"*, pointing
+  you at work that is not yours to do.
+
+  Not a hiding, either way — the task keeps its place in the list and its
+  `booked` badge. Only the count changes, exactly as with the suggestion
+  slot. Both halves of the banner learned it, the main list and the matrix
+  Schedule quadrant.
+
+- **The focus card stopped saying what NEXT UP was already saying.** The
+  ranking warms recently-worked tasks on purpose and scores "already names
+  its first step" highest — which a task you are mid-plan on always is — so
+  the card and NEXT UP naming the same task is the *ordinary* case, not an
+  edge one. Measured across three arrangements, the card's second line was
+  the same step NEXT UP was showing two hundred pixels below, in larger type,
+  with a **Start this** button beside it. In calm mode, whose whole job is
+  having less on the screen, that duplicate was the longest text block up.
+
+  Only the repeated half goes: *"Last time: 20 minutes on X — you finished
+  Y"* is a record NEXT UP does not carry. It is keyed on what the strip is
+  **showing**, not on what the ranking would pick, because the strip steps
+  out of sight during a running block while the ranking goes on agreeing —
+  and a line dropped for a box that is not there is information lost for
+  nothing.
+
+- **One snooze rule, one put-down filter.** `snooze_is_live` takes the date
+  rather than the task, so the task editor asks it instead of writing the
+  comparison out again, and `rank_for_starting` collapses its two filters
+  into `is_put_down`. Four copies of this rule existed a release ago; there
+  is one now.
+
+  The editor's copy turned out to be untested as well as duplicated:
+  replacing it with `if snoozed_until:` passed the entire suite, so nothing
+  checked that a **spent** snooze shows no "Excused from suggestions until…"
+  checkbox — an untrue sentence attached to a control that does nothing.
+
 ## 3.57.0 — A task you put down stays put down
 The focus card learned to say what you were last doing (3.56.0) and then said
 it about tasks you had deliberately set aside.

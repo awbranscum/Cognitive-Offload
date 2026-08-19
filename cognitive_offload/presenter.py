@@ -416,10 +416,24 @@ def due_view(tasks: list, scheduled: list | None = None,
     oldest overdue task, so the most confident gesture in the feature landed on
     something from two months ago. One function means they cannot disagree
     again.
+
+    **A task you have put down is not counted.** Pressing "Not today" on
+    something booked for today is a direct contradiction, and the more recent
+    of your two statements is the one that means something — the app saying
+    "1 booked for today" about the one thing you just said you would not do
+    today is the forced contact ``snooze_next`` exists to prevent, arriving
+    through a different door. A task out with someone else is the same error
+    the suggestion slot already avoids: the banner's click selects it and
+    says "Booked for today: X", which points you at work that is not yours.
+
+    Not a hiding, either way: the task keeps its place in the list and its
+    "booked" badge. Only the count changes, exactly as with the suggestion
+    slot.
     """
     day = on or today_iso()
-    due = scheduled_today(tasks, on=day)
-    booked = [t for t in (scheduled or []) if t.scheduled_for == day]
+    due = [t for t in scheduled_today(tasks, on=day) if not t.is_put_down(day)]
+    booked = [t for t in (scheduled or [])
+              if t.scheduled_for == day and not t.is_put_down(day)]
     total = len(due) + len(booked)
     return DueView(
         total=total,
@@ -502,7 +516,7 @@ def short(text: str, limit: int = RESUME_PIECE_LIMIT) -> str:
 
 
 def resume_line(session_log=None, steps_log: list | None = None,
-                tasks: list | None = None) -> str:
+                tasks: list | None = None, shown_as_next: str = "") -> str:
     """"What was I doing?", answered from the record rather than from memory.
 
     An interruption costs the context, not the intention — you know you were
@@ -534,6 +548,21 @@ def resume_line(session_log=None, steps_log: list | None = None,
     suggestion slot and left the focus card naming the step anyway — the
     repeated forced contact ``snooze_next`` exists to prevent, delivered from
     a more prominent place than the thing it was protecting.
+
+    **It does not repeat what the screen is already saying.** ``shown_as_next``
+    is the id of the task the NEXT UP strip is displaying, or "" when the
+    strip is not up. When it is this task, the "Next:" half said the same step
+    NEXT UP was already showing two hundred pixels below, in larger type, with
+    a button beside it — and that is the *ordinary* case, not an edge one,
+    because the ranking warms recently-worked tasks on purpose and scores
+    "already names its first step" highest, which a task you are mid-plan on
+    always is. The "Last time" half stays: the minutes and the step you
+    finished are things NEXT UP does not carry.
+
+    Keyed on what the strip is *showing* rather than on what the ranking would
+    pick, because the strip steps out of sight during a running block while
+    the ranking goes on agreeing — and a line dropped for a box that is not
+    there is information lost for nothing.
     """
     sessions = getattr(session_log, "sessions", None) or []
     last = next((s for s in reversed(sessions) if s.task_id), None)
@@ -552,8 +581,9 @@ def resume_line(session_log=None, steps_log: list | None = None,
     opening = f"Last time: {plural(minutes, 'minute')} on {short(task.text)}"
     finished = (f" — you finished \u201c{short(step['step'])}\u201d"
                 if step else "")
-    following = (f"\nNext: {short(task.first_step)}"
-                 if task.first_step and not task.is_put_down() else "")
+    say_next = (task.first_step and not task.is_put_down()
+                and task.id != shown_as_next)
+    following = f"\nNext: {short(task.first_step)}" if say_next else ""
     return f"{opening}{finished}.{following}"
 
 

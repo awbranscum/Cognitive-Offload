@@ -11,7 +11,7 @@ import unittest
 from datetime import date, timedelta
 
 from cognitive_offload import presenter
-from cognitive_offload.models import Task, today_iso
+from cognitive_offload.models import MatrixTask, Task, today_iso
 from cognitive_offload.sessions import FocusSession, SessionLog
 
 
@@ -419,13 +419,70 @@ class DueViewTests(unittest.TestCase):
         self.assertEqual(view.tasks[0].text, "today's booking")
 
     def test_scheduled_matrix_tasks_join_the_count(self):
-        class Booked:
-            scheduled_for = today_iso()
-
+        # A real MatrixTask rather than a stub carrying one attribute: the
+        # banner asks a quadrant task the same questions it asks a list task,
+        # and a stub that answers only `scheduled_for` passes tests the real
+        # object would fail.
+        booked = MatrixTask(title="quadrant booking",
+                            scheduled_for=today_iso())
         view = presenter.due_view([make("task", scheduled_for=today_iso())],
-                                  [Booked()])
+                                  [booked])
         self.assertEqual(view.total, 2)
         self.assertEqual(view.text, "2 booked for today →")
+
+
+class PutDownIsNotBookedTests(unittest.TestCase):
+    """A task you have set aside stops being counted as today's.
+
+    Pressing "Not today" on something booked for today is a direct
+    contradiction, and the more recent of the two statements is the one that
+    means something. A task out with someone else is the error the suggestion
+    slot already avoids: the banner's click selects it and says "Booked for
+    today: X", pointing at work that is not yours to do.
+    """
+
+    def _days(self, n):
+        return (date.today() + timedelta(days=n)).isoformat()
+
+    def _view(self, **fields):
+        task = make("ring the insurance company", scheduled_for=today_iso())
+        for name, value in fields.items():
+            setattr(task, name, value)
+        return presenter.due_view([task])
+
+    def test_a_plain_booking_is_still_counted(self):
+        self.assertEqual(self._view().total, 1)
+
+    def test_not_today_takes_it_out_of_the_count(self):
+        view = self._view(snoozed_until=self._days(1))
+        self.assertEqual(view.total, 0)
+        self.assertEqual(view.text, "")
+
+    def test_a_snooze_that_has_run_out_is_counted_again(self):
+        self.assertEqual(self._view(snoozed_until=self._days(-1)).total, 1)
+
+    def test_a_task_out_with_someone_is_not_counted(self):
+        view = self._view(handed_to="Mum", follow_up_on=self._days(3))
+        self.assertEqual(view.total, 0)
+
+    def test_but_it_comes_back_on_the_check_back_day(self):
+        view = self._view(handed_to="Mum", follow_up_on=self._days(-1))
+        self.assertEqual(view.total, 1)
+
+    def test_the_click_lands_on_what_the_count_counted(self):
+        # The count and the click come from one call; dropping a task from
+        # one and not the other is the drift this function exists to stop.
+        put_down = make("out with Mum", scheduled_for=today_iso(),
+                        handed_to="Mum")
+        live = make("still mine", scheduled_for=today_iso())
+        view = presenter.due_view([put_down, live])
+        self.assertEqual(view.total, len(view.tasks) + len(view.scheduled))
+        self.assertEqual([t.text for t in view.tasks], ["still mine"])
+
+    def test_a_quadrant_booking_is_asked_the_same_question(self):
+        booked = MatrixTask(title="quadrant booking",
+                            scheduled_for=today_iso(), handed_to="Codex")
+        self.assertEqual(presenter.due_view([], [booked]).total, 0)
 
 
 class TodayViewTests(unittest.TestCase):
