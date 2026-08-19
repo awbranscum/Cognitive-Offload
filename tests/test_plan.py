@@ -688,3 +688,159 @@ class SessionEndThroughTheAppTests(unittest.TestCase):
         self._finish(step_done=True)
         self.app.undo()
         self.assertEqual(self.app.tasks[0].steps_done, 0)
+
+
+class WhereYouAreDuringASessionTests(unittest.TestCase):
+    """During a session the one thing about the plan worth showing is where
+    you are in it — not what is coming, which is a decision, on the screen
+    someone is looking at because deciding is the hard part."""
+
+    def test_the_focus_caption_says_the_place(self):
+        from cognitive_offload.rows import focus_caption, plan_place
+
+        task = planned(first_step=PLAN[0])
+        task.advance_step()
+        self.assertEqual(focus_caption(task, task.first_step, plan_place(task)),
+                         f"Write the quarterly report\n→ {PLAN[1]} · step 2 of 4")
+
+    def test_a_task_with_no_plan_reads_exactly_as_before(self):
+        from cognitive_offload.rows import focus_caption, plan_place
+
+        task = Task(text="Bins", first_step="wheel it to the kerb")
+        self.assertEqual(plan_place(task), "")
+        self.assertEqual(focus_caption(task, task.first_step, plan_place(task)),
+                         "Bins\n→ wheel it to the kerb")
+
+    def test_free_focus_and_a_stepless_task_are_untouched(self):
+        from cognitive_offload.rows import focus_caption
+
+        self.assertEqual(focus_caption(None, "just start"), "Free focus — just start")
+        self.assertEqual(focus_caption(Task(text="Bins"), ""), "Bins")
+
+
+@unittest.skipUnless(_display_available(), "tkinter display not available")
+class StartDialogPlaceTests(unittest.TestCase):
+    def setUp(self):
+        from cognitive_offload.theme import apply_theme
+
+        self.root = tk.Tk()
+        self.root.withdraw()
+        apply_theme(self.root, "light")
+        self.addCleanup(self.root.destroy)
+
+    def _labels(self, dialog):
+        from tkinter import ttk
+
+        found = []
+
+        def walk(widget):
+            for child in widget.winfo_children():
+                if isinstance(child, ttk.Label):
+                    found.append(child.cget("text"))
+                walk(child)
+
+        walk(dialog)
+        return found
+
+    def _dialog(self, **kw):
+        from cognitive_offload.dialogs import StartFocusDialog
+
+        dialog = StartFocusDialog(self.root, task_text="Write the report",
+                                  first_step=PLAN[0], **kw)
+        self.addCleanup(dialog.destroy)
+        return dialog
+
+    def test_the_place_is_shown_when_there_is_one(self):
+        self.assertIn("step 2 of 4", self._labels(self._dialog(place="step 2 of 4")))
+
+    def test_nothing_is_added_for_a_task_with_no_plan(self):
+        """Counted, not pattern-matched: an empty label packed anyway is
+        still a row of dead space, and "does not start with 'step '" is true
+        of an empty string."""
+        with_place = self._labels(self._dialog(place="step 2 of 4"))
+        without = self._labels(self._dialog())
+        self.assertEqual(len(without), len(with_place) - 1)
+        self.assertNotIn("", without)
+
+    def test_the_plan_itself_is_not_shown_here(self):
+        """Deliberately: what comes next is a decision, and this is the
+        screen someone is on because deciding is what they are stuck on."""
+        labels = " ".join(self._labels(self._dialog(place="step 2 of 4")))
+        for step in PLAN[1:]:
+            self.assertNotIn(step, labels)
+
+
+@unittest.skipUnless(_display_available(), "tkinter display not available")
+class StartingASessionKeepsThePlanInStepTests(unittest.TestCase):
+    """A fourth place that wrote `first_step` directly.
+
+    The editor and the session-end dialog were both fixed to go through
+    `set_current_step`; the start dialog was not. On a task with a plan,
+    renaming the first move as you start left `first_step` disagreeing with
+    the plan — and `_fix_steps` puts that right on the next load, so the
+    rename survived exactly until the app was closed.
+    """
+
+    def setUp(self):
+        from cognitive_offload.app import CognitiveOffloadApp
+        from cognitive_offload.storage import Config
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name)
+        config = Config(root / "config.json")
+        config.db_path = root / "db"
+        config.matrix_db_path = root / "matrix"
+        self.app = CognitiveOffloadApp(config=config)
+        self.app.withdraw()
+        self.addCleanup(self._destroy)
+        self.app.capture_entry.insert(0, "Write the quarterly report")
+        self.app.add_task_from_capture()
+        self.task = self.app.tasks[0]
+        self.task.first_step = PLAN[0]
+        self.task.set_rest(PLAN[1:])
+        self.app.task_list.selection_set(0)
+
+    def _destroy(self):
+        try:
+            self.app.destroy()
+        except tk.TclError:
+            pass
+
+    def _start(self, first_step):
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as dialog:
+            dialog.return_value.show.return_value = {
+                "first_step": first_step, "minutes": 15, "warmup_done": 0,
+                "warmup_steps": None, "show_warmup": True, "popout": False}
+            self.app.begin_focus(self.app.tasks[0])
+            return dialog.call_args
+
+    def test_renaming_the_first_move_reaches_the_plan(self):
+        self._start("open the one from last quarter")
+        task = self.app.tasks[0]
+        self.assertEqual(task.first_step, "open the one from last quarter")
+        self.assertEqual(task.steps[0], "open the one from last quarter",
+                         "the plan still holds the old wording")
+
+    def test_the_rename_survives_being_written_out(self):
+        """The half that made it a data loss rather than a cosmetic slip."""
+        self._start("open the one from last quarter")
+        from cognitive_offload.models import Task as T
+
+        back = T.from_dict(self.app.tasks[0].to_dict())
+        self.assertEqual(back.first_step, "open the one from last quarter")
+
+    def test_the_dialog_is_told_where_in_the_plan_the_task_is(self):
+        call = self._start(PLAN[0])
+        self.assertEqual(call.kwargs["place"], "step 1 of 4")
+
+    def test_the_focus_card_says_the_place(self):
+        self._start(PLAN[0])
+        self.assertIn("step 1 of 4", self.app.focus_task_var.get())
+
+    def test_a_task_with_no_plan_is_told_no_place(self):
+        self.app.tasks[0].set_rest([])
+        self.app.tasks[0].first_step = "wheel it to the kerb"
+        call = self._start("wheel it to the kerb")
+        self.assertEqual(call.kwargs["place"], "")
+        self.assertNotIn("step ", self.app.focus_task_var.get())

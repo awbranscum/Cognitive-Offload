@@ -350,6 +350,7 @@ def task_list_view(
     show_done: bool = True,
     kind: str | None = None,
     completed_log: list | None = None,
+    steps_log: list | None = None,
 ) -> TaskListView:
     """The visible rows, plus the counters that describe what was left out."""
     visible = visible_tasks(
@@ -363,7 +364,14 @@ def task_list_view(
     if hidden > 0:
         summary += f" · {hidden} hidden"
 
-    finished = len(completed_titles_today(tasks, completed_log))
+    # Steps as well as tasks, because this number is a PROMISE ABOUT THE
+    # PANEL the pill opens, and that panel lists both. Counting only tasks
+    # made the number disagree with what it opened — and worse, on a day
+    # spent moving through one long task and finishing nothing it read zero,
+    # which hides the pill, which is the panel's only route. The evidence
+    # existed and could not be reached.
+    finished = (len(completed_titles_today(tasks, completed_log))
+                + len(steps_done_on(steps_log, today_iso())))
     # A day with nothing finished says nothing. "0 done today" is the kind of
     # scoreboard this app exists not to keep, so the empty string here is a
     # decision, not a missing value — the caller hides the pill on it.

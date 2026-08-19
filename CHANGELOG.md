@@ -5,6 +5,47 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.55.0 — The other half of the wheel fix, and a door that hid itself
+Three things, all of them consequences of the last release rather than new
+ground — which is the argument for auditing a release from outside it.
+
+- **The same stray-scroll bug on the timer.** v3.54.0 stopped a wheel notch
+  changing a combobox and stopped there. The right question was *which ttk
+  classes bind the wheel at all*, and the answer includes `ttk.Spinbox`:
+  one notch over the "Min" box took a session from 15 minutes to 14 and
+  carried it into the running clock, so the block you agreed to was quietly
+  not the block you got. Both spinboxes — the timer and the start dialog's
+  session length — are covered now.
+
+  The guard is the part that matters. `tests/test_wheel.py` no longer looks
+  for comboboxes: it **walks the app and every dialog**, reads the value of
+  anything that has one, and requires every wheel-bound class it meets to be
+  either checked or named as one whose wheel legitimately scrolls. A widget
+  added next year is covered the moment it exists, and a *class* nobody has
+  decided about fails the suite. That version would have caught the spinbox
+  on the day the combobox was fixed.
+
+- **"N done today" hid the panel it opens.** v3.54.0 made that panel list
+  finished steps as well as finished tasks; the pill went on counting tasks.
+  So the number disagreed with what it opened — and on a day spent moving
+  through one long task and finishing nothing the count was zero, which
+  hides the pill, and the pill is that panel's **only** route. The evidence
+  existed and could not be reached. The count is a promise about the panel,
+  so it now counts what the panel shows.
+
+- **A fourth place that wrote `first_step` directly.** The editor and the
+  session-end dialog were both fixed to go through `set_current_step`; the
+  start dialog was not. On a task with a plan, renaming the first move as you
+  started a session left `first_step` disagreeing with the plan — and the
+  invariant repairs that on the next load, so the rename survived exactly
+  until the app was closed.
+
+- **Where you are in the plan, during a session.** The focus card, the
+  pop-out and the start dialog now say "step 2 of 4" beside the step. Only
+  the place, deliberately — not what is coming, because that is a decision,
+  and the start dialog is the screen someone is looking at *because* deciding
+  is the part they are stuck on.
+
 ## 3.54.0 — A stray scroll cannot hide your tasks, and a finished step counts
 Two things, both found by auditing a release from outside it.
 

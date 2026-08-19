@@ -462,6 +462,7 @@ rows.py | returns | focus_caption | Free focus
 rows.py | returns | focus_caption | Free focus — {}
 rows.py | returns | focus_caption | {}\n→ {}
 rows.py | returns | plan_place | step {steps_done} of {}
+rows.py | step= | focus_caption | {} · {}
 rows.py | subtitle= | task_row | done {}
 storage.py | arg | <module> | [^A-Za-z0-9._ -]+
 storage.py | arg | _new_path | The matrix folder is missing: {} (moved or unmounted?)

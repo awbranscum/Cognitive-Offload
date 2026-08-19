@@ -1,19 +1,24 @@
-"""A stray scroll must never change what a task says.
+"""A stray scroll must never change a value.
 
-ttk binds the mouse wheel to ``ttk::combobox::Scroll``, so one notch with the
-pointer merely *over* a combobox changes its value — no click, no focus.
-Measured in the running app with three tasks on screen: one notch over the
-"feel" filter moved it to "Urgent sprint" and the list went to **zero rows**,
-with nothing saying why. This app's own rule is that hiding a task is the one
-thing it will not do.
+ttk binds the mouse wheel to `ttk::combobox::Scroll`, so one notch with the
+pointer merely *over* a combobox changed it — no click, no focus. Measured in
+the running app with three tasks on screen: one notch over the "feel" filter
+moved it to "Urgent sprint" and the list went to **zero rows**, with nothing
+saying why. This app's own rule is that hiding a task is the one thing it
+will not do.
 
-Three of the six comboboxes change saved data rather than the view, and the
-worst is "Repeats": a stray notch there makes a task recur for ever.
+Fixing that class and stopping was half a fix. `TSpinbox` does exactly the
+same thing, and the app has three of them: one notch over the timer's "Min"
+box took a session from 15 minutes to 14 and carried it into the running
+clock, so the block you agreed to was quietly not the block you got.
 
-So these tests find the comboboxes rather than listing them. A seventh added
-next year is covered the moment it exists, which is the whole reason the fix
-is a class binding and not six calls — this project has watched four
-hand-written per-site lists go stale already.
+So this file does not name the widgets it protects. It **walks the app and
+every dialog**, reads the value of anything that has one, and requires every
+wheel-bound class it meets to be either checked here or named as one whose
+wheel legitimately scrolls. A widget added next year is covered the moment it
+exists, and a *class* added to the toolkit fails the suite until someone says
+which kind it is — which is the guard that would have caught the spinbox on
+the day the combobox was fixed.
 """
 
 import tempfile
@@ -38,13 +43,62 @@ def _display_available() -> bool:
     return True
 
 
-def _combos(widget) -> list:
-    """Every ttk.Combobox anywhere inside, at any depth."""
-    found = []
+def _variable_value(widget):
+    name = widget.cget("variable")
+    return widget.getvar(name) if name else None
+
+
+#: How to read the value of a widget that holds one, by Tk class name.
+#: Anything here is scrolled over and checked.
+VALUE_READERS = {
+    "TCombobox": lambda w: w.get(),
+    "TSpinbox": lambda w: w.get(),
+    "TEntry": lambda w: w.get(),
+    "Entry": lambda w: w.get(),
+    "Spinbox": lambda w: w.get(),
+    "TScale": lambda w: w.get(),
+    "Scale": lambda w: w.get(),
+    "TCheckbutton": _variable_value,
+    "TRadiobutton": _variable_value,
+}
+
+#: Wheel-bound classes whose binding legitimately SCROLLS, with the reason.
+#: A class that is neither here nor in VALUE_READERS fails the net below.
+SCROLLS_NOT_A_VALUE = {
+    "Text": "its wheel scrolls the text, which is what a wheel is for",
+    "Listbox": "as above",
+    "TScrollbar": "dragging a scrollbar with the wheel is the same gesture",
+    "Treeview": "as above — and the app does not use one",
+    "Canvas": "the scrolling surfaces in this app are canvases, and their "
+              "wheel handlers are bound per widget rather than per class",
+}
+
+WHEEL_EVENTS = ("<MouseWheel>", "<Button-4>", "<Button-5>")
+
+
+def _walk(widget):
+    yield widget
     for child in widget.winfo_children():
-        if isinstance(child, ttk.Combobox):
-            found.append(child)
-        found.extend(_combos(child))
+        yield from _walk(child)
+
+
+def _wheel_bound(widget) -> bool:
+    return any(widget.bind_class(widget.winfo_class(), seq)
+               for seq in WHEEL_EVENTS)
+
+
+def _valued(root):
+    """Every widget in the tree that holds a readable value."""
+    found = []
+    for widget in _walk(root):
+        reader = VALUE_READERS.get(widget.winfo_class())
+        if reader is None:
+            continue
+        try:
+            reader(widget)
+        except (tk.TclError, TypeError, ValueError):
+            continue
+        found.append(widget)
     return found
 
 
@@ -53,12 +107,97 @@ def _one_notch(widget, up: bool = False) -> None:
 
     One event, not a sequence: a probe that sends down-then-up measures their
     sum and reports "unchanged" about a widget that moved twice. That very
-    mistake nearly filed this bug as safe.
+    mistake nearly filed the combobox bug as safe.
     """
     widget.event_generate("<Button-4>" if up else "<Button-5>", x=5, y=5,
                           rootx=widget.winfo_rootx() + 5,
                           rooty=widget.winfo_rooty() + 5)
     widget.update()
+
+
+def _scroll_everything(testcase, root, label=""):
+    """One notch each way over every widget with a value; nothing may move."""
+    widgets = _valued(root)
+    testcase.assertTrue(widgets, f"{label}: nothing with a value was found")
+    for widget in widgets:
+        reader = VALUE_READERS[widget.winfo_class()]
+        for up in (False, True):
+            before = reader(widget)
+            _one_notch(widget, up=up)
+            with testcase.subTest(where=label, widget=widget.winfo_class(), up=up):
+                testcase.assertEqual(reader(widget), before)
+    return widgets
+
+
+@unittest.skipUnless(_display_available(), "tkinter display not available")
+class ClassCoverageTests(unittest.TestCase):
+    """The net: every wheel-bound class the app actually contains is either
+    checked or named as one that scrolls."""
+
+    def setUp(self):
+        from cognitive_offload.app import CognitiveOffloadApp
+        from cognitive_offload.storage import Config
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name)
+        config = Config(root / "config.json")
+        config.db_path = root / "db"
+        config.matrix_db_path = root / "matrix"
+        self.app = CognitiveOffloadApp(config=config)
+        self.app.withdraw()
+        self.addCleanup(self._destroy)
+        self.app.update()
+
+    def _destroy(self):
+        try:
+            self.app.destroy()
+        except tk.TclError:
+            pass
+
+    def _classes_in(self, root):
+        return {w.winfo_class() for w in _walk(root) if _wheel_bound(w)}
+
+    def test_every_wheel_bound_class_present_is_accounted_for(self):
+        from cognitive_offload.dialogs import HandoffDialog, TaskEditorDialog
+
+        seen = self._classes_in(self.app)
+        for build in (lambda: TaskEditorDialog(self.app, title="t", with_tags=True),
+                      lambda: HandoffDialog(self.app, "Chase the claim")):
+            dialog = build()
+            self.addCleanup(dialog.destroy)
+            dialog.update()
+            seen |= self._classes_in(dialog)
+        known = set(VALUE_READERS) | set(SCROLLS_NOT_A_VALUE)
+        self.assertEqual(
+            seen - known, set(),
+            "a wheel-bound widget class is in the app that nothing has "
+            "decided about — read it in VALUE_READERS, or name it in "
+            "SCROLLS_NOT_A_VALUE with a reason",
+        )
+
+    def test_the_two_that_change_values_are_both_still_neutered(self):
+        """Named explicitly as well as walked, because these are the two the
+        toolkit gets wrong and the walk would pass if they vanished."""
+        from cognitive_offload.theme import VALUE_WHEEL_CLASSES
+
+        self.assertEqual(set(VALUE_WHEEL_CLASSES), {"TCombobox", "TSpinbox"})
+        for name in VALUE_WHEEL_CLASSES:
+            for sequence in WHEEL_EVENTS:
+                with self.subTest(cls=name, sequence=sequence):
+                    self.assertTrue(self.app.bind_class(name, sequence),
+                                    "ttk's own binding is still in place")
+
+    def test_every_exemption_carries_a_reason(self):
+        for reason in SCROLLS_NOT_A_VALUE.values():
+            self.assertTrue(reason.strip())
+
+    def test_the_walk_finds_both_kinds_in_the_app(self):
+        """Guard the guard: if the walk found neither, every test here would
+        pass by looking at nothing."""
+        classes = {w.winfo_class() for w in _valued(self.app)}
+        self.assertIn("TCombobox", classes)
+        self.assertIn("TSpinbox", classes)
 
 
 @unittest.skipUnless(_display_available(), "tkinter display not available")
@@ -88,36 +227,35 @@ class MainWindowTests(unittest.TestCase):
         except tk.TclError:
             pass
 
-    def test_the_app_still_has_comboboxes_to_protect(self):
-        """Guard the guard: if the walk finds none, every test below passes
-        by looking at nothing."""
-        self.assertGreaterEqual(len(_combos(self.app)), 3)
-
-    def test_no_combobox_changes_when_the_wheel_goes_over_it(self):
-        for combo in _combos(self.app):
-            for up in (False, True):
-                before = combo.get()
-                _one_notch(combo, up=up)
-                with self.subTest(values=combo.cget("values"), up=up):
-                    self.assertEqual(combo.get(), before)
+    def test_nothing_on_the_main_window_changes_when_scrolled(self):
+        _scroll_everything(self, self.app, "main window")
 
     def test_the_task_list_does_not_empty_itself(self):
         """The symptom that matters, asserted as behaviour rather than as a
         widget value: three tasks in, three tasks still on screen."""
-        before = self.app.task_list.size()
-        self.assertEqual(before, 3)
-        for combo in _combos(self.app):
-            _one_notch(combo)
+        self.assertEqual(self.app.task_list.size(), 3)
+        for widget in _valued(self.app):
+            _one_notch(widget)
         self.app.update()
-        self.assertEqual(self.app.task_list.size(), before,
-                         "a stray scroll hid tasks")
+        self.assertEqual(self.app.task_list.size(), 3, "a stray scroll hid tasks")
 
     def test_the_saved_sort_order_is_not_rewritten(self):
         before = self.app.config_store.sort_order
-        for combo in _combos(self.app):
-            _one_notch(combo)
+        for widget in _valued(self.app):
+            _one_notch(widget)
         self.app.update()
         self.assertEqual(self.app.config_store.sort_order, before)
+
+    def test_the_session_you_agreed_to_is_the_one_you_get(self):
+        """The spinbox case: a notch over "Min" took 15 minutes to 14 and
+        carried it into the running clock."""
+        before_minutes = self.app.work_minutes.get()
+        before_total = self.app._timer_total
+        for widget in _valued(self.app):
+            _one_notch(widget)
+        self.app.update()
+        self.assertEqual(self.app.work_minutes.get(), before_minutes)
+        self.assertEqual(self.app._timer_total, before_total)
 
 
 @unittest.skipUnless(_display_available(), "tkinter display not available")
@@ -131,12 +269,15 @@ class DialogTests(unittest.TestCase):
         self.addCleanup(self.root.destroy)
 
     def _dialogs(self):
-        from cognitive_offload.dialogs import HandoffDialog, TaskEditorDialog
+        from cognitive_offload.dialogs import (HandoffDialog, StartFocusDialog,
+                                               TaskEditorDialog)
 
         made = [
             TaskEditorDialog(self.root, title="Write the report",
                              kind="admin", repeat="weekly", with_tags=True),
             HandoffDialog(self.root, "Chase the claim"),
+            StartFocusDialog(self.root, task_text="Write the report",
+                             first_step="open it", minutes=15),
         ]
         for dialog in made:
             self.addCleanup(dialog.destroy)
@@ -146,28 +287,27 @@ class DialogTests(unittest.TestCase):
             dialog.update()
         return made
 
-    def test_no_dialog_combobox_changes_either(self):
+    def test_nothing_in_any_dialog_changes_when_scrolled(self):
         for dialog in self._dialogs():
-            combos = _combos(dialog)
-            self.assertTrue(combos, f"{type(dialog).__name__} has none to check")
-            for combo in combos:
-                for up in (False, True):
-                    before = combo.get()
-                    _one_notch(combo, up=up)
-                    with self.subTest(dialog=type(dialog).__name__, up=up,
-                                      values=combo.cget("values")):
-                        self.assertEqual(combo.get(), before)
+            _scroll_everything(self, dialog, type(dialog).__name__)
 
     def test_what_the_editor_collects_is_what_was_set(self):
         """The end of the story rather than the middle: a scrolled dialog
         must save the feel and the repeat it was opened with."""
         editor = self._dialogs()[0]
-        for combo in _combos(editor):
-            _one_notch(combo)
+        for widget in _valued(editor):
+            _one_notch(widget)
         editor.update()
         result = editor.collect()
         self.assertEqual(result["kind"], "admin")
         self.assertEqual(result["repeat"], "weekly")
+
+    def test_the_session_length_is_not_shortened_by_a_scroll(self):
+        starter = self._dialogs()[2]
+        for widget in _valued(starter):
+            _one_notch(widget)
+        starter.update()
+        self.assertEqual(starter.collect()["minutes"], 15)
 
     def test_the_wheel_now_scrolls_the_form_instead(self):
         """The event is not swallowed, it is handed on. Scrolling with the
@@ -186,7 +326,7 @@ class DialogTests(unittest.TestCase):
         dialog.update()
         dialog._canvas.yview_moveto(0)
         dialog.update()
-        combo = _combos(dialog)[0]
+        combo = [w for w in _valued(dialog) if w.winfo_class() == "TCombobox"][0]
         _one_notch(combo)
         self.assertGreater(dialog._canvas.yview()[0], 0.0,
                            "the wheel was swallowed rather than handed on")
@@ -203,22 +343,13 @@ class TheFixItselfTests(unittest.TestCase):
     def test_every_wheel_sequence_is_covered(self):
         """X sends Button-4/5 and Windows sends MouseWheel. Covering one and
         not the other fixes the bug on the tester's machine only."""
-        from cognitive_offload.theme import WHEEL_EVENTS, apply_theme
+        from cognitive_offload.theme import WHEEL_EVENTS as APP_EVENTS
 
-        root = tk.Tk()
-        root.withdraw()
-        self.addCleanup(root.destroy)
-        apply_theme(root, "light")
-        self.assertEqual(set(WHEEL_EVENTS),
-                         {"<MouseWheel>", "<Button-4>", "<Button-5>"})
-        for sequence in WHEEL_EVENTS:
-            with self.subTest(sequence=sequence):
-                self.assertTrue(root.bind_class("TCombobox", sequence),
-                                "ttk's own binding is still in place")
+        self.assertEqual(set(APP_EVENTS), set(WHEEL_EVENTS))
 
     def test_it_is_installed_by_applying_the_theme(self):
-        """So it is on before any combobox exists, and stays on across a
-        theme switch."""
+        """So it is on before any widget exists, and stays on across a theme
+        switch."""
         from cognitive_offload.theme import apply_theme
 
         root = tk.Tk()
@@ -229,11 +360,17 @@ class TheFixItselfTests(unittest.TestCase):
             combo = ttk.Combobox(root, values=["a", "b", "c"], state="readonly")
             combo.set("a")
             combo.pack()
+            spin = ttk.Spinbox(root, from_=1, to=120)
+            spin.set("15")
+            spin.pack()
             root.update()
             _one_notch(combo)
+            _one_notch(spin)
             with self.subTest(theme=name):
                 self.assertEqual(combo.get(), "a")
+                self.assertEqual(spin.get(), "15")
             combo.destroy()
+            spin.destroy()
 
 
 if __name__ == "__main__":  # pragma: no cover

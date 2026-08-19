@@ -189,6 +189,14 @@ def _pick_family(root: tk.Misc) -> str:
 #: the wheel sequences X and Windows use. Button-4/5 are the X ones.
 WHEEL_EVENTS = ("<MouseWheel>", "<Button-4>", "<Button-5>")
 
+#: ttk classes whose own wheel binding CHANGES A VALUE rather than scrolling.
+#: Found by asking which classes bind the wheel at all, rather than by
+#: waiting to be bitten: `TCombobox` was, and fixing only that left
+#: `TSpinbox` doing exactly the same thing on the timer. `Text`, `Listbox`,
+#: `TScrollbar` and `Treeview` are wheel-bound too and are deliberately NOT
+#: here — theirs scrolls, which is what a wheel is for.
+VALUE_WHEEL_CLASSES = ("TCombobox", "TSpinbox")
+
 
 def quiet_the_wheel(root: tk.Misc) -> None:
     """Stop a stray scroll from rewriting a combobox.
@@ -203,7 +211,10 @@ def quiet_the_wheel(root: tk.Misc) -> None:
 
     Three of the app's comboboxes change saved data rather than the view, and
     the worst of them is "Repeats": a stray notch there makes a task recur for
-    ever.
+    ever. `TSpinbox` is the same story on the timer — one notch over the "Min"
+    box took a session from 15 minutes to 14, and carried the change into the
+    running clock, so the block you agreed to was quietly not the block you
+    got.
 
     Bound on the CLASS rather than on each widget, which replaces ttk's own
     binding, because the fault is a dangerous default that anything added
@@ -218,8 +229,9 @@ def quiet_the_wheel(root: tk.Misc) -> None:
     # the window — where, in a dialog whose form scrolls, it does the thing
     # the person was actually reaching for. Swallowing it would trade a
     # destructive gesture for a dead one.
-    for sequence in WHEEL_EVENTS:
-        root.bind_class("TCombobox", sequence, lambda _e: None)
+    for name in VALUE_WHEEL_CLASSES:
+        for sequence in WHEEL_EVENTS:
+            root.bind_class(name, sequence, lambda _e: None)
 
 
 def apply_theme(root: tk.Misc, name: str = "light") -> Tokens:

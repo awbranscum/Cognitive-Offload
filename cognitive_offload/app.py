@@ -371,6 +371,7 @@ class CognitiveOffloadApp(tk.Tk):
             show_done=self.show_done_var.get(),
             kind=self._active_kind(),
             completed_log=self.completed_log,
+            steps_log=self.steps_log,
         )
         self._visible = view.visible
 
@@ -1477,6 +1478,7 @@ class CognitiveOffloadApp(tk.Tk):
                 self,
                 task_text=task.text if task else "",
                 first_step=task.first_step if task else "",
+                place=plan_place(task) if task else "",
                 minutes=self.config_store.focus_minutes,
                 warmup_steps=self.config_store.warmup_steps,
                 show_warmup=self.config_store.show_warmup,
@@ -1508,7 +1510,13 @@ class CognitiveOffloadApp(tk.Tk):
         if task is not None and result["first_step"] and result["first_step"] != task.first_step:
             # Naming the first move is worth keeping even if the session dies.
             self.push_undo("set first step")
-            task.first_step = result["first_step"]
+            # set_current_step, not a plain assignment: on a task with a plan
+            # the first step IS the current line of it, and writing only to
+            # `first_step` left the two disagreeing — which `_fix_steps`
+            # silently reverted on the next load, so the rename survived
+            # until the app was closed. The editor and the session-end dialog
+            # were fixed for this; this fourth site was missed.
+            task.set_current_step(result["first_step"])
             self.refresh_tasks()
             self.mark_dirty()
 
@@ -1516,7 +1524,8 @@ class CognitiveOffloadApp(tk.Tk):
             steps = result["warmup_done"]
             self.set_status(f"{steps} warm-up step{'s' if steps != 1 else ''} done. Starting.")
         self._focus_task_id = task.id if task else None
-        self.focus_task_var.set(focus_caption(task, result["first_step"]))
+        self.focus_task_var.set(
+            focus_caption(task, result["first_step"], plan_place(task)))
         self.config_store.focus_minutes = result["minutes"]
         self.work_minutes.set(result["minutes"])
         # The rituals stick: ladder edits, ladder visibility, the pop-out

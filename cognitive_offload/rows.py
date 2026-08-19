@@ -149,10 +149,20 @@ def matrix_row(task) -> Row:
                badges=_shared_badges(task), marker="·")
 
 
-def focus_caption(task: Task | None, first_step: str) -> str:
+def focus_caption(task: Task | None, first_step: str, place: str = "") -> str:
+    """What the focus card and the pop-out say you are on.
+
+    ``place`` is "step 2 of 4" and only ever appears on a task that has a
+    plan. During a session it is the one thing about the plan worth showing:
+    not what is coming — that is a decision for later and this screen is
+    deliberately light — but where you are in it.
+    """
     if task is None:
         return f"Free focus — {first_step}" if first_step else "Free focus"
-    return f"{task.text}\n→ {first_step}" if first_step else task.text
+    if not first_step:
+        return task.text
+    step = f"{first_step} · {place}" if place else first_step
+    return f"{task.text}\n→ {step}"
 
 
 def sort_label(order: str) -> str:

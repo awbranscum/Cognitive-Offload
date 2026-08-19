@@ -311,3 +311,96 @@ class ThroughTheAppTests(unittest.TestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+
+class TheDoneTodayPillTests(unittest.TestCase):
+    """The number on the pill is a promise about the panel it opens.
+
+    The panel began listing finished steps as well as finished tasks; the
+    pill went on counting tasks. Two consequences, and the second is the
+    serious one: the number disagreed with what it opened, and on a day spent
+    moving through one long task and finishing nothing the count was zero —
+    which hides the pill, which is the panel's **only** route. One
+    `Button-1` binding, no keyboard shortcut. The evidence existed and could
+    not be reached.
+    """
+
+    def _view(self, tasks=(), steps=()):
+        return presenter.task_list_view(list(tasks), completed_log=[],
+                                        steps_log=list(steps))
+
+    def _today(self):
+        from cognitive_offload.models import today_iso
+
+        return today_iso()
+
+    def test_a_day_of_only_steps_still_shows_the_pill(self):
+        view = self._view(steps=[entry(PLAN[0], day=self._today()),
+                                 entry(PLAN[1], day=self._today())])
+        self.assertEqual(view.done_today, 2)
+        self.assertEqual(view.done_today_text, "2 done today →")
+
+    def test_a_day_with_neither_still_says_nothing(self):
+        """No zeros. "0 done today" is the kind of scoreboard this app exists
+        not to keep."""
+        self.assertEqual(self._view().done_today_text, "")
+
+    def test_steps_from_another_day_do_not_count(self):
+        self.assertEqual(self._view(steps=[entry(PLAN[0], day="2020-01-01")])
+                         .done_today, 0)
+
+    def test_the_number_matches_what_the_panel_lists(self):
+        """The promise itself, asserted rather than assumed: whatever the
+        pill says, the panel behind it has that many lines."""
+        from cognitive_offload.models import Task
+
+        done = Task(text="Ring the dentist")
+        done.set_done(True)
+        steps = [entry(PLAN[0], day=self._today()),
+                 entry(PLAN[1], day=self._today())]
+        view = self._view(tasks=[done], steps=steps)
+        panel = presenter.today_view([done], [], None, steps_log=steps)
+        listed = [line for line in panel.body.splitlines()
+                  if line.startswith("·  ")]
+        self.assertEqual(view.done_today, len(listed))
+        self.assertEqual(view.done_today, 3)
+
+
+@unittest.skipUnless(_display_available(), "tkinter display not available")
+class ThePillOnScreenTests(unittest.TestCase):
+    def setUp(self):
+        from cognitive_offload.app import CognitiveOffloadApp
+        from cognitive_offload.storage import Config
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name)
+        config = Config(root / "config.json")
+        config.db_path = root / "db"
+        config.matrix_db_path = root / "matrix"
+        self.app = CognitiveOffloadApp(config=config)
+        self.app.withdraw()
+        self.addCleanup(self._destroy)
+
+    def _destroy(self):
+        try:
+            self.app.destroy()
+        except tk.TclError:
+            pass
+
+    def test_the_pill_is_hidden_on_a_day_with_nothing(self):
+        self.app.refresh_tasks()
+        self.app.update()
+        self.assertFalse(self.app.today_label.winfo_manager())
+
+    def test_a_day_of_only_steps_makes_the_pill_appear(self):
+        """Which is what makes the panel reachable at all: the pill is its
+        only route."""
+        from cognitive_offload.models import today_iso
+
+        self.app.steps_log = [entry(PLAN[0], day=today_iso())]
+        self.app.refresh_tasks()
+        self.app.update()
+        self.assertTrue(self.app.today_label.winfo_manager(),
+                        "the only way into the panel is hidden")
+        self.assertIn("1 done today", self.app.today_var.get())

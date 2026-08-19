@@ -657,6 +657,7 @@ class StartFocusDialog(ModalDialog):
         parent: tk.Misc,
         task_text: str = "",
         first_step: str = "",
+        place: str = "",
         minutes: int = 15,
         warmup_steps: list[str] | None = None,
         show_warmup: bool = True,
@@ -685,6 +686,12 @@ class StartFocusDialog(ModalDialog):
         self.step_entry = ttk.Entry(self.body)
         self.step_entry.pack(fill="x", pady=(2, 2))
         self.step_entry.insert(0, first_step)
+        # Where in the plan, and deliberately NOT the plan itself: what comes
+        # after this is a decision, and this is the screen someone is on
+        # because deciding is the part they are struggling with.
+        if place:
+            ttk.Label(self.body, text=place, style="Muted.TLabel").pack(
+                anchor="w", pady=(0, 2))
         ttk.Label(
             self.body,
             text="Name the smallest physical action. You are only committing to this.",
