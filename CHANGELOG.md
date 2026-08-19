@@ -5,6 +5,49 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.43.0 — The week review can no longer run off the bottom of the screen
+The one screen whose whole job is to say "you did more than you think"
+was the one that could hide its own answer.
+
+- **A busy week rendered taller than the screen.** *This week* fits itself
+  to its content and is not resizable, by design: a fixed height leaves a
+  dead band on a quiet week. But the content has no upper bound — it grows
+  with every finished task, and long titles wrap to two or three lines
+  each. Measured on a seven-day week of long titles: 508px for one task a
+  day, 718 for two, **928 for three, 1138 for four**. On a 1366×768 laptop,
+  three finished tasks a day put the window 160px past the bottom edge.
+
+- **What fell off was the point of the screen.** Bottom-up, the first
+  things past the edge were the totals line — *"14 sessions · 350 minutes
+  across the week"*, the single most reassuring number this app produces —
+  and then the Close button. So the failure was worst on exactly the week
+  that had earned the number, and it left someone in a modal with no
+  visible way out. Escape still closed it, but only if you knew.
+
+- **The days scroll; the total and the way out do not.** The day list moved
+  into a canvas with a ceiling of 80% of screen height, with the totals
+  label and Close pinned below it on the dialog itself. The scrollbar packs
+  itself only when there is something to scroll, so an ordinary week grows
+  no furniture it does not need, and the canvas asks for exactly the height
+  the days want up to that ceiling — otherwise the fix would have traded a
+  window that overflows for a window that scrolls when it has one day in
+  it. Mouse wheel and Button-4/5 scroll it.
+
+- **Three copies of the fit-to-content line had drifted apart.**
+  `self.geometry(f"{self._fit_width}x{self.winfo_reqheight()}")` appeared
+  in `show()`, in the suggestion refresh and in the ladder editor. A
+  ceiling added to one would have silently missed the other two, so all
+  three now call one `ModalDialog._fit_to_content()`, which is where the
+  `_max_height` opt-in lives. Every fit-to-content dialog can now take a
+  ceiling; only this one asks for one.
+
+- 562 → 564 tests, Xvfb (`skipped=2`) and headless (`skipped=243`). Both
+  new tests were checked against four separate mutants — no ceiling, an
+  unbounded canvas, a canvas that always takes the ceiling, and a scrollbar
+  that is always packed — and each mutant fails the suite. The busy-week
+  fixture is deliberately larger than a real week, because a test screen
+  taller than a laptop would otherwise have passed it for the wrong reason.
+
 ## 3.42.0 — "20 mins" is now an estimate, not a discarded keystroke
 The time-estimate field understands what people actually type.
 

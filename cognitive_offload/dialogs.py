@@ -48,12 +48,31 @@ class ModalDialog(tk.Toplevel):
         elif size:
             self.minsize(*size)
             self.geometry(f"{size[0]}x{size[1]}")
+        # Opt-in ceiling for a dialog whose content has no natural bound.
+        # Fitting to content is right until the content is taller than the
+        # screen, at which point the controls at the bottom are simply gone
+        # and the window cannot be resized to reach them.
+        self._max_height = None
         self.body = ttk.Frame(self, padding=12)
         self.body.pack(fill="both", expand=True)
         self.protocol("WM_DELETE_WINDOW", self.cancel)
         # "or \"break\"" stops the global Escape binding from also pausing a
         # running session behind the dialog.
         self.bind("<Escape>", lambda _e: self.cancel() or "break")
+
+    def _fit_to_content(self) -> None:
+        """Grow to fit what was built, but never past the ceiling.
+
+        Three copies of this geometry line had drifted into the file — the
+        initial show, the suggestion refresh and the ladder editor — so a
+        cap added to one would have missed the others.
+        """
+        if not self._fit_width:
+            return
+        height = self.winfo_reqheight()
+        if self._max_height:
+            height = min(height, self._max_height)
+        self.geometry(f"{self._fit_width}x{height}")
 
     def button_row(self, ok_text: str = "OK") -> ttk.Frame:
         row = ttk.Frame(self.body)
@@ -79,8 +98,7 @@ class ModalDialog(tk.Toplevel):
     def show(self):
         """Centre, make modal, and block until closed. Returns ``self.result``."""
         self.update_idletasks()
-        if self._fit_width:
-            self.geometry(f"{self._fit_width}x{self.winfo_reqheight()}")
+        self._fit_to_content()
         self._center()
         try:
             self.wait_visibility()
@@ -331,8 +349,7 @@ class StartHereDialog(ModalDialog):
                 ).pack(anchor="w")
         # The choice list's length just changed; follow it.
         self.update_idletasks()
-        if self._fit_width:
-            self.geometry(f"{self._fit_width}x{self.winfo_reqheight()}")
+        self._fit_to_content()
 
     def _cycle(self) -> None:
         self._offset += 3
@@ -470,8 +487,7 @@ class StartFocusDialog(ModalDialog):
                 entry.insert(0, self._steps[index])
             self._step_entries.append(entry)
         self.update_idletasks()
-        if self._fit_width:
-            self.geometry(f"{self._fit_width}x{self.winfo_reqheight()}")
+        self._fit_to_content()
 
     def collect(self):
         try:
@@ -645,27 +661,76 @@ class WeekReviewDialog(ModalDialog):
                      "happen.",
                 style="Muted.TLabel", wraplength=px(self, 430), justify="left",
             ).pack(anchor="w", pady=(6, 0))
+        # The days scroll; the total and the way out do not. A busy week of
+        # long titles ran past the bottom of a 1366x768 screen, and what fell
+        # off first was the totals line and the Close button — the single
+        # most reassuring number this app produces, lost on exactly the week
+        # that earned it, in a window that cannot be resized to reach it.
+        self._max_height = int(self.winfo_screenheight() * 0.8)
+        days_area = ttk.Frame(self.body)
+        days_area.pack(fill="both", expand=True)
+        canvas = tk.Canvas(days_area, highlightthickness=0, borderwidth=0,
+                           background=tokens().background)
+        canvas.pack(side="left", fill="both", expand=True)
+        bar = ttk.Scrollbar(days_area, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=bar.set)
+        inner = ttk.Frame(canvas)
+        window = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        def _resized(_event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            canvas.itemconfigure(window, width=canvas.winfo_width())
+            # The scrollbar only appears when it has something to do; an
+            # ordinary week should not grow furniture it does not need.
+            needed = inner.winfo_reqheight() > canvas.winfo_height()
+            if needed and not bar.winfo_ismapped():
+                bar.pack(side="right", fill="y")
+            elif not needed and bar.winfo_ismapped():
+                bar.pack_forget()
+
+        inner.bind("<Configure>", _resized)
+        canvas.bind("<Configure>", _resized)
+        for widget in (canvas, inner):
+            widget.bind("<MouseWheel>",
+                        lambda e: canvas.yview_scroll(-1 if e.delta > 0 else 1, "units"))
+            widget.bind("<Button-4>", lambda _e: canvas.yview_scroll(-1, "units"))
+            widget.bind("<Button-5>", lambda _e: canvas.yview_scroll(1, "units"))
+
         for entry in days:
             line = entry.label
             if entry.sessions:
                 plural = "s" if entry.sessions != 1 else ""
                 line += (f" · {entry.sessions} session{plural}"
                          f" · {entry.minutes} min")
-            ttk.Label(self.body, text=line, font=font(SIZE_BASE, "bold")).pack(
+            ttk.Label(inner, text=line, font=font(SIZE_BASE, "bold")).pack(
                 anchor="w", pady=(8, 0))
             for title in entry.titles:
-                ttk.Label(self.body, text=f"   ✓ {title}", style="Muted.TLabel",
-                          wraplength=px(self, 430), justify="left").pack(anchor="w")
+                ttk.Label(inner, text=f"   ✓ {title}", style="Muted.TLabel",
+                          wraplength=px(self, 410), justify="left").pack(anchor="w")
+        # Ask for exactly as much room as the days need, up to the ceiling.
+        # Without this the canvas asks for nothing and even a quiet week
+        # would scroll — trading one wrong answer for another.
+        inner.update_idletasks()
+        room = int(self.winfo_screenheight() * 0.8) - px(self, 160)
+        canvas.configure(height=max(px(self, 80),
+                                    min(inner.winfo_reqheight(), room)))
+
+        # Named, because a test has to be able to ask where they ended up:
+        # these two are precisely what used to fall off the bottom.
+        self.totals_label = None
         if days:
             plural = "s" if total_sessions != 1 else ""
-            ttk.Label(
+            self.totals_label = ttk.Label(
                 self.body,
                 text=f"{total_sessions} session{plural} · {total_minutes} "
                      f"minutes across the week.",
                 style="Muted.TLabel",
-            ).pack(anchor="w", pady=(12, 0))
-        ttk.Button(self.body, text="Close", style="Outline.TButton",
-                   command=self.cancel).pack(anchor="e", pady=(14, 0))
+            )
+            self.totals_label.pack(anchor="w", pady=(12, 0))
+        self.close_button = ttk.Button(self.body, text="Close",
+                                       style="Outline.TButton",
+                                       command=self.cancel)
+        self.close_button.pack(anchor="e", pady=(14, 0))
 
 
 class ShortcutsDialog(ModalDialog):
