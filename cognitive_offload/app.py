@@ -158,6 +158,12 @@ class CognitiveOffloadApp(tk.Tk):
         self.refresh_momentum()
         self._update_timer_label()
         self._schedule_autosave()
+        if self.config_store.first_run:
+            # Said once, on the only launch where the app can know nobody has
+            # seen it before. Calm mode hiding controls silently would be a
+            # trap; one flat sentence that names the way out is not.
+            self.set_status("Calm mode is on — fewer controls to begin with. "
+                            "Untick it above for filters and task tools.")
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def _claim_instance_lock(self, lock: InstanceLock) -> bool:
@@ -371,6 +377,8 @@ class CognitiveOffloadApp(tk.Tk):
         # repainting every row.
         self.task_list.set_rows(view.rows, keep_selection=keep_selection)
         self.counts_var.set(view.summary)
+        # The row set just changed, so what the actions can act on has too.
+        self.sync_action_availability()
         self.refresh_next_up()
         # An empty ``done_today_text`` is the presenter's decision that today
         # has nothing to say, not a missing value. Hide the whole pill rather
@@ -536,7 +544,31 @@ class CognitiveOffloadApp(tk.Tk):
             self.set_status(f"Select a task first to {verb}.")
         return tasks
 
+    def sync_action_availability(self) -> None:
+        """Grey the controls that cannot act yet.
+
+        First run offered thirty-two clickable things, and about half of them
+        could do nothing at all: every task action needs a selection, and
+        there were no tasks. For this audience each control is a small
+        decision — "is this for me? what does it do?" — and an inert one is a
+        decision that pays nothing back. The only way to learn a button was
+        not for you was to press it and be told so.
+
+        Greying rather than hiding, deliberately: nothing moves, the row
+        keeps its shape, and the moment you select a task seven buttons come
+        on at once. That correlation teaches what they apply to without a
+        sentence and without a failed click.
+        """
+        state = "normal" if self.selected_tasks() else "disabled"
+        for button in getattr(self, "needs_selection", ()):
+            button.state(["!disabled"] if state == "normal" else ["disabled"])
+        clearable = any(t.done for t in self.tasks)
+        button = getattr(self, "needs_done_task", None)
+        if button is not None:
+            button.state(["!disabled"] if clearable else ["disabled"])
+
     def on_task_selection_changed(self) -> None:
+        self.sync_action_availability()
         tasks = self.selected_tasks()
         if len(tasks) == 1:
             task = tasks[0]
@@ -1412,6 +1444,10 @@ class CognitiveOffloadApp(tk.Tk):
                 self.task_list.selection_set(index)
                 self.task_list.see(index)
                 break
+        # Selecting from code does not fire the widget's own callback, so the
+        # actions would stay greyed over a visibly selected row — reachable
+        # by clicking the "booked for today" banner.
+        self.sync_action_availability()
 
     def _focus_task(self) -> Task | None:
         if not self._focus_task_id:

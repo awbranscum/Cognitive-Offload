@@ -775,3 +775,61 @@ class MatrixStoreTests(TempDirTest):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FirstRunTests(unittest.TestCase):
+    """A missing config file is the one moment the app can know nobody has
+    used this copy before, and that first screen starts calm."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+
+    def config(self):
+        from cognitive_offload.storage import Config
+
+        return Config(self.root / "config.json")
+
+    def test_a_brand_new_install_starts_calm_and_says_so(self):
+        loaded = self.config().load()
+        self.assertTrue(loaded.first_run)
+        self.assertTrue(loaded.calm_mode)
+
+    def test_the_second_launch_is_not_a_first_run(self):
+        first = self.config().load()
+        first.db_path = self.root / "db"
+        first.matrix_db_path = self.root / "m"
+        first.save()
+        second = self.config().load()
+        self.assertFalse(second.first_run)
+
+    def test_turning_calm_off_is_remembered(self):
+        """Calm as a first impression, not as a decision made for you every
+        time — otherwise it is a setting that fights you."""
+        first = self.config().load()
+        first.db_path = self.root / "db"
+        first.matrix_db_path = self.root / "m"
+        first.calm_mode = False
+        first.save()
+        self.assertFalse(self.config().load().calm_mode)
+
+    def test_an_existing_config_is_never_overridden(self):
+        """Someone who already uses the app must not have their screen
+        rearranged by an upgrade."""
+        first = self.config().load()
+        first.db_path = self.root / "db"
+        first.matrix_db_path = self.root / "m"
+        first.calm_mode = False
+        first.save()
+        again = self.config().load()
+        self.assertFalse(again.calm_mode)
+        self.assertFalse(again.first_run)
+
+    def test_a_corrupt_config_is_not_treated_as_a_first_run(self):
+        """A damaged file is not a new user, and quietly hiding their
+        controls on top of a corrupt config would be its own small betrayal."""
+        (self.root / "config.json").write_text("{not json", encoding="utf-8")
+        loaded = self.config().load()
+        self.assertFalse(loaded.first_run)
+        self.assertFalse(loaded.calm_mode)

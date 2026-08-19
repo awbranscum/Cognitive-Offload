@@ -5,6 +5,58 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.48.0 — Fewer things to decide about, at the moment you have least to spend
+Counted rather than guessed: the first screen of a brand-new install offered
+**32 clickable controls** before a single task existed — and about half of
+them could not do anything at all. Every task action needs a selection, and
+there were no tasks. For an app built for people who find a wall of choices
+expensive, that is the wrong first impression.
+
+- **A first launch now starts in Calm mode.** A missing config file is the one
+  moment the app can know nobody has used this copy, and that screen opens
+  with **17 live controls instead of 32**. The capture box and "Where do I
+  start?" carry it, which is what the tagline has always said the app is for.
+  Calm mode already existed and was already good; it was simply off by
+  default on the one screen that most needed it.
+
+- **It is a first impression, not a decision made for you.** The checkbox is
+  in plain sight, the choice is remembered from then on, and an existing
+  install is never rearranged — the default only applies where there is no
+  config file at all. A corrupt config is not treated as a new user either:
+  quietly hiding someone's controls on top of a damaged file would be its own
+  small betrayal.
+
+- **One flat sentence says where the rest went**, once, on that launch only:
+  *"Calm mode is on — fewer controls to begin with. Untick it above for
+  filters and task tools."* Hiding controls silently would be a trap; naming
+  the way out is not.
+
+- **Nothing is offered while it cannot act.** Priority, Tag, Edit, Pin, To
+  matrix, Delete, Focus on selected and Done all need a selection, and
+  "Clear done" needs something finished. They are now greyed until they can
+  act. A control that looks live and does nothing is a decision that pays
+  nothing back, and the only way to learn a button was not for you was to
+  press it and be told so.
+
+- **Greyed, not hidden — deliberately.** Nothing moves, the row keeps its
+  shape, and the moment you select a task **seven buttons come on at once**.
+  That correlation teaches what they apply to without a sentence and without
+  a failed click. A row that changes shape under you is its own kind of
+  overwhelming, and this app already refuses to hide a control that is still
+  doing something.
+
+- **A real bug fell out of it.** Selecting a row *from code* does not fire the
+  widget's own callback, so the actions stayed greyed over a visibly selected
+  task — reachable today by clicking the "booked for today" banner, which
+  selects a row for you. `_select_task` now re-syncs, with a test that fails
+  if it stops.
+
+- 656 → 667 tests, Xvfb (`skipped=2`) and headless (`skipped=275`). **Seven
+  promises broken on purpose and all seven caught**: never greying, greying
+  for ever, dropping the re-sync after a refresh, dropping it after a
+  code-driven selection, "Clear done" always live, a first run that is not
+  calm, and every launch treated as a first run.
+
 ## 3.47.0 — The window now fits the screen it is on
 The app opened at a fixed 1240x880 with a floor of 1160x790, and **neither
 number was ever compared to the screen**. On a 1366x768 laptop it opened

@@ -184,6 +184,16 @@ reinstall from python.org).
   gets you one task, not fourteen. Do it early and the rhythm holds — a Friday
   task stays a Friday task.
 
+- **The first launch starts calm.** A brand-new install opens in Calm mode:
+  17 things you can click instead of 32, with the capture box and "Where do I
+  start?" carrying the screen. The checkbox that turns it off is in plain
+  sight, one flat sentence in the status bar says where the rest went, and the
+  choice is remembered from then on. An existing install is never rearranged.
+- **Nothing is offered while it cannot act.** Every task action needs a
+  selection, so they stay greyed until there is one — and then seven of them
+  come on at once, which teaches what they apply to without a sentence and
+  without a failed click. Greyed rather than hidden, so nothing moves.
+
 **Matrix**
 - Add, edit, delete and move tasks between any two quadrants (not just into
   "Do First").

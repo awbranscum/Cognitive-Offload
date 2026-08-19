@@ -586,6 +586,117 @@ class AppSmokeTests(unittest.TestCase):
         self.app.load_state()
         self.assertEqual(self.app.tasks[0].repeat, "fortnightly")
 
+    # -- how much is on screen at once ---------------------------------
+    def _clickable(self):
+        """(live, greyed) among everything you could click right now."""
+        def walk(w):
+            for child in w.winfo_children():
+                yield child
+                yield from walk(child)
+
+        self.app.update_idletasks()
+        live = greyed = 0
+        for widget in walk(self.app):
+            if not widget.winfo_ismapped():
+                continue
+            if widget.winfo_class() not in ("TButton", "TCheckbutton",
+                                            "TCombobox", "TSpinbox"):
+                continue
+            if "disabled" in widget.state():
+                greyed += 1
+            else:
+                live += 1
+        return live, greyed
+
+    def test_task_actions_are_not_offered_while_they_cannot_act(self):
+        """First run offered 32 clickable things and about half could do
+        nothing: every task action needs a selection, and there were no
+        tasks. A control that looks live and does nothing is a decision that
+        pays nothing back."""
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        self.capture("call the dentist")
+        self.app.task_list.selection_clear(0, tk.END)
+        self.app.on_task_selection_changed()
+        for button in self.app.needs_selection:
+            self.assertIn("disabled", button.state(), button.cget("text"))
+
+        self.select(0)
+        self.app.on_task_selection_changed()   # what a real click fires
+        for button in self.app.needs_selection:
+            self.assertNotIn("disabled", button.state(), button.cget("text"))
+
+    def test_selecting_a_task_lights_up_every_action_at_once(self):
+        """The correlation is the lesson: it teaches what they apply to
+        without a sentence and without a failed click."""
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        self.capture("call the dentist")
+        self.app.task_list.selection_clear(0, tk.END)
+        self.app.on_task_selection_changed()
+        before_live, before_grey = self._clickable()
+        self.select(0)
+        self.app.on_task_selection_changed()
+        after_live, after_grey = self._clickable()
+        self.assertGreater(after_live, before_live)
+        self.assertLess(after_grey, before_grey)
+
+    def test_greying_never_moves_anything(self):
+        """Greyed rather than hidden, deliberately: a row that changes shape
+        under you is its own kind of overwhelming."""
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        self.capture("call the dentist")
+        self.app.update()
+        places = {b: (b.winfo_rootx(), b.winfo_rooty(), b.winfo_width())
+                  for b in self.app.needs_selection}
+        self.select(0)
+        self.app.on_task_selection_changed()
+        self.app.update()
+        for button, before in places.items():
+            self.assertEqual(
+                (button.winfo_rootx(), button.winfo_rooty(), button.winfo_width()),
+                before, button.cget("text"))
+
+    def test_selecting_from_code_lights_the_actions_too(self):
+        """The "booked for today" banner selects a row without any click, so
+        the widget's own callback never fires. The actions stayed greyed over
+        a visibly selected task."""
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        from cognitive_offload.models import today_iso
+
+        self.capture("call the dentist")
+        self.app.tasks[0].scheduled_for = today_iso()
+        self.app.refresh_tasks()
+        self.app.task_list.selection_clear(0, tk.END)
+        self.app.on_task_selection_changed()
+        self.app.show_booked()
+        self.assertTrue(self.app.task_list.curselection())
+        for button in self.app.needs_selection:
+            self.assertNotIn("disabled", button.state(), button.cget("text"))
+
+    def test_clear_done_waits_for_something_to_clear(self):
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        self.capture("call the dentist")
+        self.assertIn("disabled", self.app.needs_done_task.state())
+        self.select(0)
+        self.app.on_task_selection_changed()
+        self.app.toggle_selected_done()
+        self.assertNotIn("disabled", self.app.needs_done_task.state())
+
+    def test_the_actions_come_back_when_the_selection_goes(self):
+        """Greyed state must follow the list, not just the click that set
+        it — deleting the selected task leaves nothing selected."""
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        self.capture("call the dentist")
+        self.select(0)
+        self.app.delete_selected()
+        for button in self.app.needs_selection:
+            self.assertIn("disabled", button.state(), button.cget("text"))
+
     # -- handing a task to an agent ------------------------------------
     def _hand_off(self, target="claude_desktop", note="Draft it.", days=3):
         """Drive the real command with the two dialogs stubbed out."""

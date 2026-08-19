@@ -230,12 +230,21 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
     start_row.grid(row=2, column=0, sticky="ew", pady=(0, 8))
     ttk.Button(start_row, text="Where do I start?", style="Default.TButton",
                command=app.start_here).pack(side="left")
-    ttk.Button(start_row, text="Focus on selected", style="Outline.TButton",
-               command=app.focus_on_selected).pack(side="left", padx=(6, 0))
+    # Kept in `needs_selection` so they can be greyed while they cannot act:
+    # a control that looks live and does nothing is a decision that pays
+    # nothing, and this screen used to offer fourteen of them at once.
+    app.needs_selection = []
+    focus_button = ttk.Button(start_row, text="Focus on selected",
+                              style="Outline.TButton",
+                              command=app.focus_on_selected)
+    focus_button.pack(side="left", padx=(6, 0))
+    app.needs_selection.append(focus_button)
     # Done lives here, not in the toolbar: Calm mode hides the toolbar, and
     # hiding the primary verb while keeping Save/Open/Export is backwards.
-    ttk.Button(start_row, text="Done", style="Outline.TButton",
-               command=app.toggle_selected_done).pack(side="left", padx=(6, 0))
+    done_button = ttk.Button(start_row, text="Done", style="Outline.TButton",
+                             command=app.toggle_selected_done)
+    done_button.pack(side="left", padx=(6, 0))
+    app.needs_selection.append(done_button)
     app.due_label = ttk.Label(start_row, textvariable=app.due_var, style="CardMuted.TLabel",
                               cursor="hand2")
     app.due_label.pack(side="left", padx=(12, 0))
@@ -309,9 +318,15 @@ def _build_tasks_card(app, body: ttk.Frame) -> None:
     # minimum size. Each column floors at its own label instead.
     for column, (label, command, style) in enumerate(buttons):
         toolbar.columnconfigure(column, weight=1)
-        ttk.Button(toolbar, text=label, style=style, command=command).grid(
-            row=0, column=column, sticky="ew",
-            padx=(0, 3) if column < len(buttons) - 1 else 0)
+        button = ttk.Button(toolbar, text=label, style=style, command=command)
+        button.grid(row=0, column=column, sticky="ew",
+                    padx=(0, 3) if column < len(buttons) - 1 else 0)
+        # "Clear done" acts on the list, not on a selection, so it answers to
+        # a different question and is tracked separately.
+        if label == "Clear done":
+            app.needs_done_task = button
+        else:
+            app.needs_selection.append(button)
     app.task_toolbar = toolbar
 
 

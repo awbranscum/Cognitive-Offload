@@ -129,6 +129,7 @@ app.py | ok_text= | book_matrix_time | Book
 app.py | ok_text= | tag_selected | Add
 app.py | spoken= | book_matrix_time | for {}
 app.py | spoken= | book_matrix_time | for {} ({})
+app.py | status | __init__ | Calm mode is on — fewer controls to begin with. Untick it above for filters and task tools.
 app.py | status | _autosave | Auto-saved.
 app.py | status | _autosave | Couldn't auto-save — disk full, or the folder unavailable? Your work is only in this window for now: try Save, or Export a copy somewhere safe.
 app.py | status | _finish_break | Break finished.

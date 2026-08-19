@@ -139,6 +139,10 @@ class Config:
         self.popout_on_start = False
         self.theme = "light"
         self.calm_mode = False
+        # True only until the first save: a brand-new install has no config
+        # file, and that is the one moment the app can know it is someone's
+        # first look at it.
+        self.first_run = False
         # Where handoff briefs are written, and which agent the picker opens
         # on. The folder is deliberately outside the app's own data directory:
         # the point of a brief is that another program can read it, and asking
@@ -161,10 +165,20 @@ class Config:
         return self.db_path / SESSIONS_FILENAME
 
     def load(self) -> "Config":
-        """Load config, falling back to defaults for anything unusable."""
+        """Load config, falling back to defaults for anything unusable.
+
+        A missing config file means nobody has ever used this copy, and that
+        first screen starts in Calm mode. The app is for people who find a
+        wall of controls expensive, and the wall was thirty-two clickable
+        things before a single task existed. Calm is the honest first
+        impression; the checkbox that turns it off is in plain sight, and the
+        choice is remembered from then on.
+        """
         try:
             data = read_json(self.path)
         except FileNotFoundError:
+            self.first_run = True
+            self.calm_mode = True
             return self
         except (OSError, json.JSONDecodeError, UnicodeDecodeError):
             # A corrupt config must never stop the app from starting.
