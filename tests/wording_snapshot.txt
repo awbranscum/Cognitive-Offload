@@ -159,8 +159,10 @@ app.py | status | delete_matrix_tasks | {Deleted matrix task}. Ctrl+Z undoes it.
 app.py | status | delete_selected | Deleted {task}. Ctrl+Z undoes it.
 app.py | status | edit_matrix_task | Matrix task updated.
 app.py | status | edit_matrix_task | Select exactly one task to edit.
+app.py | status | edit_matrix_task | Waiting on {}. Ctrl+Z undoes it.
 app.py | status | edit_selected_details | Select exactly one task to edit.
 app.py | status | edit_selected_details | Task updated.
+app.py | status | edit_selected_details | Waiting on {}. Ctrl+Z undoes it.
 app.py | status | export_state | Exported to {}
 app.py | status | finish_session_early | Break ended.
 app.py | status | focus_matrix_task | Select a task to start.
@@ -266,10 +268,10 @@ dialogs.py | in-list | ShortcutsDialog | Where do I start? — pick something
 dialogs.py | in-list | __init__ | It's finished — mark it done
 dialogs.py | in-list | __init__ | Not yet — keep going
 dialogs.py | in-list | __init__ | Not yet — take {} minutes
-dialogs.py | messagebox.showwarning | collect | Date not understood
+dialogs.py | messagebox.showwarning | _warn_about_date | Date not understood
+dialogs.py | messagebox.showwarning | _warn_about_date | Try 'today', 'tomorrow', a weekday, or a date like 2026-08-01.
 dialogs.py | messagebox.showwarning | collect | The title cannot be empty.
 dialogs.py | messagebox.showwarning | collect | Title required
-dialogs.py | messagebox.showwarning | collect | Try 'today', 'tomorrow', a weekday, or a date like 2026-08-01.
 dialogs.py | text= | __init__ |    ✓ {}
 dialogs.py | text= | __init__ | A quiet week is just a quiet week — nothing here counts against you. The strip fills in as sessions happen.
 dialogs.py | text= | __init__ | About
@@ -305,11 +307,13 @@ dialogs.py | text= | __init__ | The two-minute physical action that starts it �
 dialogs.py | text= | __init__ | This week, in evidence
 dialogs.py | text= | __init__ | Title
 dialogs.py | text= | __init__ | To
+dialogs.py | text= | __init__ | Waiting on
 dialogs.py | text= | __init__ | What can you face right now?
 dialogs.py | text= | __init__ | Where does it pick up next time?
 dialogs.py | text= | __init__ | Working on
 dialogs.py | text= | __init__ | Written for {}
 dialogs.py | text= | __init__ | Your guess: about {} min.
+dialogs.py | text= | __init__ | check back
 dialogs.py | text= | __init__ | days
 dialogs.py | text= | __init__ | minutes
 dialogs.py | text= | __init__ | minutes, at a guess
@@ -326,6 +330,7 @@ dialogs.py | text= | _refresh |     → {}
 dialogs.py | text= | _refresh | Nothing open in that shape. Try 'Anything', or capture something new — an empty list is allowed.
 dialogs.py | text= | button_row | Cancel
 dialogs.py | waiting= | __init__ | Out with {}
+dialogs.py | waiting_hint= | __init__ | A person or an agent — anyone but you. It keeps its place in the list and in every search, and stops being offered as the next thing to start until the day you check back. Blank means three days from now.
 handoff.py | REPORT_BACK= | <module> | When you are done, reply with what you did, anything you could not do, and anything you need from me. Ask before doing anything that spends money, sends a message to another person, or cannot be undone.
 handoff.py | arg | _lines_common | Rough size: about {} minutes, as guessed by a human who is bad at guessing.
 handoff.py | arg | _lines_common | Start with: {}

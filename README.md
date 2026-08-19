@@ -139,6 +139,14 @@ reinstall from python.org).
 - Sort by priority, creation date, alphabetically, or by completion time.
   Priority sorting keeps open work at the top: unfinished first, pinned first,
   then flagged, then newest.
+- **Waiting on someone.** Say who has a task and when you will check back, in
+  the task editor on either tab. It keeps its badge, its place in the list and
+  its place in every search — and stops being offered as the next thing to
+  start, because starting it would duplicate what someone else is already
+  doing. On the check-back day the badge changes to `check back` and it is in
+  the running again. A fact, not a telling-off. Blank date means three days.
+  A person, an agent, a landlord, a GP surgery: the app does not care which,
+  and neither does the badge.
 - `Ctrl+Z` undoes the last change — deletes, edits, bulk moves and all.
 
 **Focus sessions**

@@ -45,6 +45,118 @@ def _labels(widget):
     return found
 
 
+def _buttons(widget):
+    """Every ttk.Button anywhere inside, at any depth."""
+    from tkinter import ttk
+
+    found = []
+    for child in widget.winfo_children():
+        if isinstance(child, ttk.Button):
+            found.append(child)
+        found.extend(_buttons(child))
+    return found
+
+
+@unittest.skipUnless(_display_available(), "tkinter display not available")
+class ReachableSaveTests(unittest.TestCase):
+    """The way to keep an edit has to be on the screen.
+
+    The task editor opened at a fixed 520px against content that wanted 578
+    with a tag row — so Tk laid out everything above and **did not draw Save
+    or Cancel at all**. Not scrolled off; not clipped; absent, on a window
+    whose only other exit is Escape, which throws the edit away. Measured at
+    every height from 520 up, the row first appeared at 668.
+
+    Every optional row added since made it worse, which is why this is pinned
+    rather than fixed and forgotten: the next one is somebody typing a field
+    into a dialog that already does not fit.
+    """
+
+    def setUp(self):
+        from cognitive_offload.theme import apply_theme
+
+        self.root = tk.Tk()
+        self.root.withdraw()
+        apply_theme(self.root, "light")
+        self.addCleanup(self.root.destroy)
+
+    def _opened(self, **kw):
+        """A dialog sized the way show() sizes it, without the modal grab."""
+        from cognitive_offload.dialogs import TaskEditorDialog
+
+        dialog = TaskEditorDialog(self.root, title="Send the passport form", **kw)
+        self.addCleanup(dialog.destroy)
+        dialog.update_idletasks()
+        dialog._fit_to_content()
+        dialog.deiconify()
+        dialog.update()
+        return dialog
+
+    def _fullest(self):
+        """Every optional row at once — the case that overflowed first."""
+        return self._opened(
+            with_tags=True, snoozed_until="2099-01-01",
+            content="They said four to six weeks.",
+            first_step="find the reference number in the confirmation email")
+
+    def test_save_is_drawn_at_all(self):
+        dialog = self._fullest()
+        labels = [b.cget("text") for b in _buttons(dialog)]
+        self.assertIn("Save", labels)
+        [save] = [b for b in _buttons(dialog) if b.cget("text") == "Save"]
+        self.assertTrue(save.winfo_ismapped(),
+                        "Save exists but Tk never placed it — the row ran off "
+                        "the bottom of a window that could not fit it")
+
+    def test_save_is_inside_the_window_it_belongs_to(self):
+        dialog = self._fullest()
+        [save] = [b for b in _buttons(dialog) if b.cget("text") == "Save"]
+        bottom = (save.winfo_rooty() - dialog.winfo_rooty()) + save.winfo_height()
+        self.assertLessEqual(bottom, dialog.winfo_height(),
+                             "Save is placed past the bottom edge")
+
+    def test_the_editor_is_as_tall_as_what_it_holds(self):
+        """The fix, rather than its symptom: a fixed height was always going
+        to be wrong for a dialog whose rows come and go."""
+        dialog = self._fullest()
+        self.assertGreaterEqual(dialog.winfo_height(),
+                                min(dialog.winfo_reqheight(),
+                                    dialog._max_height))
+
+    def test_a_ceiling_takes_the_room_from_the_notes_not_from_the_buttons(self):
+        """On a screen too short for the content something has to give. It
+        must be the box you can scroll, not the button you cannot reach."""
+        dialog = self._fullest()
+        dialog.geometry("520x520")
+        dialog.update()
+        [save] = [b for b in _buttons(dialog) if b.cget("text") == "Save"]
+        self.assertTrue(save.winfo_ismapped())
+        self.assertLess(dialog.content_text.winfo_height(), 154,
+                        "the notes box did not give up the room")
+
+    def test_every_dialog_with_a_button_row_still_draws_it(self):
+        """The row moved out of the body for every dialog, not just this one."""
+        from cognitive_offload.dialogs import (HandoffDialog, PromptDialog,
+                                               QuadrantDialog, TaskEditorDialog)
+
+        builders = (
+            lambda: TaskEditorDialog(self.root, title="t", with_tags=True),
+            lambda: PromptDialog(self.root, "Add tag", "Tag name"),
+            lambda: QuadrantDialog(self.root, "Send to the matrix"),
+            lambda: HandoffDialog(self.root, "Chase the claim"),
+        )
+        for build in builders:
+            dialog = build()
+            self.addCleanup(dialog.destroy)
+            dialog.update_idletasks()
+            dialog._fit_to_content()
+            dialog.deiconify()
+            dialog.update()
+            with self.subTest(dialog=type(dialog).__name__):
+                mapped = [b for b in _buttons(dialog) if b.winfo_ismapped()]
+                self.assertTrue(mapped, "no button was placed")
+
+
 @unittest.skipUnless(_display_available(), "tkinter display not available")
 class DialogCollectTests(unittest.TestCase):
     def setUp(self):

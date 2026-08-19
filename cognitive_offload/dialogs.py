@@ -28,6 +28,7 @@ from .handoff import (
     TARGET_KEY_BY_LABEL,
     TARGET_KEYS,
     TARGET_LABELS,
+    follow_up_date,
     target_for,
 )
 from .queries import suggest_tasks
@@ -85,8 +86,20 @@ class ModalDialog(tk.Toplevel):
         self.geometry(f"{self._fit_width}x{height}")
 
     def button_row(self, ok_text: str = "OK") -> ttk.Frame:
-        row = ttk.Frame(self.body)
-        row.pack(fill="x", pady=(10, 0))
+        """The row that closes the dialog, packed so it cannot be dropped.
+
+        Tk gives each slave its slab in pack order and squeezes what is left,
+        so a row packed last inside an expanding body is the first thing to
+        go when the window is shorter than its content — measured, the task
+        editor's Save and Cancel were **not drawn at all** below 668px. The
+        row is therefore packed against the bottom of the window *before* the
+        body is re-packed to take the rest: whatever else has to give, the
+        way out of the dialog does not.
+        """
+        row = ttk.Frame(self.body.master, padding=(12, 0, 12, 12))
+        self.body.pack_forget()
+        row.pack(side="bottom", fill="x")
+        self.body.pack(fill="both", expand=True)
         ttk.Button(row, text="Cancel", style="Outline.TButton", command=self.cancel).pack(side="right")
         ttk.Button(row, text=ok_text, style="Default.TButton", command=self.ok).pack(
             side="right", padx=(0, 8)
@@ -156,7 +169,16 @@ class TaskEditorDialog(ModalDialog):
         window_title: str = "Task",
         with_tags: bool = False,
     ):
-        super().__init__(parent, window_title, size=(520, 520))
+        # Width pinned, height fitted — the mechanism ModalDialog already
+        # carries, and whose own comment says why: "a fixed height is always
+        # wrong for someone when the content varies". This dialog varies more
+        # than any other. It wanted 578px with a tag row and got 520, so
+        # **Save and Cancel were simply not drawn**; the only way to keep an
+        # edit was to know you could drag the window taller first. Every
+        # optional row since — the excuse, the handoff, the wait — made it
+        # worse.
+        super().__init__(parent, window_title, size=(520, None))
+        self._max_height = int(self.winfo_screenheight() * 0.8)
         ttk.Label(self.body, text="Title").pack(anchor="w")
         self.title_entry = ttk.Entry(self.body)
         self.title_entry.pack(fill="x", pady=(2, 10))
@@ -226,11 +248,19 @@ class TaskEditorDialog(ModalDialog):
                 variable=self.unsnooze_var,
             ).pack(anchor="w", pady=(0, 10))
 
-        # The exit from a handoff, built exactly like the one from "Not
-        # today" above it: visible only while a handoff is actually in
-        # effect. Carrying the waiting mark onto the main list without this
-        # would have left a task marked as out with nothing able to clear it.
+        # Two directions on one state, and never both on screen at once.
+        #
+        # The way OUT shipped first, and for a while it was the only half
+        # that existed: the way IN was an agent handoff, reachable from one
+        # quadrant of the other tab. So the whole waiting treatment — the
+        # badge, the line under the title, the task quietly stepping out of
+        # the suggestion slot until the day you said you would look again —
+        # could only ever describe an AI agent, while most of what anyone is
+        # actually waiting on is a person. Nothing in the model ever thought
+        # so: `handed_to` is free text and always was.
         self.unwait_var = None
+        self.waiting_entry = None
+        self.check_back_entry = None
         if handed_to:
             self.unwait_var = tk.BooleanVar(value=False)
             waiting = f"Out with {handed_to}"
@@ -241,6 +271,24 @@ class TaskEditorDialog(ModalDialog):
                 text=f"{waiting} — take it back and do it yourself",
                 variable=self.unwait_var,
             ).pack(anchor="w", pady=(0, 10))
+        else:
+            waiting_row = ttk.Frame(self.body)
+            waiting_row.pack(fill="x")
+            ttk.Label(waiting_row, text="Waiting on").pack(side="left")
+            self.waiting_entry = ttk.Entry(waiting_row, width=18)
+            self.waiting_entry.pack(side="left", padx=(6, 16))
+            ttk.Label(waiting_row, text="check back").pack(side="left")
+            self.check_back_entry = ttk.Entry(waiting_row, width=14)
+            self.check_back_entry.pack(side="left", padx=(6, 0))
+            waiting_hint = (
+                "A person or an agent — anyone but you. It keeps its place "
+                "in the list and in every search, and stops being offered as "
+                "the next thing to start until the day you check back. "
+                "Blank means three days from now."
+            )
+            ttk.Label(self.body, text=waiting_hint, style="Muted.TLabel",
+                      wraplength=px(self, 470), justify="left").pack(
+                anchor="w", pady=(2, 10))
 
         ttk.Label(self.body, text="Details").pack(anchor="w")
         self.content_text = tk.Text(self.body, height=8, wrap="word", undo=True)
@@ -259,6 +307,15 @@ class TaskEditorDialog(ModalDialog):
         self.title_entry.focus_set()
         self.title_entry.bind("<Return>", lambda _e: self.step_entry.focus_set())
 
+    def _warn_about_date(self, entry) -> None:
+        """One sentence, both date fields. Said twice it would drift once."""
+        messagebox.showwarning(
+            "Date not understood",
+            "Try 'today', 'tomorrow', a weekday, or a date like 2026-08-01.",
+            parent=self,
+        )
+        entry.focus_set()
+
     def collect(self):
         title = self.title_entry.get().strip()
         if not title:
@@ -267,13 +324,19 @@ class TaskEditorDialog(ModalDialog):
             return None
         scheduled = parse_date_input(self.date_entry.get())
         if scheduled is None:
-            messagebox.showwarning(
-                "Date not understood",
-                "Try 'today', 'tomorrow', a weekday, or a date like 2026-08-01.",
-                parent=self,
-            )
-            self.date_entry.focus_set()
+            self._warn_about_date(self.date_entry)
             return None
+        waiting_on = self.waiting_entry.get().strip() if self.waiting_entry else ""
+        check_back = ""
+        if waiting_on:
+            check_back = parse_date_input(self.check_back_entry.get())
+            if check_back is None:
+                self._warn_about_date(self.check_back_entry)
+                return None
+            # Handing something over and then forgetting it is not delegating,
+            # it is losing it somewhere more respectable. Every wait gets a
+            # date, and the default is the one the agent handoff already uses.
+            check_back = check_back or follow_up_date(today_iso())
         # "junk is just 'no guess', never an error dialog" — that decision
         # stands. What changed is how much counts as junk: "20 mins", "20m",
         # "1h" and "~15" all used to land here and vanish, which is the one
@@ -293,6 +356,8 @@ class TaskEditorDialog(ModalDialog):
             "repeat": REPEAT_KEY_BY_LABEL.get(self.repeat_var.get(), ""),
             "clear_snooze": bool(self.unsnooze_var and self.unsnooze_var.get()),
             "take_back": bool(self.unwait_var and self.unwait_var.get()),
+            "waiting_on": waiting_on,
+            "check_back": check_back,
         }
         if self.tags_entry is not None:
             tags = [t.strip().lower() for t in self.tags_entry.get().split(",")]

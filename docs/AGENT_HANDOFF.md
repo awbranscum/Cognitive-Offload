@@ -36,6 +36,15 @@ way "Not today" does, because starting it would mean duplicating work someone
 else is already doing. On the check-back day it comes back into the running,
 since from then on picking it up again is a real option.
 
+**The same treatment works for a person.** Everything on this page about the
+waiting mark — the badge, the line under the title, the task stepping out of
+the suggestion slot until the check-back day — is written against `handed_to`,
+which is free text and has never cared whether it holds "Codex" or "Mum". The
+task editor on either tab has a **Waiting on** field and a **check back** date
+for exactly that, and no brief is written and no command is copied, because
+there is nothing to run. An agent is one thing you can be waiting on; most of
+them are people.
+
 **Two ways back.** In Delegate, **Take it back**. Anywhere else, the task
 editor offers *"Out with Claude Desktop, checking back Friday — take it back
 and do it yourself"*, visible only while a handoff is actually in effect. Both

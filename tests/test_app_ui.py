@@ -415,22 +415,36 @@ class AppSmokeTests(unittest.TestCase):
                       self.app.status_var.get())
 
     def _matrix_dialog_result(self, **overrides):
+        """Everything TaskEditorDialog.collect() returns, not a subset.
+
+        A stub that omits a key tests the app against a dialog that does not
+        exist. It omitted `repeat` and `estimate_minutes` on the add path,
+        which is how both went straight to the floor untested; the guard
+        against the next one is tests/test_editor_fields.py.
+        """
         result = {"title": "From the dialog", "content": "body text",
                   "first_step": "open it", "kind": "admin",
-                  "scheduled_for": "", "estimate_minutes": 0}
+                  "scheduled_for": "", "estimate_minutes": 0, "repeat": "",
+                  "clear_snooze": False, "take_back": False,
+                  "waiting_on": "", "check_back": ""}
         result.update(overrides)
         return result
 
     def test_matrix_add_carries_every_dialog_field(self):
         with mock.patch("cognitive_offload.app.TaskEditorDialog") as editor:
             editor.return_value.show.return_value = self._matrix_dialog_result(
-                scheduled_for="2026-09-01")
+                scheduled_for="2026-09-01", estimate_minutes=25,
+                repeat="weekly")
             self.app.add_matrix_task("do_first")
         [task] = self.app.matrix.list("do_first")
         self.assertEqual(task.title, "From the dialog")
         self.assertEqual(task.first_step, "open it")
         self.assertEqual(task.kind, "admin")
         self.assertEqual(task.scheduled_for, "2026-09-01")
+        # Typed into the dialog and dropped on the floor until v3.51.0. The
+        # person watched themselves fill both of these in.
+        self.assertEqual(task.estimate_minutes, 25)
+        self.assertEqual(task.repeat, "weekly")
         self.assertEqual(self.app.matrix_lists["do_first"].size(), 1)
 
     def test_matrix_edit_round_trips_the_fields(self):
@@ -1575,6 +1589,54 @@ class AppSmokeTests(unittest.TestCase):
         self.assertLessEqual(cell["title"].winfo_reqwidth(),
                              cell["title"].winfo_width(),
                              "the title was clipped after a bare resize")
+
+    def test_the_title_font_is_built_against_this_app_not_a_global_default(self):
+        """A Font belongs to the Tk instance that made it.
+
+        With no ``root=`` it binds to ``tkinter._default_root``, which is a
+        *different* app in a process that built two and ``None`` once the
+        first is destroyed. The badge measurement thirty lines above has
+        carried this guard from the start; the title measurement was added
+        without it.
+        """
+        from tkinter import font as tkfont
+
+        listing = self.app.task_list
+        listing._title_fonts.clear()
+        listing._title_widths.clear()
+        with mock.patch.object(tkfont, "Font", wraps=tkfont.Font) as made:
+            listing._title_width("Chase the insurance claim", bold=True)
+        self.assertTrue(made.called)
+        self.assertIn("root", made.call_args.kwargs,
+                      "the font was built against the global default root")
+
+    def test_a_font_it_cannot_build_lays_out_roughly_rather_than_crashing(self):
+        """This measurement only decides how wide a badge strip may be. Dying
+        on a refresh is far too large a consequence for that; the badge
+        measurement estimates instead, and so does this one now."""
+        from tkinter import font as tkfont
+
+        listing = self.app.task_list
+        listing._title_fonts.clear()
+        listing._title_widths.clear()
+        title = "Chase the insurance claim appeal before Friday"
+        with mock.patch.object(tkfont, "Font",
+                               side_effect=RuntimeError("no default root")):
+            estimated = listing._title_width(title, bold=True)
+        self.assertGreater(estimated, 0)
+        # Erring wide is the safe direction: the budget then falls back to
+        # the share rather than squeezing the title on a guess.
+        self.assertGreaterEqual(estimated, len(title) * 7)
+
+    def test_a_measurement_that_fails_midway_is_also_survivable(self):
+        listing = self.app.task_list
+        listing._title_fonts.clear()
+        listing._title_widths.clear()
+        listing._title_width("warm the cache", bold=False)
+        broken = mock.Mock()
+        broken.measure.side_effect = tk.TclError("font is gone")
+        listing._title_fonts["normal"] = broken
+        self.assertGreater(listing._title_width("a fresh title", bold=False), 0)
 
     def test_the_title_is_still_never_clipped_at_any_width(self):
         """The v3.49.0 promise must survive the fix to its own side effect."""

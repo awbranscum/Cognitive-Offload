@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import json
 import shlex
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .models import humanize_date, today_iso
@@ -275,8 +275,3 @@ def follow_up_date(handed_on: str, days: int = DEFAULT_FOLLOW_UP_DAYS) -> str:
     except (TypeError, ValueError):
         base = date.fromisoformat(today_iso())
     return (base + timedelta(days=max(1, days))).isoformat()
-
-
-def with_handoff(brief: Brief, note: str) -> Brief:
-    """A copy of the brief carrying a different covering note."""
-    return replace(brief, note=note.strip())

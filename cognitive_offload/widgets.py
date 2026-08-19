@@ -585,19 +585,42 @@ class RowList(ttk.Frame):
     #: for a list nobody scrolls through twice in a row.
     WIDTH_CACHE_LIMIT = 2000
 
+    #: rough width of one character, per weight, for when there is no Tk to
+    #: ask. Measured at SIZE_BASE (7.77 bold, 6.64 normal) and rounded UP,
+    #: because erring wide means the badges fall back to their share rather
+    #: than the title being squeezed on a guess.
+    CHAR_WIDTH = {"bold": 8, "normal": 7}
+
     def _title_width(self, text: str, bold: bool) -> int:
-        """How wide this title would be on one line."""
+        """How wide this title would be on one line.
+
+        Built with ``root=self`` and guarded, exactly like the badge
+        measurement above: a Font belongs to the Tk instance that made it,
+        and with no ``root=`` it silently binds to ``tkinter._default_root``
+        — which is a *different* app in a process that built two, and
+        ``None`` once that first app is destroyed. Unguarded, the next
+        refresh then died with "Too early to use font" rather than laying
+        out slightly wrong, which is the wrong way round for a measurement
+        that only decides how wide a badge strip may be.
+        """
         weight = "bold" if bold else "normal"
         key = (weight, text)
         cached = self._title_widths.get(key)
         if cached is not None:
             return cached
-        if weight not in self._title_fonts:
-            self._title_fonts[weight] = tkfont.Font(
-                font=font(theme.SIZE_BASE, weight))
+        measurer = self._title_fonts.get(weight)
+        if measurer is None:
+            try:
+                measurer = tkfont.Font(root=self, font=font(theme.SIZE_BASE, weight))
+            except (tk.TclError, RuntimeError):
+                return self.CHAR_WIDTH[weight] * len(text)
+            self._title_fonts[weight] = measurer
         if len(self._title_widths) >= self.WIDTH_CACHE_LIMIT:
             self._title_widths.clear()
-        width = self._title_fonts[weight].measure(text)
+        try:
+            width = measurer.measure(text)
+        except tk.TclError:
+            return self.CHAR_WIDTH[weight] * len(text)
         self._title_widths[key] = width
         return width
 

@@ -5,6 +5,68 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.51.0 — Waiting on a person, and a Save button you can reach
+The Delegate quadrant got a way to hand a task to an AI agent in v3.44.0, and
+with it the whole *waiting* treatment: a badge, a line under the title saying
+who has it and when to check back, and the task quietly stepping out of the
+"what should I start?" slot until that day. None of that machinery ever cared
+who was holding the task — `handed_to` is free text — but the only way to set
+it was to hand something to an agent, from one quadrant of the other tab.
+
+- **You can now say you are waiting on a person.** The task editor gained a
+  *Waiting on* field and a *check back* date, on both tabs, alongside the
+  take-back checkbox that was already there — one direction visible at a
+  time, never both. Blank date means three days, the same default the agent
+  handoff uses, because handing something over and then forgetting it is not
+  delegating, it is losing it somewhere more respectable.
+
+  Nothing downstream needed changing: the badge, the subtitle, the search,
+  the exclusion from the suggestion slot and the return on the check-back day
+  were all built already and all agnostic. What was missing was the sentence.
+  This matters because "waiting on a reply" is the single most reliable way
+  for a task to rot quietly, and this app already had the right treatment for
+  it — a fact ("check back Sat"), never a verdict ("overdue").
+
+- **The matrix editor was showing a task that was not the task.** It never
+  passed `repeat`, so a quadrant task wearing a `weekly` badge opened saying
+  *"Does not repeat"* — and since the result was not applied either, setting
+  the combobox to "Does not repeat" changed nothing. It also never passed
+  `handed_to`, so the take-back checkbox never appeared there; "Take it back"
+  is a **Delegate-only button**, which left a waiting task moved to any other
+  quadrant with no way out of the mark at all.
+
+- **Adding a matrix task dropped the estimate and the repeat.** Filled in as
+  "about 25 minutes, every week" and saved as neither, without a word. The
+  worst shape a data loss can take, because the person watched themselves
+  type it.
+
+- **Save and Cancel were not being drawn.** Found by rendering the dialog
+  rather than by any test. The task editor opened at a fixed 520px against
+  content that wanted **578** with a tag row; Tk lays out in pack order and
+  simply stops, so the button row was absent — not clipped, not scrolled off
+  — on a window whose only other exit is Escape, which throws the edit away.
+  This predates every feature above; each optional row added since had made
+  it worse. Two fixes: the dialog now sizes to its content (the mechanism
+  `ModalDialog` already had, and whose own comment says *"a fixed height is
+  always wrong for someone when the content varies"*), and the button row is
+  packed against the bottom of the window **before** the body, so on a screen
+  too short for the content the notes box gives up the room rather than the
+  way to save.
+
+- **The title measurement no longer crashes a refresh.** `_title_width` built
+  its font without `root=`, so it bound to the global default root — a
+  *different* app in a process holding two, and `None` once the first is
+  destroyed, where it raised rather than laying out approximately. The badge
+  measurement thirty lines above has carried both guards from the start.
+
+- The dead `handoff.with_handoff` is gone.
+
+**The guard:** `tests/test_editor_fields.py` reads the dialog's own signature
+and the dict `collect()` actually returns, and requires every caller to both
+pass and apply every field — or to name the exception with a reason. Three of
+the five bugs above were the same disease, a hand-written argument list at
+each of three call sites, and it caught two more the moment it was written.
+
 ## 3.50.0 — The badges give way before the title does
 v3.49.0 stopped badges clipping a long title by letting them narrow it
 instead — and left nothing bounding how narrow. This is the other half of

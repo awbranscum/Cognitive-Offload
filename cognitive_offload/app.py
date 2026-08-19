@@ -747,9 +747,15 @@ class CognitiveOffloadApp(tk.Tk):
             task.snoozed_until = ""
         if result.get("take_back"):
             task.handed_to = task.handed_off_on = task.follow_up_on = ""
+        waiting_on = result.get("waiting_on", "")
+        if waiting_on:
+            task.handed_to = waiting_on
+            task.handed_off_on = today_iso()
+            task.follow_up_on = result.get("check_back", "")
         self.refresh_tasks()
         self.mark_dirty()
-        self.set_status("Task updated.")
+        self.set_status(f"Waiting on {waiting_on}. Ctrl+Z undoes it."
+                        if waiting_on else "Task updated.")
 
     def promote_selected(self) -> None:
         """Pin the selection above everything open (or unpin it again).
@@ -946,6 +952,18 @@ class CognitiveOffloadApp(tk.Tk):
             created = self.matrix.create(category, result["title"], result["content"])
             created.first_step = result["first_step"]
             created.kind = result["kind"]
+            # The dialog offers a guess and a repeat, so it has to keep them.
+            # It did not: a new quadrant task filled in as "about 25 minutes,
+            # every week" arrived with neither, and nothing said so — the
+            # worst shape a data loss can take, because the person watched
+            # themselves type it.
+            created.estimate_minutes = result.get("estimate_minutes", 0)
+            created.repeat = result.get("repeat", "")
+            if result.get("waiting_on"):
+                created.handed_to = result["waiting_on"]
+                created.handed_off_on = today_iso()
+                created.follow_up_on = result.get("check_back", "")
+            # set_scheduled writes the record, so everything above rides with it.
             self.matrix.set_scheduled(created, result["scheduled_for"])
         except StorageError as exc:
             messagebox.showerror("Save failed", str(exc))
@@ -968,6 +986,16 @@ class CognitiveOffloadApp(tk.Tk):
             kind=task.kind,
             scheduled_for=task.scheduled_for,
             estimate_minutes=task.estimate_minutes,
+            # A quadrant task carries these too — it can arrive from the main
+            # list already repeating, already excused, already out with
+            # someone. Leaving them out did not hide them, it MISREPORTED
+            # them: the dialog said "Does not repeat" about a task wearing a
+            # weekly badge two inches away, and offered no way out of a wait
+            # anywhere but Delegate, where the button lives.
+            repeat=task.repeat,
+            snoozed_until=task.snoozed_until,
+            handed_to=task.handed_to,
+            follow_up_on=task.follow_up_on,
             window_title="Edit matrix task",
         ).show()
         if not result:
@@ -975,18 +1003,31 @@ class CognitiveOffloadApp(tk.Tk):
         # Taken before the writes below, which change the task in place and
         # can rename its file.
         before = [task.copy()]
+        waiting_on = result.get("waiting_on", "")
         try:
             task.first_step = result["first_step"]
             task.kind = result["kind"]
             task.scheduled_for = result["scheduled_for"]
             task.estimate_minutes = result.get("estimate_minutes", task.estimate_minutes)
+            task.repeat = result.get("repeat", task.repeat)
+            if result.get("clear_snooze"):
+                task.snoozed_until = ""
+            if result.get("take_back"):
+                task.handed_to = task.handed_off_on = task.follow_up_on = ""
+            if waiting_on:
+                task.handed_to = waiting_on
+                task.handed_off_on = today_iso()
+                task.follow_up_on = result.get("check_back", "")
+            # One write, not five: `update` persists the whole record, so
+            # every field above rides along with the title and the content.
             self.matrix.update(task, result["title"], result["content"])
         except StorageError as exc:
             messagebox.showerror("Save failed", str(exc))
             return
         self._undo_matrix_change("edit matrix task", before, [task.id])
         self.refresh_matrix()
-        self.set_status("Matrix task updated.")
+        self.set_status(f"Waiting on {waiting_on}. Ctrl+Z undoes it."
+                        if waiting_on else "Matrix task updated.")
 
     def hand_off_matrix_task(self, category: str) -> None:
         """Write a brief for an agent, and mark the task as waiting.
