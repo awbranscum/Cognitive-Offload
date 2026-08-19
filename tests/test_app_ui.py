@@ -1453,6 +1453,143 @@ class AppSmokeTests(unittest.TestCase):
                          "the title was wrapped against the badge strip's "
                          "allocated width instead of its requested width")
 
+    def _badged_long_task(self):
+        from cognitive_offload.models import today_iso
+
+        long_text = ("call the insurance company back about the rejected claim "
+                     "and ask for a supervisor and get the appeal deadline in "
+                     "writing this time")
+        self.capture(long_text)
+        task = self.app.tasks[0]
+        task.first_step = "ring them"
+        task.kind = "admin"
+        task.scheduled_for = today_iso()
+        task.estimate_minutes = 10
+        task.repeat = "weekly"
+        task.pinned = True
+        task.tags = ["health", "phone"]
+        return task
+
+    def test_one_task_is_never_taller_than_the_list_it_sits_in(self):
+        """Making badges narrow the title instead of clipping it left nothing
+        bounding how narrow. At the app's own minimum width a fully-badged
+        long task rendered ELEVEN lines — 224px, taller than the whole visible
+        list, filling it and pushing every other task out of view."""
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        self._badged_long_task()
+        for width in (1600, 1400, 1240, 1120):
+            with self.subTest(window=width):
+                self.app.geometry(f"{width}x880")
+                self.app.update_idletasks()
+                self.app.refresh_tasks()
+                self.app.update()
+                frame = self.app.task_list._pool[0]["frame"]
+                self.assertLessEqual(
+                    frame.winfo_height(), 140,
+                    f"one row is {frame.winfo_height()}px at {width}px wide",
+                )
+
+    def test_the_badges_give_way_before_the_title_does(self):
+        """The strip is the compressible thing — it already had a "+k" pill,
+        keyed on a count when width is what binds."""
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        task = self._badged_long_task()
+        self.app.geometry("1120x880")
+        self.app.update_idletasks()
+        self.app.refresh_tasks()
+        self.app.update()
+        cell = self.app.task_list._pool[0]
+        from cognitive_offload.rows import task_row
+
+        wanted = len(task_row(task).badges)
+        drawn = cell["badges"]._fit()
+        self.assertLess(len(drawn), wanted, "nothing was collapsed")
+        self.assertTrue(drawn[-1].text.startswith("+"),
+                        f"no overflow pill: {[b.text for b in drawn]}")
+
+    def test_a_short_title_keeps_the_badges_it_has_room_for(self):
+        """Capping by share alone collapsed "Bins" — a four-letter task —
+        down to four badges on a wide screen, for no reason at all."""
+        from cognitive_offload.models import today_iso
+        from cognitive_offload.rows import task_row
+
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        self.capture("Bins")
+        task = self.app.tasks[0]
+        task.first_step = "x"
+        task.kind = "admin"
+        task.scheduled_for = today_iso()
+        task.estimate_minutes = 10
+        task.repeat = "weekly"
+        task.pinned = True
+        self.app.geometry("1240x880")
+        self.app.update_idletasks()
+        self.app.refresh_tasks()
+        self.app.update()
+        cell = self.app.task_list._pool[0]
+        self.assertEqual(len(cell["badges"]._fit()), len(task_row(task).badges),
+                         "a short title lost badges it had room for")
+
+    def test_the_strip_never_draws_wider_than_its_budget(self):
+        """Including the overflow pill: room is reserved for "+k" before the
+        last badge is accepted, so the marker can never bust the budget."""
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        self._badged_long_task()
+        for width in (1600, 1240, 1120):
+            with self.subTest(window=width):
+                self.app.geometry(f"{width}x880")
+                self.app.update_idletasks()
+                self.app.refresh_tasks()
+                self.app.update()
+                strip = self.app.task_list._pool[0]["badges"]
+                self.assertLessEqual(strip.winfo_reqwidth(), strip.max_width,
+                                     [b.text for b in strip._fit()])
+
+    def test_resizing_alone_re_budgets_the_badges(self):
+        """Dragging the window narrower fires a Configure event and nothing
+        else — no refresh, so `_apply_row` never runs. The titles were
+        re-wrapped on that path but the badge budgets were not, so the strip
+        kept the room it was given at the old width and squeezed the title.
+        """
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        self._badged_long_task()
+        self.app.geometry("1600x880")
+        self.app.update_idletasks()
+        self.app.refresh_tasks()
+        self.app.update()
+        wide = self.app.task_list._pool[0]["badges"].max_width
+
+        # Resize only. No refresh_tasks() — this is what a drag does.
+        self.app.geometry("1120x880")
+        self.app.update()
+        cell = self.app.task_list._pool[0]
+        self.assertLess(cell["badges"].max_width, wide,
+                        "the badge budget did not follow the window in")
+        self.assertLessEqual(cell["badges"].winfo_reqwidth(),
+                             cell["badges"].max_width)
+        self.assertLessEqual(cell["title"].winfo_reqwidth(),
+                             cell["title"].winfo_width(),
+                             "the title was clipped after a bare resize")
+
+    def test_the_title_is_still_never_clipped_at_any_width(self):
+        """The v3.49.0 promise must survive the fix to its own side effect."""
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        self._badged_long_task()
+        for width in (1600, 1400, 1240, 1120):
+            with self.subTest(window=width):
+                self.app.geometry(f"{width}x880")
+                self.app.update_idletasks()
+                self.app.refresh_tasks()
+                self.app.update()
+                title = self.app.task_list._pool[0]["title"]
+                self.assertLessEqual(title.winfo_reqwidth(), title.winfo_width())
+
     def test_a_row_that_loses_its_badges_gets_its_width_back(self):
         """Rows come from a pool, so a cell that carried badges is reused for
         one that does not."""

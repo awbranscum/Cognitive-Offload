@@ -11,6 +11,7 @@ sentence.
 from __future__ import annotations
 
 import tkinter as tk
+from tkinter import font as tkfont
 from tkinter import ttk
 
 from . import theme
@@ -52,10 +53,20 @@ class BadgeStrip(tk.Canvas):
     # The title is the row; badges are garnish. Past this many, the rest
     # collapse into one quiet "+k" pill instead of squeezing the title to
     # nothing (a 15-tag task used to render as tags and no title at all).
+    #
+    # That was always the right intent measured against the wrong thing. A
+    # count does not bound the strip's WIDTH, and once the title started
+    # wrapping into whatever the badges left it, six wide badges squeezed a
+    # long title to eleven lines — one row taller than the whole visible
+    # list. `max_width` is the cap that actually binds; this one stays as a
+    # second, cheaper ceiling.
     MAX_BADGES = 6
 
     def __init__(self, master, badges: list[Badge], background: str, **kwargs):
         self._badges = badges
+        #: hard ceiling on how wide the strip may draw, in pixels; 0 means
+        #: unbounded. Set per row, because the room depends on the row.
+        self.max_width = 0
         self._background = background
         self._font = font(theme.SIZE_XS, "bold")
         super().__init__(master, highlightthickness=0, borderwidth=0,
@@ -91,19 +102,53 @@ class BadgeStrip(tk.Canvas):
         _TEXT_WIDTHS[key] = width
         return width
 
+    def _pill_width(self, text: str) -> int:
+        return self._text_width(text) + 2 * self.PAD_X
+
+    def _fit(self) -> list:
+        """The badges that fit, with the rest collapsed into one "+k" pill.
+
+        Bounded by ``max_width`` as well as by ``MAX_BADGES``, because width
+        is what actually costs the title its room. Room is reserved for the
+        "+k" pill *before* deciding whether one more badge fits, so the
+        overflow marker can never be the thing that busts the budget.
+        """
+        candidates = list(self._badges[:self.MAX_BADGES])
+        if not self.max_width:
+            shown = candidates
+        else:
+            shown, used = [], 0
+            for index, badge in enumerate(candidates):
+                cost = self._pill_width(badge.text) + self.GAP
+                still_hidden = len(self._badges) - index - 1
+                reserve = (self._pill_width(f"+{still_hidden}") + self.GAP
+                           if still_hidden else 0)
+                if shown and used + cost + reserve > self.max_width:
+                    break
+                used += cost
+                shown.append(badge)
+        hidden = len(self._badges) - len(shown)
+        if hidden == 1:
+            # "+1" costs about what the badge it hides costs, so show the
+            # real thing — but only if it genuinely fits.
+            extra = self._badges[len(shown)]
+            room = (not self.max_width
+                    or self._strip_width(shown + [extra]) <= self.max_width)
+            if room:
+                return shown + [extra]
+        if hidden > 0:
+            return shown + [Badge(f"+{hidden}", "tag")]
+        return shown
+
+    def _strip_width(self, badges: list) -> int:
+        return sum(self._pill_width(b.text) + self.GAP for b in badges)
+
     def _draw(self) -> None:
         self.delete("all")
         palette = tokens().badges
         x = 0
         height = 17
-        shown = list(self._badges[:self.MAX_BADGES])
-        overflow = len(self._badges) - len(shown)
-        if overflow == 1:
-            # "+1" costs the same space as the badge it hides.
-            shown.append(self._badges[self.MAX_BADGES])
-        elif overflow > 1:
-            shown.append(Badge(f"+{overflow}", "tag"))
-        for badge in shown:
+        for badge in self._fit():
             fill, fg = palette.get(badge.variant, palette["tag"])
             width = self._text_width(badge.text) + 2 * self.PAD_X
             rounded_rect(self, x, 1, x + width, height, RADIUS_PILL, fill=fill, outline="")
@@ -134,6 +179,13 @@ class RowList(ttk.Frame):
         self._surface = surface  # None -> card colour
         self._rows: list[Row] = []
         self._pool: list[dict] = []
+        #: measured-once fonts, keyed by weight, for deciding how much width
+        #: a title actually wants before the badges are given the rest.
+        self._title_fonts: dict = {}
+        #: memoised title widths. Every measure is a Tcl round trip, and a
+        #: refresh re-measures the same titles it measured last time —
+        #: unmemoised this doubled the cost of a keystroke in the search box.
+        self._title_widths: dict = {}
         self._selected: set[int] = set()
         self._hovered: int | None = None
         self._anchor: int | None = None
@@ -181,6 +233,8 @@ class RowList(ttk.Frame):
 
     def restyle(self) -> None:
         t = tokens()
+        self._title_fonts.clear()  # a theme switch can change the font
+        self._title_widths.clear()
         # Tk reserves the highlight border whether or not the widget has focus,
         # so a thickness of 2 shows keyboard focus without shifting the layout.
         self.canvas.configure(background=self._bg(), highlightthickness=2,
@@ -309,6 +363,9 @@ class RowList(ttk.Frame):
             foreground=t.muted_foreground if row.done else t.card_foreground,
             font=font(theme.SIZE_BASE, "normal" if row.done else "bold"),
         )
+        # The budget first: set_badges draws immediately, and _fit_title
+        # reads the width that draw produced.
+        cell["badges"].max_width = self._badge_budget(cell, row)
         cell["badges"].set_badges(row.badges, background=bg)
         cell["row_has_badges"] = bool(row.badges)
         if row.badges:
@@ -512,9 +569,62 @@ class RowList(ttk.Frame):
     #: gap between the title and the badge strip beside it (matches the
     #: padx the strip is gridded with)
     BADGE_GAP = 8
+    #: most of the row the badges may take before they start collapsing into
+    #: a "+k" pill. Measured rather than picked: at the app's minimum width a
+    #: full badge load left the title 128px and wrapped it to ELEVEN lines —
+    #: a single row taller than the whole visible list. At this share the same
+    #: row is five lines, and a wide window is unaffected because the badges
+    #: never wanted more than this anyway.
+    BADGE_SHARE = 0.42
     #: a title never wraps narrower than this, however many badges a row
     #: carries: past this point the badges are the thing that should give.
     MIN_WRAP = 80
+
+    #: how many measured titles to remember; past this the cache is dropped
+    #: whole rather than evicted one by one, which is cheap and good enough
+    #: for a list nobody scrolls through twice in a row.
+    WIDTH_CACHE_LIMIT = 2000
+
+    def _title_width(self, text: str, bold: bool) -> int:
+        """How wide this title would be on one line."""
+        weight = "bold" if bold else "normal"
+        key = (weight, text)
+        cached = self._title_widths.get(key)
+        if cached is not None:
+            return cached
+        if weight not in self._title_fonts:
+            self._title_fonts[weight] = tkfont.Font(
+                font=font(theme.SIZE_BASE, weight))
+        if len(self._title_widths) >= self.WIDTH_CACHE_LIMIT:
+            self._title_widths.clear()
+        width = self._title_fonts[weight].measure(text)
+        self._title_widths[key] = width
+        return width
+
+    def _badge_budget(self, cell: dict, row: Row) -> int:
+        """How much width this row's badges may take.
+
+        Whatever the title does not want, floored at ``BADGE_SHARE``. A
+        four-letter task has room for every badge it owns and should keep
+        them; a long one does not, and the share is what stops the badges
+        taking the room the title needs. Capping by the share alone collapsed
+        "Bins" down to four badges on a wide screen for no reason at all.
+
+        The cheap test comes first. Measuring a title is a Tcl round trip,
+        and almost every row carries one or two badges that fit inside the
+        share whatever the title is doing — so the title's width cannot
+        change the answer and is not worth asking for. Paying it on every
+        row cost about a fifth of the 300-task paint.
+        """
+        room = getattr(self, "_wrap_at", 0)
+        if not room or not row.badges:
+            return 0  # nothing to bound, and no reason to measure anything
+        share = int(room * self.BADGE_SHARE)
+        wanted = cell["badges"]._strip_width(row.badges[:BadgeStrip.MAX_BADGES])
+        if wanted <= share:
+            return share
+        spare = room - self._title_width(row.title, bold=not row.done) - self.BADGE_GAP
+        return max(share, spare)
 
     def _fit_title(self, cell: dict) -> None:
         """Wrap this row's title in the room its own badges leave it.
@@ -560,6 +670,14 @@ class RowList(ttk.Frame):
         if room == getattr(self, "_wrap_at", None):
             return
         self._wrap_at = room
+        for index, cell in enumerate(self._pool):
+            # Re-budget before the titles are refitted: how wide the strip
+            # ends up is what the title has left.
+            if index < len(self._rows):
+                budget = self._badge_budget(cell, self._rows[index])
+                if cell["badges"].max_width != budget:
+                    cell["badges"].max_width = budget
+                    cell["badges"]._draw()
         for cell in self._pool:
             # The subtitle spans both columns, so it keeps the full room; only
             # the title shares its line with the badges.

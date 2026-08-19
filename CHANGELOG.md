@@ -5,6 +5,60 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.50.0 — The badges give way before the title does
+v3.49.0 stopped badges clipping a long title by letting them narrow it
+instead — and left nothing bounding how narrow. This is the other half of
+that fix.
+
+- **One task could be taller than the whole visible list.** Measured, one
+  138-character task with a full badge load, varying only the window width:
+  3 lines at 1600, 4 at 1400, 6 at 1240 (the default), and **11 lines — a
+  224px row — at 1120**, which is the app's own minimum width. The task list
+  viewport at the minimum window height is 55–103px, so that single row
+  filled it and pushed every other task out of view. At the default width it
+  was still 139px, more than half a 254px viewport.
+
+  This was the mirror of the bug it fixed rather than a return of it: v3.49.0
+  hid *words*, this hid *other tasks*.
+
+- **The strip is the compressible thing, and it already knew.** `MAX_BADGES`
+  has always carried the comment *"the rest collapse into one quiet '+k' pill
+  instead of squeezing the title to nothing (a 15-tag task used to render as
+  tags and no title at all)"*. That intent was right and measured against the
+  wrong quantity: a **count** does not bound a **width**. Six wide badges
+  cost more room than fifteen narrow ones. The strip now has a width budget
+  as well, and the `+k` pill it already owned does the rest. Room is reserved
+  for `+k` *before* the last badge is accepted, so the overflow marker can
+  never be the thing that busts the budget.
+
+- **The budget is what the title does not want, floored at 42% of the row.**
+  A share alone was wrong in the other direction: it collapsed **"Bins"** — a
+  four-letter task — down to four badges on a wide screen, for no reason at
+  all. A short title now keeps every badge it has room for; a long one gets
+  the floor. Measured after: 3 lines at every width from 1600 down to 1240,
+  and 4 at the 1120 floor.
+
+- **The cheap test runs first, and that matters.** Measuring a title is a Tcl
+  round trip, and almost every row carries one or two badges that fit inside
+  the share whatever the title is doing — so the title's width cannot change
+  the answer and is not worth asking for. Paying it on every row cost about a
+  fifth of the 300-task paint (0.82s → 0.98s). Skipping it when the badges
+  already fit puts the documented benchmark back at **0.82s**, unchanged. The
+  measurements that are still needed are memoised, which also took a filter
+  round trip from 0.132s to 0.108s — better than before, because rows with no
+  badges now skip the work entirely. A heavily-badged 300-task list is 1.01s
+  against 0.89s: the case where the budget genuinely does work, and the only
+  one that pays.
+
+- 683 → 689 tests, Xvfb (`skipped=2`) and headless (`skipped=285`). **Six
+  promises broken on purpose; five caught, and the sixth found a gap in the
+  tests rather than in the code.** Removing the re-budget on resize passed
+  everything, because every test refreshed the list after resizing the
+  window. Dragging a window narrower fires a Configure event and *nothing
+  else* — no refresh, so the per-row code never runs, and the strip kept the
+  room it was given at the old width. There is now a test that resizes and
+  does not refresh.
+
 ## 3.49.0 — Two regressions this branch caused itself
 Both were introduced by earlier work in the arc that has just merged, and
 both were found by the research habit rather than by a failing test.
