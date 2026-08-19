@@ -186,12 +186,51 @@ def _pick_family(root: tk.Misc) -> str:
     return "Helvetica"
 
 
+#: the wheel sequences X and Windows use. Button-4/5 are the X ones.
+WHEEL_EVENTS = ("<MouseWheel>", "<Button-4>", "<Button-5>")
+
+
+def quiet_the_wheel(root: tk.Misc) -> None:
+    """Stop a stray scroll from rewriting a combobox.
+
+    ttk binds the wheel to ``ttk::combobox::Scroll``, so **one notch with the
+    pointer merely over a combobox changes its value** — no click, no focus.
+    Measured in the running app with three tasks on screen: one notch over the
+    "feel" filter moved it from "(any feel)" to "Urgent sprint" and the list
+    went to **zero rows**, with nothing saying why. This app's own rule is
+    that hiding a task is the one thing it will not do, and that gesture hid
+    all of them.
+
+    Three of the app's comboboxes change saved data rather than the view, and
+    the worst of them is "Repeats": a stray notch there makes a task recur for
+    ever.
+
+    Bound on the CLASS rather than on each widget, which replaces ttk's own
+    binding, because the fault is a dangerous default that anything added
+    later would inherit too — and this project has already watched four
+    hand-written per-site lists go stale. The dropdown list is a different
+    class (``ComboboxPopdownFrame``) and still scrolls, and in a dialog whose
+    form scrolls the event now reaches that instead, which is what the person
+    was reaching for.
+    """
+    # Deliberately NOT "break": replacing the class binding is what stops
+    # ttk's own handler, and returning nothing lets the event carry on up to
+    # the window — where, in a dialog whose form scrolls, it does the thing
+    # the person was actually reaching for. Swallowing it would trade a
+    # destructive gesture for a dead one.
+    for sequence in WHEEL_EVENTS:
+        root.bind_class("TCombobox", sequence, lambda _e: None)
+
+
 def apply_theme(root: tk.Misc, name: str = "light") -> Tokens:
     """Install the ttk styles for a theme and remember it as current."""
     global _current, _family
     _current = THEMES.get(name, LIGHT)
     t = _current
     _family = _pick_family(root)
+    # Not styling, but the one place that configures the toolkit for the whole
+    # app, and it must run before any combobox exists.
+    quiet_the_wheel(root)
 
     style = ttk.Style(root)
     for base in ("clam", "alt", "default"):

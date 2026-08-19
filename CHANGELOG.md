@@ -5,6 +5,60 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.54.0 — A stray scroll cannot hide your tasks, and a finished step counts
+Two things, both found by auditing a release from outside it.
+
+### One wheel notch over a combobox changed its value
+ttk binds the mouse wheel to `ttk::combobox::Scroll`, and it always has. So
+**one notch with the pointer merely over a combobox changed it** — no click,
+no focus. Measured in the running app with three tasks on screen:
+
+```
+visible before: 3 | kind filter: (any feel)
+after ONE wheel notch over the filter combobox:
+   filter now: Urgent sprint | visible: 0
+```
+
+This app's own rule is that hiding a task is the one thing it will not do,
+and that gesture hid all of them, silently, in response to the most ordinary
+thing anyone does to a list. Three of the six comboboxes change **saved
+data** rather than the view, and the worst of them is "Repeats": a stray
+notch there makes a task recur for ever.
+
+The fix is one binding, installed on the **class** rather than on each
+widget, because the fault is a dangerous default that anything added later
+would inherit too — and this project has already watched four hand-written
+per-site lists go stale. It deliberately does not swallow the event: in a
+dialog whose form scrolls, the wheel now scrolls the form, which is what the
+person was reaching for. The dropdown list is a different class and still
+scrolls. `tests/test_wheel.py` finds every combobox in the app rather than
+listing them, so a seventh is covered the moment it exists.
+
+### A finished step is evidence, and nothing was writing it down
+The week review counts sessions, minutes and *finished tasks*. A step ticked
+off is none of those, so a week spent moving through a four-step report
+showed effort and no outcome — on the one screen whose stated job is that
+*"I did nothing this week is a distortion, and the correction is not
+motivation; it is the record."*
+
+The obstacle was that `steps_done` is a **cursor, not a history**: nothing on
+the task says when a step was ticked, so unless it is written down at the
+moment it happens the evidence does not exist. There is now a step log, the
+same shape as the completed-tasks log that already exists so that tidying up
+cannot erase the answer to "what did I get done today". A day whose only
+outcome was two steps of something long now appears in the week, where
+before it read as blank.
+
+The cheaper idea — recording the step on the focus session — was rejected on
+purpose: it would credit steps ticked at session end and silently miss those
+ticked in the editor, and a record that covers *some* of the thing is worse
+than one that admits its scope.
+
+Undo takes the record back with the cursor, which needed the undo stack to
+snapshot the log alongside the tasks: restoring the cursor and leaving the
+entry behind would leave the week review claiming a step was finished that,
+as far as the task is concerned, never was.
+
 ## 3.53.0 — The plan reaches the rest of the app
 v3.52.0 gave a task a plan. This is the pass that asks where a plan needs to
 be visible and finds four places it was not — two of them defects in v3.52.0

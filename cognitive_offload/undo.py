@@ -15,11 +15,17 @@ UNDO_LIMIT = 30
 
 
 class UndoEntry:
-    __slots__ = ("label", "snapshot", "restore")
+    __slots__ = ("label", "snapshot", "restore", "steps_log")
 
-    def __init__(self, label: str, snapshot: list):
+    def __init__(self, label: str, snapshot: list, steps_log: list | None = None):
         self.label = label
         self.snapshot = snapshot
+        #: the record of steps ticked off, as it stood before this change.
+        #: Carried here rather than through `attach` because the record is a
+        #: claim about what happened: restoring the cursor and leaving the
+        #: entry behind would leave the week review saying a step was
+        #: finished that, as far as the task is concerned, never was.
+        self.steps_log = list(steps_log or [])
         self.restore: Callable[[], None] | None = None
 
 
@@ -31,8 +37,8 @@ class UndoStack:
         self._entries: list[UndoEntry] = []
         self._limit = max(1, limit)
 
-    def push(self, label: str, snapshot: list) -> None:
-        self._entries.append(UndoEntry(label, snapshot))
+    def push(self, label: str, snapshot: list, steps_log: list | None = None) -> None:
+        self._entries.append(UndoEntry(label, snapshot, steps_log))
         del self._entries[:-self._limit]
 
     def attach(self, restore: Callable[[], None]) -> None:

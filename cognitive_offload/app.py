@@ -113,6 +113,11 @@ class CognitiveOffloadApp(tk.Tk):
         # Tasks finished and then cleared away; keeps "N done today" honest
         # after a tidy-up instead of resetting the day to zero.
         self.completed_log: list[dict] = []
+        # Steps ticked off, with the day they were ticked. `Task.steps_done`
+        # is a cursor and keeps no history, so this is the ONLY record that a
+        # step was ever finished — and the week review's whole job is being
+        # the record.
+        self.steps_log: list[dict] = []
         self._day = None
         # Which suggestion the "Next up" strip is showing; "Not that one"
         # walks it forward.
@@ -586,7 +591,32 @@ class CognitiveOffloadApp(tk.Tk):
     # undo
     # ------------------------------------------------------------------
     def push_undo(self, label: str) -> None:
-        self._undo_stack.push(label, [t.copy() for t in self.tasks])
+        self._undo_stack.push(label, [t.copy() for t in self.tasks],
+                              self.steps_log)
+
+    def _advance(self, item) -> bool:
+        """Tick the current step off, recording it on the way past."""
+        self.record_step_done(item)
+        return item.advance_step()
+
+    def record_step_done(self, item) -> None:
+        """Write down the step about to be ticked, before it moves.
+
+        Called from all three places that advance a plan, because three
+        hand-written copies of this is precisely the shape of bug the last
+        four releases have been fixing. Undo is handled by the stack, which
+        snapshots the log alongside the tasks — Ctrl+Z must not put the
+        cursor back and leave the evidence behind.
+        """
+        step = (getattr(item, "first_step", "") or "").strip()
+        if not step:
+            return
+        self.steps_log.append({
+            "step": step,
+            "task": getattr(item, "text", None) or getattr(item, "title", "") or "",
+            "done_at": now_stamp(),
+        })
+        self.mark_dirty()
 
     def attach_undo(self, restore) -> None:
         """Give the pending undo entry a side effect to run as well.
@@ -603,6 +633,10 @@ class CognitiveOffloadApp(tk.Tk):
             self.set_status("Nothing to undo.")
             return
         self.tasks = entry.snapshot
+        # Before `restore`, so a flow that captured the log itself — the
+        # matrix editor pushes AFTER its writes, so its snapshot already has
+        # the new entry in it — gets the last word.
+        self.steps_log = list(entry.steps_log)
         if entry.restore is not None:
             try:
                 entry.restore()
@@ -745,7 +779,7 @@ class CognitiveOffloadApp(tk.Tk):
         # silently reverted the edit.
         task.set_current_step(result["first_step"])
         task.set_rest(result.get("rest_of_plan", task.rest_of_plan))
-        advanced = bool(result.get("step_done")) and task.advance_step()
+        advanced = bool(result.get("step_done")) and self._advance(task)
         task.kind = result["kind"]
         task.scheduled_for = result["scheduled_for"]
         task.estimate_minutes = result.get("estimate_minutes", task.estimate_minutes)
@@ -1020,11 +1054,14 @@ class CognitiveOffloadApp(tk.Tk):
         # Taken before the writes below, which change the task in place and
         # can rename its file.
         before = [task.copy()]
+        # Captured here because this flow registers its undo entry AFTER the
+        # writes, so by then the log already holds whatever the edit added.
+        steps_before = list(self.steps_log)
         waiting_on = result.get("waiting_on", "")
         try:
             task.set_current_step(result["first_step"])
             task.set_rest(result.get("rest_of_plan", task.rest_of_plan))
-            advanced = bool(result.get("step_done")) and task.advance_step()
+            advanced = bool(result.get("step_done")) and self._advance(task)
             task.kind = result["kind"]
             task.scheduled_for = result["scheduled_for"]
             task.estimate_minutes = result.get("estimate_minutes", task.estimate_minutes)
@@ -1043,7 +1080,8 @@ class CognitiveOffloadApp(tk.Tk):
         except StorageError as exc:
             messagebox.showerror("Save failed", str(exc))
             return
-        self._undo_matrix_change("edit matrix task", before, [task.id])
+        self._undo_matrix_change("edit matrix task", before, [task.id],
+                                 steps_before=steps_before)
         self.refresh_matrix()
         if waiting_on:
             self.set_status(f"Waiting on {waiting_on}. Ctrl+Z undoes it.")
@@ -1664,7 +1702,8 @@ class CognitiveOffloadApp(tk.Tk):
             self.matrix.restore(task)
         self.refresh_matrix()
 
-    def _undo_matrix_change(self, label: str, before: list, ids: list) -> None:
+    def _undo_matrix_change(self, label: str, before: list, ids: list,
+                            steps_before: list | None = None) -> None:
         """Register a matrix change with the same undo stack as everything else.
 
         Without this the stack simply did not hear about matrix work, so the
@@ -1673,8 +1712,13 @@ class CognitiveOffloadApp(tk.Tk):
         instead.
         """
         self.push_undo(label)
-        self.attach_undo(
-            lambda before=before, ids=ids: self._revert_matrix_tasks(before, ids))
+
+        def restore(before=before, ids=ids, steps=steps_before):
+            if steps is not None:
+                self.steps_log = list(steps)
+            self._revert_matrix_tasks(before, ids)
+
+        self.attach_undo(restore)
 
     def _remove_matrix_tasks_by_id(self, ids: list) -> None:
         """Delete matrix tasks by id, resolved fresh from disk."""
@@ -1754,7 +1798,7 @@ class CognitiveOffloadApp(tk.Tk):
             if next_step:
                 task.set_current_step(next_step)
             if step_done:
-                task.advance_step()
+                self._advance(task)
             self.refresh_tasks()
             self.mark_dirty()
 
@@ -1813,7 +1857,7 @@ class CognitiveOffloadApp(tk.Tk):
     def show_today(self) -> None:
         """What you actually finished today, plus the minutes you focused."""
         view = presenter.today_view(self.tasks, self.completed_log,
-                                    self.session_log)
+                                    self.session_log, steps_log=self.steps_log)
         if not view.body:
             return
         with self._ask_over_focus():
@@ -1822,7 +1866,7 @@ class CognitiveOffloadApp(tk.Tk):
     def show_week(self) -> None:
         """The last seven days, as evidence — only the days that had anything."""
         view = presenter.week_view(self.tasks, self.completed_log,
-                                   self.session_log)
+                                   self.session_log, steps_log=self.steps_log)
         with self._ask_over_focus():
             WeekReviewDialog(self, view.days, view.total_sessions,
                              view.total_minutes).show()
@@ -2177,11 +2221,13 @@ class CognitiveOffloadApp(tk.Tk):
                         "starts empty. The set-aside file is untouched.",
             )
         self.set_status(f"Started fresh. The unreadable file is kept as {spoiled.name}.")
-        return {"tasks": [], "scratchpad": "", "timer_minutes": 15, "completed_log": []}
+        return {"tasks": [], "scratchpad": "", "timer_minutes": 15,
+                "completed_log": [], "steps_log": []}
 
     def _apply_state(self, data: dict) -> None:
         self.tasks = data["tasks"]
         self.completed_log = list(data.get("completed_log") or [])
+        self.steps_log = list(data.get("steps_log") or [])
         self.set_scratchpad(data["scratchpad"])
         self.work_minutes.set(data["timer_minutes"])
         self._stop_ticking()
@@ -2202,7 +2248,7 @@ class CognitiveOffloadApp(tk.Tk):
     def save_state(self, silent: bool = False) -> bool:
         try:
             self.state_store.save(self.tasks, self.scratchpad_text(), self._minutes(),
-                                  self.completed_log)
+                                  self.completed_log, self.steps_log)
         except StorageError as exc:
             if not silent:
                 messagebox.showerror("Save failed", str(exc))
@@ -2265,7 +2311,7 @@ class CognitiveOffloadApp(tk.Tk):
             return False
         try:
             StateStore(Path(path)).save(self.tasks, self.scratchpad_text(), self._minutes(),
-                                        self.completed_log)
+                                        self.completed_log, self.steps_log)
         except StorageError as exc:
             messagebox.showerror("Export failed", str(exc))
             return False

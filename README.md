@@ -169,8 +169,9 @@ reinstall from python.org).
   you are actually working in. "Done early" banks the minutes you did do.
 - Finished sessions are logged to `sessions.json` and drawn as a 14-day strip.
 - Click the strip (or its summary) for **the week, in evidence**: one line per
-  day that had anything — sessions, minutes, and the tasks finished that day —
-  with days that had nothing simply left out. "I did nothing this week" is a
+  day that had anything — sessions, minutes, the tasks finished that day, and
+  the **steps** ticked off — with days that had nothing simply left out. A day
+  whose only outcome was two steps of something long still counts as a day. "I did nothing this week" is a
   distortion, and the correction is not motivation; it is the record.
 
 **Look and feel**

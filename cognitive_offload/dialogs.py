@@ -31,6 +31,7 @@ from .handoff import (
     follow_up_date,
     target_for,
 )
+from .presenter import step_line
 from .queries import split_lines, suggest_tasks
 from .storage import CATEGORIES, CATEGORY_KEYS
 from .theme import SIZE_BASE, SIZE_LG, SIZE_SM, font, px, style_text, tokens
@@ -1027,6 +1028,13 @@ class WeekReviewDialog(ModalDialog):
             for title in entry.titles:
                 ttk.Label(inner, text=f"   ✓ {title}", style="Muted.TLabel",
                           wraplength=px(self, 410), justify="left").pack(anchor="w")
+            # Steps use a different mark from finished tasks, because they
+            # are different evidence: a task done and a step done should not
+            # read as the same thing at a glance.
+            for step, task in entry.steps:
+                ttk.Label(inner, text=f"   · {step_line(step, task)}",
+                          style="Muted.TLabel", wraplength=px(self, 410),
+                          justify="left").pack(anchor="w")
         # Ask for exactly as much room as the days need, up to the ceiling.
         # Without this the canvas asks for nothing and even a quiet week
         # would scroll — trading one wrong answer for another.

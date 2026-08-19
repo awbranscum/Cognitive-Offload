@@ -89,6 +89,10 @@ class WeekDay:
     sessions: int
     minutes: int
     titles: list = field(default_factory=list)
+    #: steps ticked off that day, as (step, task) pairs. A step finished is
+    #: evidence in exactly the way a task finished is; the only reason it was
+    #: not here before is that nothing recorded when one happened.
+    steps: list = field(default_factory=list)
 
 
 @dataclass
@@ -417,26 +421,59 @@ def due_view(tasks: list, scheduled: list | None = None,
     )
 
 
+def steps_done_on(steps_log: list | None, day: str) -> list:
+    """The steps ticked off on ``day``, oldest first, as (step, task) pairs.
+
+    One reader for both screens. The last sentence this app kept in two
+    places drifted, and these two say the same thing about the same day.
+    """
+    found = []
+    for entry in steps_log or []:
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("done_at", ""))[:10] != day:
+            continue
+        step = (entry.get("step") or "").strip()
+        if step:
+            found.append((step, (entry.get("task") or "").strip()))
+    return found
+
+
+def step_line(step: str, task: str) -> str:
+    """A finished step, named with the task it belongs to.
+
+    Without the task a step reads as a fragment — "copy the headings across"
+    is not evidence of anything on its own — and a week review that cannot be
+    understood is not a record.
+    """
+    return f"{step} — {task}" if task else step
+
+
 def today_view(tasks: list, completed_log: list | None = None,
-               session_log=None, on: str | None = None) -> TodayView:
+               session_log=None, on: str | None = None,
+               steps_log: list | None = None) -> TodayView:
     """What you finished today, plus the minutes you focused."""
     day = on or today_iso()
     titles = completed_titles_today(tasks, completed_log, on=day)
+    steps = steps_done_on(steps_log, day)
     sessions = len(session_log.on_day(day)) if session_log is not None else 0
     minutes = (sum(s.minutes for s in session_log.on_day(day))
                if session_log is not None else 0)
-    if not titles:
+    if not titles and not steps:
         return TodayView(titles=[], sessions=sessions, minutes=minutes, body="")
     footer = ""
     if sessions:
         footer = (f"\n\nPlus {sessions} focus session"
                   f"{'s' if sessions != 1 else ''} — {minutes} minutes.")
-    body = "Finished today:\n\n" + "\n".join(f"·  {t}" for t in titles) + footer
+    lines = [f"·  {t}" for t in titles]
+    lines += [f"·  {step_line(step, task)}" for step, task in steps]
+    body = "Finished today:\n\n" + "\n".join(lines) + footer
     return TodayView(titles=titles, sessions=sessions, minutes=minutes, body=body)
 
 
 def week_view(tasks: list, completed_log: list | None = None,
-              session_log=None, today: date | None = None) -> WeekView:
+              session_log=None, today: date | None = None,
+              steps_log: list | None = None) -> WeekView:
     """The last seven days as evidence — only the days that had something.
 
     A day you did nothing is skipped rather than listed with a zero beside it.
@@ -452,7 +489,8 @@ def week_view(tasks: list, completed_log: list | None = None,
         iso = day.isoformat()
         sessions = session_log.on_day(iso) if session_log is not None else []
         titles = completed_titles_today(tasks, completed_log, on=iso)
-        if not sessions and not titles:
+        steps = steps_done_on(steps_log, iso)
+        if not sessions and not titles and not steps:
             continue
         minutes = sum(s.minutes for s in sessions)
         total_sessions += len(sessions)
@@ -464,6 +502,6 @@ def week_view(tasks: list, completed_log: list | None = None,
         else:
             label = day.strftime("%A")
         days.append(WeekDay(label=label, sessions=len(sessions),
-                            minutes=minutes, titles=titles))
+                            minutes=minutes, titles=titles, steps=steps))
     return WeekView(days=days, total_sessions=total_sessions,
                     total_minutes=total_minutes)

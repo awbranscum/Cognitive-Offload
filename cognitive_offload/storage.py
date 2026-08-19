@@ -32,6 +32,12 @@ CONFIG_PATH = DEFAULT_LOCATIONS.config_file
 STATE_FILENAME = "data.json"
 SESSIONS_FILENAME = "sessions.json"
 COMPLETED_LOG_LIMIT = 200
+# Steps finished, kept for the same reason the completed log is: the week
+# review reads it, and `steps_done` is a CURSOR, not a history — nothing in
+# the task itself records when a step was ticked, so if this is not written
+# down the evidence does not exist. Roomier than the completed log because a
+# week of steps is many more entries than a week of finished tasks.
+STEPS_LOG_LIMIT = 500
 
 # The bridge out of high-stimulation activity: a few small, concrete steps
 # between where you are and the task, so starting is not one big leap.
@@ -469,7 +475,8 @@ class StateStore:
         try:
             data = read_json(self.path)
         except FileNotFoundError:
-            return {"tasks": [], "scratchpad": "", "timer_minutes": 15, "completed_log": []}
+            return {"tasks": [], "scratchpad": "", "timer_minutes": 15,
+                    "completed_log": [], "steps_log": []}
         except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             # An unreadable file must never reach _backup(): copying it over
             # the .bak would destroy the last good copy at the exact moment
@@ -560,18 +567,29 @@ class StateStore:
                     "completed_at": record.get("completed_at") or "",
                 })
 
+        steps = []
+        for record in data.get("steps_log") or []:
+            if isinstance(record, dict) and isinstance(record.get("step"), str):
+                steps.append({
+                    "step": record["step"],
+                    "task": record.get("task") if isinstance(record.get("task"), str) else "",
+                    "done_at": record.get("done_at") or "",
+                })
+
         return {
             "tasks": tasks,
             "scratchpad": scratchpad,
             # Short by default: 15 minutes is the length you can agree to.
             "timer_minutes": _int_or(data.get("timer_minutes"), 15, 1, 240),
             "completed_log": finished[-COMPLETED_LOG_LIMIT:],
+            "steps_log": steps[-STEPS_LOG_LIMIT:],
             "dropped": dropped,
         }
 
     @staticmethod
     def serialize(tasks: list[Task], scratchpad: str, timer_minutes: int,
-                  completed_log: list | None = None) -> dict:
+                  completed_log: list | None = None,
+                  steps_log: list | None = None) -> dict:
         return {
             "version": STATE_VERSION,
             "tasks": [t.to_dict() for t in tasks],
@@ -580,12 +598,17 @@ class StateStore:
             # What was finished and then cleared away. Kept so "N done today"
             # survives a tidy-up; capped because it is a footnote, not a store.
             "completed_log": list(completed_log or [])[-COMPLETED_LOG_LIMIT:],
+            # Steps finished, for the week review. The task itself keeps only
+            # a cursor, so without this the record does not exist anywhere.
+            "steps_log": list(steps_log or [])[-STEPS_LOG_LIMIT:],
             "saved_at": now_stamp(),
         }
 
     def save(self, tasks: list[Task], scratchpad: str, timer_minutes: int,
-             completed_log: list | None = None) -> None:
-        payload = self.serialize(tasks, scratchpad, timer_minutes, completed_log)
+             completed_log: list | None = None,
+             steps_log: list | None = None) -> None:
+        payload = self.serialize(tasks, scratchpad, timer_minutes,
+                                 completed_log, steps_log)
         try:
             self._backup()
             write_json(self.path, payload)

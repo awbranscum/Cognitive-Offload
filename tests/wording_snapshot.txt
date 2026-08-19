@@ -278,6 +278,7 @@ dialogs.py | messagebox.showwarning | _warn_about_date | Try 'today', 'tomorrow'
 dialogs.py | messagebox.showwarning | collect | The title cannot be empty.
 dialogs.py | messagebox.showwarning | collect | Title required
 dialogs.py | plan_hint= | __init__ | One step per line, in order. Optional — and only the top one has to be any good.
+dialogs.py | text= | __init__ |    · {}
 dialogs.py | text= | __init__ |    ✓ {}
 dialogs.py | text= | __init__ | A quiet week is just a quiet week — nothing here counts against you. The strip fills in as sessions happen.
 dialogs.py | text= | __init__ | About
@@ -446,6 +447,7 @@ presenter.py | returns | plural | {} {}s
 presenter.py | returns | quadrant_tab | {} ({})
 presenter.py | returns | replace_running_question | A break is running.\n\nEnd it and start a session now?
 presenter.py | returns | replace_running_question | You are {minute} into {}.\n\nThose minutes are kept, not lost — starting something else banks them.\n\nStart something else instead?
+presenter.py | returns | step_line | {} — {}
 presenter.py | summary= | task_list_view | {} open · {} done
 presenter.py | text= | finished_message | {} min, and it's finished. Nice.
 queries.py | ALL_KINDS= | <module> | (any feel)
