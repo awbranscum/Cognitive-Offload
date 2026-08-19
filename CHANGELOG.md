@@ -5,6 +5,67 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.45.0 — Things that come back round
+The app could not hold a recurring task at all. Every task was one-shot,
+which leaves out bins, meds, bills and standing appointments — precisely the
+things this audience loses, and precisely the things an external memory is
+supposed to be for.
+
+- **Repeats: daily, weekdays, weekly, fortnightly, monthly**, set in the task
+  editor beside the estimate. Deliberately a small vocabulary — a recurrence
+  grammar with "every 3rd Tuesday" in it is a second app, and this list covers
+  what actually goes missing.
+
+- **Finishing one completes that round and books the next.** It does not reset
+  the date. Resetting would quietly delete the evidence that you did it, and
+  the week review — the screen whose entire job is answering *"I did nothing
+  this week"* — reads exactly that evidence. Doing the bins six weeks running
+  should look like six things done, not like one task that is somehow never
+  finished. There is a test named for that sentence.
+
+- **A missed repeat never becomes a backlog.** The next date is worked out
+  from **today** whenever the booking has already passed, so two weeks off the
+  bins gets you one task asking about the next collection — not fourteen
+  copies of a task you already feel bad about. A pile of overdue duplicates is
+  the most reliable way to make someone stop opening an app, and this
+  application cannot afford it.
+
+- **The rhythm holds when you are on time.** If the booking is still ahead
+  because you did it early, the next one counts from the booking rather than
+  from today, so a Friday task stays a Friday task instead of drifting a day
+  earlier every week. Those are two different rules and both are pinned:
+  making the code always count from today fails three tests, and making it
+  always count from the booking fails one.
+
+- **Weekdays skips the weekend; monthly does not skip February.** 31 January
+  repeats to 28 February rather than overflowing, and Friday repeats to Monday.
+
+- **A repeating task is visibly different from a one-off**, because otherwise
+  the reasonable thing to do with a finished one is delete it — taking the
+  recurrence with it. The badge uses the same quiet grey as the estimate and
+  the tags: "this comes back" is information, not a signal.
+
+- **A snooze does not carry into the next round.** "Not today" was about
+  today, not about every future Tuesday.
+
+- **Two new status sentences were nearly shipped watched by nothing.** They
+  were built with `status += ...`, and the wording extractor cannot see an
+  augmented assignment — the snapshot diff showed the *old* sentence moving
+  category and no sign of the new ones. Both are now their own `status =`,
+  which is a smaller change than it sounds and the difference between a
+  sentence that is checked for tone and one that is not.
+
+- 605 → 630 tests, Xvfb (`skipped=2`) and headless (`skipped=259`). **Nine
+  promises broken on purpose; eight caught, and the ninth found a test that
+  could not fail.** `test_reopening_a_repeating_task_does_not_book_another`
+  asserted a count that was the same under both implementations, because
+  `target` is only true when something selected is still open — so a lone
+  finished task takes the no-op branch either way. The guard only bites on a
+  **mixed selection**, one finished task and one open one. Rewritten to that
+  shape, it fails against its mutant; the old single-selection version was the
+  "input where every implementation agrees" trap for the third time on this
+  branch.
+
 ## 3.44.0 — Delegate is a quadrant you can actually use now
 "Give it to someone else" needs a someone else. For a lot of people there
 isn't one, so Delegate fills up and becomes a second Do First with a politer

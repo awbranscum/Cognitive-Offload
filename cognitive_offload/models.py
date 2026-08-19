@@ -201,6 +201,80 @@ def _as_tags(value) -> list[str]:
     return tags
 
 
+# key -> (label, how the next date is worked out). Deliberately small: a
+# recurrence grammar with "every 3rd Tuesday" in it is a second app, and the
+# things this audience actually loses are bins, meds, bills and standing
+# appointments — all of which fit here.
+REPEATS: dict[str, str] = {
+    "": "Does not repeat",
+    "daily": "Every day",
+    "weekdays": "Every weekday",
+    "weekly": "Every week",
+    "fortnightly": "Every two weeks",
+    "monthly": "Every month",
+}
+REPEAT_KEYS = tuple(REPEATS)
+REPEAT_LABELS = tuple(REPEATS.values())
+REPEAT_KEY_BY_LABEL = {label: key for key, label in REPEATS.items()}
+
+
+def repeat_label(repeat: str) -> str:
+    return REPEATS.get(repeat, REPEATS[""])
+
+
+def next_occurrence(repeat: str, scheduled_for: str = "", on: str | None = None) -> str:
+    """The next day a repeating task is wanted, or "" if it does not repeat.
+
+    Two rules, and the second one is the whole reason this is a function
+    rather than a line of arithmetic:
+
+    **Never generate a backlog.** The next date is worked out from *today*
+    whenever the booking has already passed. Miss the bins for a fortnight and
+    you come back to one task asking about the next collection — not fourteen
+    copies of a task you already feel bad about. A pile of overdue duplicates
+    is the single most reliable way to make someone stop opening an app.
+
+    **Keep the rhythm when you are on time.** If the booking is still ahead
+    (you did it early), the next one is counted from the booking, so a
+    Tuesday task stays a Tuesday task instead of drifting a day earlier every
+    week.
+    """
+    if repeat not in REPEATS or not repeat:
+        return ""
+    from datetime import date, timedelta
+
+    today = on or today_iso()
+    try:
+        base = date.fromisoformat(scheduled_for) if scheduled_for else None
+    except ValueError:
+        base = None
+    try:
+        floor = date.fromisoformat(today)
+    except ValueError:
+        floor = date.fromisoformat(today_iso())
+    if base is None or base < floor:
+        base = floor
+
+    if repeat == "daily":
+        return (base + timedelta(days=1)).isoformat()
+    if repeat == "weekdays":
+        nxt = base + timedelta(days=1)
+        while nxt.weekday() >= 5:  # Saturday, Sunday
+            nxt += timedelta(days=1)
+        return nxt.isoformat()
+    if repeat == "weekly":
+        return (base + timedelta(days=7)).isoformat()
+    if repeat == "fortnightly":
+        return (base + timedelta(days=14)).isoformat()
+    # monthly: the same day next month, pulled back to the last day of a
+    # shorter one so the 31st does not silently skip February.
+    year, month = base.year + (base.month // 12), base.month % 12 + 1
+    import calendar
+
+    day = min(base.day, calendar.monthrange(year, month)[1])
+    return date(year, month, day).isoformat()
+
+
 @dataclass
 class Task:
     """A single item on the active stack.
@@ -237,6 +311,11 @@ class Task:
     # what makes time-sense calibrate: compared later with what the sessions
     # actually took — as data, never as a mark.
     estimate_minutes: int = 0
+    # How often this comes back round (see REPEATS). Finishing a repeating
+    # task completes *this* one and books the next, so the week review still
+    # holds the evidence that you did it — a task that quietly reset its own
+    # date would erase the record, which is the one thing that screen is for.
+    repeat: str = ""
 
     def __post_init__(self) -> None:
         self.text = _as_str(self.text).strip()
@@ -248,6 +327,9 @@ class Task:
         self.snoozed_until = _as_str(self.snoozed_until).strip()
         self.estimate_minutes = _as_minutes(self.estimate_minutes)
         self.first_step = _as_str(self.first_step).strip()
+        # An unknown repeat becomes "does not repeat" rather than an error:
+        # same reason an unknown kind becomes Unsorted.
+        self.repeat = self.repeat if self.repeat in REPEATS else ""
         self.kind = self.kind if self.kind in TASK_KINDS else KIND_UNSET
         self.scheduled_for = _as_str(self.scheduled_for).strip()
         if not self.created_at:
@@ -270,6 +352,30 @@ class Task:
     def set_done(self, done: bool) -> None:
         self.done = bool(done)
         self.completed_at = now_stamp() if self.done else None
+
+    def next_instance(self, on: str | None = None) -> "Task | None":
+        """The next round of a repeating task, or ``None`` if it does not.
+
+        A fresh, open task rather than a reset of this one. Resetting would
+        quietly delete the evidence that you did it, and the week review — the
+        screen whose whole job is answering "I did nothing this week" — reads
+        exactly that evidence. Doing the bins six weeks running should look
+        like six things done, not like one task that is somehow never
+        finished.
+        """
+        when = next_occurrence(self.repeat, self.scheduled_for, on)
+        if not when:
+            return None
+        nxt = Task.from_dict(self.to_dict())
+        nxt.id = new_id()
+        nxt.created_at = now_stamp()
+        nxt.done = False
+        nxt.completed_at = None
+        nxt.scheduled_for = when
+        # A snooze belongs to the round it was taken in; carrying it forward
+        # would silently excuse the next one too.
+        nxt.snoozed_until = ""
+        return nxt
 
 
     def add_tag(self, tag: str) -> bool:
@@ -313,6 +419,7 @@ class Task:
             "pinned": self.pinned,
             "snoozed_until": self.snoozed_until,
             "estimate_minutes": self.estimate_minutes,
+            "repeat": self.repeat,
         }
 
     @classmethod
@@ -336,6 +443,7 @@ class Task:
             pinned=_as_bool(data.get("pinned")),
             snoozed_until=_as_str(data.get("snoozed_until")),
             estimate_minutes=_as_minutes(data.get("estimate_minutes")),
+            repeat=_as_str(data.get("repeat")),
         )
 
     def copy(self) -> "Task":

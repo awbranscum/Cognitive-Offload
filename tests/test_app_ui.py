@@ -446,6 +446,146 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(task.estimate_minutes, 45)
         self.assertEqual(task.kind, "admin")
 
+    # -- repeating tasks -----------------------------------------------
+    def _make_repeating(self, text="Take the bins out", repeat="weekly",
+                        booked="2026-08-21"):
+        self.capture(text)
+        task = self.app.tasks[0]
+        task.repeat = repeat
+        task.scheduled_for = booked
+        self.app.refresh_tasks()
+        return task
+
+    def test_finishing_a_repeating_task_books_the_next_one(self):
+        task = self._make_repeating()
+        self.select(0)
+        self.app.toggle_selected_done()
+        self.assertTrue(task.done)
+        following = [t for t in self.app.tasks if not t.done and t.repeat == "weekly"]
+        self.assertEqual(len(following), 1)
+        self.assertGreater(following[0].scheduled_for, task.scheduled_for)
+
+    def test_the_finished_round_stays_finished_so_the_week_still_counts_it(self):
+        """A task that quietly reset its own date would erase the evidence
+        that you did it — which is the one thing the week review is for."""
+        task = self._make_repeating()
+        self.select(0)
+        self.app.toggle_selected_done()
+        self.assertTrue(task.done)
+        self.assertIsNotNone(task.completed_at)
+        self.assertEqual(len([t for t in self.app.tasks if t.done]), 1)
+
+    def test_doing_the_bins_six_weeks_running_looks_like_six_things_done(self):
+        for _ in range(6):
+            open_repeats = [t for t in self.app.tasks
+                            if not t.done and t.repeat == "weekly"]
+            if not open_repeats:
+                self._make_repeating()
+                continue
+            index = self.app._visible.index(open_repeats[0])
+            self.select(index)
+            self.app.toggle_selected_done()
+        self.assertEqual(len([t for t in self.app.tasks if t.done]), 5)
+        self.assertEqual(len([t for t in self.app.tasks if not t.done]), 1)
+
+    def test_finishing_a_one_off_books_nothing(self):
+        self.capture("a single thing")
+        self.select(0)
+        self.app.toggle_selected_done()
+        self.assertEqual(len(self.app.tasks), 1)
+
+    def test_a_task_already_done_is_not_completed_a_second_time(self):
+        """Marking a mixed selection done must not re-book the ones that were
+        already finished.
+
+        Single selection cannot see this: ``target`` is only True when
+        something selected is still open, so a lone done task takes the
+        no-op branch either way. The guard only bites on a MIXED selection,
+        which is exactly the shape the first version of this test missed.
+        """
+        first = self._make_repeating("Take the bins out")
+        self.select(0)
+        self.app.toggle_selected_done()          # first round done, next booked
+        self.assertTrue(first.done)
+        self._make_repeating("Water the plants", repeat="daily")
+        self.app.refresh_tasks()
+        before = len(self.app.tasks)
+
+        # Select the finished one AND an open one together.
+        open_task = [t for t in self.app.tasks if not t.done][0]
+        self.select(self.app._visible.index(first),
+                    self.app._visible.index(open_task))
+        self.app.toggle_selected_done()
+        # Exactly one new booking — from the open task, not from the finished
+        # one, which must not be completed twice.
+        self.assertEqual(len(self.app.tasks), before + 1)
+
+    def test_un_ticking_a_repeating_task_books_nothing(self):
+        """Un-ticking is a correction, not a completion."""
+        self._make_repeating()
+        self.select(0)
+        self.app.toggle_selected_done()
+        before = len(self.app.tasks)
+        done = [t for t in self.app.tasks if t.done][0]
+        self.select(self.app._visible.index(done))
+        self.app.toggle_selected_done()          # back to open
+        self.assertEqual(len(self.app.tasks), before)
+        self.assertFalse(done.done)
+
+    def test_ctrl_z_undoes_the_whole_thing_including_the_new_booking(self):
+        self._make_repeating()
+        before = len(self.app.tasks)
+        self.select(0)
+        self.app.toggle_selected_done()
+        self.assertEqual(len(self.app.tasks), before + 1)
+        self.app.undo()
+        self.assertEqual(len(self.app.tasks), before)
+        self.assertFalse(any(t.done for t in self.app.tasks))
+
+    def test_the_status_reads_correctly_whichever_form_the_date_takes(self):
+        """humanize_date returns "today", "tomorrow", "Sat", "in 9 days" and
+        "2026-09-30". Any preposition that fits a weekday is wrong for a
+        duration — "Next one booked for in 9 days." passed every test there
+        was, and was only visible by running the app."""
+        from cognitive_offload.models import humanize_date
+
+        for booked, repeat in (("2026-08-21", "weekly"), ("", "daily"),
+                               ("", "monthly"), ("", "fortnightly")):
+            with self.subTest(repeat=repeat):
+                self.app.tasks = []
+                task = self._make_repeating(f"thing {repeat}", repeat, booked)
+                self.select(self.app._visible.index(task))
+                self.app.toggle_selected_done()
+                status = self.app.status_var.get()
+                self.assertIn("Next one", status)
+                following = [t for t in self.app.tasks if not t.done][0]
+                phrase = humanize_date(following.scheduled_for)
+                self.assertIn(phrase, status)
+                # The tell: a preposition immediately before "in 9 days".
+                self.assertNotIn(f"for {phrase}", status)
+                self.assertNotIn(f"on {phrase}", status)
+                for scold in ("overdue", "missed", "forgot", "still", "again"):
+                    self.assertNotIn(scold, status.lower())
+
+    def test_the_editor_round_trips_a_repeat(self):
+        self.capture("bins")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.TaskEditorDialog") as editor:
+            editor.return_value.show.return_value = {
+                "title": "bins", "content": "", "tags": [], "first_step": "",
+                "kind": "", "scheduled_for": "", "estimate_minutes": 0,
+                "repeat": "monthly", "clear_snooze": False,
+            }
+            self.app.edit_selected_details()
+        self.assertEqual(self.app.tasks[0].repeat, "monthly")
+
+    def test_a_repeat_survives_a_save_and_reload(self):
+        self._make_repeating(repeat="fortnightly")
+        self.app.save_state()
+        self.app.tasks = []
+        self.app.load_state()
+        self.assertEqual(self.app.tasks[0].repeat, "fortnightly")
+
     # -- handing a task to an agent ------------------------------------
     def _hand_off(self, target="claude_desktop", note="Draft it.", days=3):
         """Drive the real command with the two dialogs stubbed out."""

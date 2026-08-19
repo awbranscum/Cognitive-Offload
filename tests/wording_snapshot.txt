@@ -198,10 +198,12 @@ app.py | status | start_timer | {} minutes. Only the first step matters.
 app.py | status | tag_selected | Tagged {task} with '{}'.
 app.py | status | take_back_matrix_task | Back with you. Ctrl+Z undoes it.
 app.py | status | take_back_matrix_task | Select a task that is out with someone.
-app.py | status | toggle_selected_done | Marked {task} {}.
 app.py | status | toggle_selected_priority | {Flagged Unflagged} {task}.
 app.py | status | undo | Nothing to undo.
 app.py | status | undo | Undid: {}.
+app.py | status= | toggle_selected_done | Marked {task} {}.
+app.py | status= | toggle_selected_done | {} Next one: {}.
+app.py | status= | toggle_selected_done | {} {repeat} booked again.
 app.py | text= | _build_ui |   Cognitive Offload  
 app.py | text= | _build_ui |   Eisenhower Matrix  
 app.py | text= | _tick_timer | Start
@@ -290,6 +292,7 @@ dialogs.py | text= | __init__ | Nothing is sent anywhere. A brief is written to 
 dialogs.py | text= | __init__ | On your clipboard
 dialogs.py | text= | __init__ | Optional. The title, your details, the first step and the booked date all go with it already.
 dialogs.py | text= | __init__ | Pick the shape of the work, not the most important thing. Starting anything beats picking perfectly.
+dialogs.py | text= | __init__ | Repeats
 dialogs.py | text= | __init__ | Session length
 dialogs.py | text= | __init__ | Show me others
 dialogs.py | text= | __init__ | Show the warm-up ladder before sessions
@@ -388,6 +391,12 @@ models.py | arg | from_dict | task record must be an object
 models.py | in-dict | <module> | Admin sprint
 models.py | in-dict | <module> | Creative / fun
 models.py | in-dict | <module> | Deadline sprint
+models.py | in-dict | <module> | Does not repeat
+models.py | in-dict | <module> | Every day
+models.py | in-dict | <module> | Every month
+models.py | in-dict | <module> | Every two weeks
+models.py | in-dict | <module> | Every week
+models.py | in-dict | <module> | Every weekday
 models.py | in-dict | <module> | Urgent sprint
 models.py | returns | humanize_date | in {} days
 models.py | returns | humanize_date | {} {%b}

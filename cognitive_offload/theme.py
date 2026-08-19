@@ -93,6 +93,7 @@ LIGHT = Tokens(
         "pinned": ("#e0f2fe", "#075985"),  # sky pair, 6.6:1
         "estimate": ("#f4f4f5", "#71717a"),  # same quiet pair as "tag":
         # a guess is information, not a signal.
+        "repeat": ("#f4f4f5", "#71717a"),  # and neither is "this comes back"
     },
 )
 
@@ -137,6 +138,7 @@ DARK = Tokens(
         "done": ("#27272a", "#9a9aa2"),  # 5.3:1; was 3.1:1
         "pinned": ("#0c2f42", "#7dd3fc"),  # sky pair, 8.4:1
         "estimate": ("#27272a", "#a1a1aa"),  # same quiet pair as "tag"
+        "repeat": ("#27272a", "#a1a1aa"),
     },
 )
 

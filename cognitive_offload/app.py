@@ -572,12 +572,35 @@ class CognitiveOffloadApp(tk.Tk):
             return
         self.push_undo("toggle done")
         target = not all(t.done for t in tasks)
+        booked = []
         for task in tasks:
+            # Take the next round before marking this one done, so the new
+            # booking is worked out from the date this one was actually for.
+            following = task.next_instance() if target and not task.done else None
             task.set_done(target)
+            if following is not None:
+                booked.append(following)
+        self.tasks.extend(booked)
         self.refresh_tasks()
         self.mark_dirty()
         word = "done" if target else "open"
-        self.set_status(f"Marked {presenter.plural(len(tasks), 'task')} {word}.")
+        status = f"Marked {presenter.plural(len(tasks), 'task')} {word}."
+        # Said once, as a fact: the thing you just finished has not been taken
+        # away from you and you do not have to remember to put it back. Each
+        # tail is its own `status =` rather than a `+=` — an augmented
+        # assignment is invisible to the wording snapshot, so these two
+        # sentences would have shipped watched by nothing.
+        if len(booked) == 1:
+            # A colon, not "booked for": humanize_date returns both weekdays
+            # ("Sat") and durations ("in 9 days"), and every preposition that
+            # fits one is wrong for the other. Seen only by running the app —
+            # "Next one booked for in 9 days." passes every test there is.
+            status = (f"{status} Next one: "
+                      f"{humanize_date(booked[0].scheduled_for)}.")
+        elif booked:
+            status = (f"{status} "
+                      f"{presenter.plural(len(booked), 'repeat')} booked again.")
+        self.set_status(status)
 
     def toggle_selected_priority(self) -> None:
         tasks = self._require_selection("change its priority")
@@ -621,6 +644,7 @@ class CognitiveOffloadApp(tk.Tk):
             kind=task.kind,
             scheduled_for=task.scheduled_for,
             estimate_minutes=task.estimate_minutes,
+            repeat=task.repeat,
             snoozed_until=task.snoozed_until,
             window_title="Edit task",
             with_tags=True,
@@ -635,6 +659,7 @@ class CognitiveOffloadApp(tk.Tk):
         task.kind = result["kind"]
         task.scheduled_for = result["scheduled_for"]
         task.estimate_minutes = result.get("estimate_minutes", task.estimate_minutes)
+        task.repeat = result.get("repeat", task.repeat)
         if result.get("clear_snooze"):
             task.snoozed_until = ""
         self.refresh_tasks()

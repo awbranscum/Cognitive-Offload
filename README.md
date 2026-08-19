@@ -175,6 +175,15 @@ reinstall from python.org).
   are pooled and refilled rather than rebuilt, so a 300-task list re-renders in
   ~50ms instead of locking the window for a second on every keystroke.
 
+- **Repeating tasks** — daily, weekdays, weekly, fortnightly or monthly, set
+  in the task editor. Finishing one **completes that round and books the next**
+  rather than resetting the date, so doing the bins six weeks running looks
+  like six things done in the week review instead of one task that is somehow
+  never finished. A missed repeat **never piles up**: the next date is worked
+  out from today whenever the booking has passed, so two weeks off the bins
+  gets you one task, not fourteen. Do it early and the rhythm holds — a Friday
+  task stays a Friday task.
+
 **Matrix**
 - Add, edit, delete and move tasks between any two quadrants (not just into
   "Do First").

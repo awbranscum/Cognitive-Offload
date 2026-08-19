@@ -12,12 +12,15 @@ from tkinter import messagebox, ttk
 
 from .models import (
     KIND_KEY_BY_LABEL,
+    REPEAT_KEY_BY_LABEL,
+    REPEAT_LABELS,
     KIND_UNSET,
     TASK_KINDS,
     Task,
     humanize_date,
     parse_date_input,
     parse_estimate_input,
+    repeat_label,
     today_iso,
 )
 from .handoff import (
@@ -146,6 +149,7 @@ class TaskEditorDialog(ModalDialog):
         kind: str = KIND_UNSET,
         scheduled_for: str = "",
         estimate_minutes: int = 0,
+        repeat: str = "",
         snoozed_until: str = "",
         window_title: str = "Task",
         with_tags: bool = False,
@@ -194,6 +198,11 @@ class TaskEditorDialog(ModalDialog):
         if estimate_minutes:
             self.estimate_entry.insert(0, str(estimate_minutes))
         ttk.Label(estimate_row, text="minutes, at a guess").pack(side="left", padx=(4, 0))
+        ttk.Label(estimate_row, text="Repeats").pack(side="left", padx=(16, 0))
+        self.repeat_var = tk.StringVar(value=repeat_label(repeat))
+        ttk.Combobox(estimate_row, textvariable=self.repeat_var,
+                     values=list(REPEAT_LABELS), state="readonly",
+                     width=15).pack(side="left", padx=(6, 0))
         ttk.Label(
             self.body,
             text="Dates can be \"today\", \"tomorrow\", a weekday like \"fri\", "
@@ -263,6 +272,7 @@ class TaskEditorDialog(ModalDialog):
             "kind": KIND_KEY_BY_LABEL.get(self.kind_var.get(), KIND_UNSET),
             "scheduled_for": scheduled,
             "estimate_minutes": estimate,
+            "repeat": REPEAT_KEY_BY_LABEL.get(self.repeat_var.get(), ""),
             "clear_snooze": bool(self.unsnooze_var and self.unsnooze_var.get()),
         }
         if self.tags_entry is not None:

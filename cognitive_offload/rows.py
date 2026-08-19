@@ -13,7 +13,7 @@ a task's badges stay identical wherever it appears.
 
 from __future__ import annotations
 
-from .models import Task, humanize_date, kind_label, today_iso
+from .models import Task, humanize_date, kind_label, repeat_label, today_iso
 from .queries import SORT_ORDERS
 from .viewmodels import Badge, Row
 
@@ -39,6 +39,11 @@ def _shared_badges(item) -> list[Badge]:
         ))
     if item.estimate_minutes:
         badges.append(Badge(f"~{item.estimate_minutes} min", "estimate"))
+    if getattr(item, "repeat", ""):
+        # Without this a repeating task is indistinguishable from a one-off,
+        # and the reasonable thing to do with a finished one-off is delete it
+        # — taking the recurrence with it.
+        badges.append(Badge(repeat_label(item.repeat).lower(), "repeat"))
     return badges
 
 

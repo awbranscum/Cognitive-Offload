@@ -293,3 +293,140 @@ class MatrixTaskTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RepeatTests(unittest.TestCase):
+    """Bins, meds, bills and standing appointments — the things this audience
+    loses, and the things the app could not hold at all until now."""
+
+    def test_a_missed_repeat_never_becomes_a_backlog(self):
+        """The single most reliable way to make someone stop opening an app
+        is to greet them with fourteen copies of a task they feel bad about."""
+        from cognitive_offload.models import next_occurrence
+
+        # Booked six weeks ago and never done: still exactly one next date,
+        # and it is in the future.
+        nxt = next_occurrence("weekly", "2026-07-01", "2026-08-19")
+        self.assertGreater(nxt, "2026-08-19")
+        self.assertEqual(nxt, "2026-08-26")
+
+    def test_being_on_time_keeps_the_rhythm(self):
+        """Done early, a Friday task stays a Friday task instead of drifting
+        a day earlier every week."""
+        from cognitive_offload.models import next_occurrence
+
+        # Booked Friday 21st, ticked off on Wednesday 19th.
+        self.assertEqual(next_occurrence("weekly", "2026-08-21", "2026-08-19"),
+                         "2026-08-28")
+
+    def test_weekdays_skips_the_weekend(self):
+        from cognitive_offload.models import next_occurrence
+
+        # Friday 21 Aug 2026 -> Monday 24th, not Saturday 22nd.
+        self.assertEqual(next_occurrence("weekdays", "2026-08-21", "2026-08-19"),
+                         "2026-08-24")
+        # ...and an ordinary weekday just moves on one.
+        self.assertEqual(next_occurrence("weekdays", "2026-08-19", "2026-08-19"),
+                         "2026-08-20")
+
+    def test_monthly_does_not_skip_february(self):
+        from cognitive_offload.models import next_occurrence
+
+        self.assertEqual(next_occurrence("monthly", "2026-01-31", "2026-01-31"),
+                         "2026-02-28")
+        self.assertEqual(next_occurrence("monthly", "2026-12-15", "2026-12-15"),
+                         "2027-01-15")
+
+    def test_every_interval_moves_forward(self):
+        from cognitive_offload.models import REPEAT_KEYS, next_occurrence
+
+        for key in REPEAT_KEYS:
+            if not key:
+                continue
+            self.assertGreater(next_occurrence(key, "2026-08-19", "2026-08-19"),
+                               "2026-08-19", key)
+
+    def test_a_task_that_does_not_repeat_produces_no_next_date(self):
+        from cognitive_offload.models import next_occurrence
+
+        self.assertEqual(next_occurrence("", "2026-08-19", "2026-08-19"), "")
+        self.assertEqual(next_occurrence("every other tuesday", "", "2026-08-19"), "")
+
+    def test_an_unreadable_stored_repeat_becomes_no_repeat(self):
+        from cognitive_offload.models import Task
+
+        self.assertEqual(Task(text="x", repeat="nonsense").repeat, "")
+        self.assertEqual(Task.from_dict({"text": "x", "repeat": 7}).repeat, "")
+
+    def test_a_nonsense_booking_still_yields_a_real_next_date(self):
+        from cognitive_offload.models import next_occurrence
+
+        self.assertRegex(next_occurrence("weekly", "not a date", "2026-08-19"),
+                         r"^\d{4}-\d{2}-\d{2}$")
+
+    def test_the_next_round_is_a_new_open_task_not_a_reset(self):
+        """Resetting would delete the evidence that you did it, and the week
+        review exists to hold exactly that evidence."""
+        from cognitive_offload.models import Task
+
+        task = Task(text="Take the bins out", repeat="weekly",
+                    scheduled_for="2026-08-21", first_step="wheel it to the kerb",
+                    tags=["home"], estimate_minutes=5)
+        nxt = task.next_instance("2026-08-19")
+        self.assertIsNotNone(nxt)
+        self.assertNotEqual(nxt.id, task.id)
+        self.assertFalse(nxt.done)
+        self.assertIsNone(nxt.completed_at)
+        self.assertEqual(nxt.scheduled_for, "2026-08-28")
+        # Everything you set up once is carried, so it stays set up.
+        self.assertEqual(nxt.first_step, "wheel it to the kerb")
+        self.assertEqual(nxt.tags, ["home"])
+        self.assertEqual(nxt.estimate_minutes, 5)
+        self.assertEqual(nxt.repeat, "weekly")
+
+    def test_a_snooze_does_not_carry_into_the_next_round(self):
+        """"Not today" was about today, not about every future Tuesday."""
+        from cognitive_offload.models import Task
+
+        task = Task(text="bins", repeat="weekly", scheduled_for="2026-08-21",
+                    snoozed_until="2026-08-20")
+        self.assertEqual(task.next_instance("2026-08-19").snoozed_until, "")
+
+    def test_a_non_repeating_task_has_no_next_instance(self):
+        from cognitive_offload.models import Task
+
+        self.assertIsNone(Task(text="one off").next_instance("2026-08-19"))
+
+    def test_the_repeat_survives_a_round_trip(self):
+        from cognitive_offload.models import Task
+
+        task = Task(text="bins", repeat="fortnightly")
+        self.assertEqual(Task.from_dict(task.to_dict()).repeat, "fortnightly")
+
+    def test_a_file_written_before_repeats_existed_still_loads(self):
+        from cognitive_offload.models import Task
+
+        self.assertEqual(Task.from_dict({"text": "older"}).repeat, "")
+
+    def test_the_labels_and_keys_agree_in_both_directions(self):
+        from cognitive_offload.models import (
+            REPEAT_KEY_BY_LABEL,
+            REPEATS,
+            repeat_label,
+        )
+
+        for key, label in REPEATS.items():
+            self.assertEqual(REPEAT_KEY_BY_LABEL[label], key)
+            self.assertEqual(repeat_label(key), label)
+        self.assertEqual(repeat_label("nonsense"), REPEATS[""])
+
+    def test_a_repeating_task_is_visibly_different_from_a_one_off(self):
+        """Otherwise the reasonable thing to do with a finished one is delete
+        it, which takes the recurrence with it."""
+        from cognitive_offload.models import Task
+        from cognitive_offload.rows import task_row
+
+        badges = [b.text for b in task_row(Task(text="bins", repeat="weekly")).badges]
+        self.assertIn("every week", badges)
+        plain = [b.text for b in task_row(Task(text="once")).badges]
+        self.assertNotIn("every week", plain)
