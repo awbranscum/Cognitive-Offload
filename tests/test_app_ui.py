@@ -1942,8 +1942,19 @@ class AppSmokeTests(unittest.TestCase):
         # its card down to 1100x670 in the worst legitimate state, so this
         # keeps 20-30px of clearance. The old floor was 1160x790, and 790 is
         # taller than a 768px laptop screen — which is the bug.
-        self.assertEqual(self.app.wm_minsize(),
-                         (px(self.app, 1120), px(self.app, 700)))
+        #
+        # Compared through window_bounds rather than against the two numbers
+        # directly, because the floor is deliberately clamped by the screen:
+        # on a 1024x768 display the app is RIGHT to ask for 1008x696, and a
+        # hard-coded pair turns that correct behaviour into a red suite. The
+        # designed floor is still asserted — it is the first argument.
+        designed = (px(self.app, 1120), px(self.app, 700))
+        _opening, expected = self._sized_for(self.app.winfo_screenwidth(),
+                                             self.app.winfo_screenheight())
+        self.assertEqual(self.app.wm_minsize(), expected)
+        self.assertEqual(
+            tuple(min(d, e) for d, e in zip(designed, expected)), expected,
+            "the floor is no longer the designed one, capped by the screen")
 
     def _sized_for(self, width, height):
         """(opening size, floor) for a screen of this size.

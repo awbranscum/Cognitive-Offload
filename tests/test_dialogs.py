@@ -178,12 +178,48 @@ class ReachableSaveTests(unittest.TestCase):
         self.assertGreater(top, dialog._canvas.winfo_height() - 4,
                            "Save is inside the scrolling form")
 
-    def test_a_form_that_fits_shows_no_scrollbar_at_all(self):
-        """The other half: the scrollbar is for the case that needs it. A
-        permanent one on a dialog that fits is a control that does nothing,
-        which is exactly what this app spends its effort removing."""
-        dialog = self._fullest()
-        self.assertFalse(dialog._vbar.winfo_ismapped())
+    def test_the_scrollbar_appears_exactly_when_it_is_needed(self):
+        """The other half: a permanent scrollbar on a dialog that fits is a
+        control that does nothing, which is what this app spends its effort
+        removing.
+
+        Asserted as a *relationship* rather than against a fixed expectation
+        per fixture, because whether any given form fits depends on the
+        screen the test is running on — the ceiling is 80% of screen height.
+        The first version of this test asserted "the fullest dialog shows no
+        scrollbar", passed on a 1200px test display and failed on CI's 768px
+        one, which was the test being wrong rather than the app.
+        """
+        for label, build in (("smallest", lambda: self._opened()),
+                             ("fullest", self._fullest)):
+            dialog = build()
+            with self.subTest(dialog=label):
+                needed = (dialog.body.winfo_reqheight()
+                          > dialog._canvas.winfo_height())
+                self.assertEqual(
+                    bool(dialog._vbar.winfo_ismapped()), needed,
+                    "the scrollbar is showing when there is nothing to scroll "
+                    "to, or hiding when there is")
+
+    def test_the_plain_editor_stays_inside_its_height_budget(self):
+        """A ratchet, so the dialog cannot balloon unnoticed.
+
+        Measured honestly rather than aspirationally: the plain editor wants
+        ~639px, so on the 1366x768 laptop this app supports it is ~25px over
+        an 80% ceiling and shows a scrollbar. That is a real limitation and
+        it is recorded rather than asserted away — before the form scrolled
+        it was much worse, because the same shortfall meant widgets were
+        simply not drawn.
+
+        The budget below is the ceiling on a 900px-tall screen, which the
+        plain dialog clears comfortably. It exists to fail when someone adds
+        another hundred pixels of rows, not to describe today to the pixel.
+        """
+        dialog = self._opened()
+        self.assertLessEqual(
+            dialog.body.winfo_reqheight(), int(900 * 0.8),
+            "the plain task editor has grown past its height budget — every "
+            "screen smaller than a desktop monitor now opens it scrolling")
 
     def test_every_dialog_with_a_button_row_still_draws_it(self):
         """The row moved out of the body for every dialog, not just this one."""
