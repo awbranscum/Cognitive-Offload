@@ -20,6 +20,13 @@ from .models import (
     parse_estimate_input,
     today_iso,
 )
+from .handoff import (
+    DEFAULT_FOLLOW_UP_DAYS,
+    TARGET_KEY_BY_LABEL,
+    TARGET_KEYS,
+    TARGET_LABELS,
+    target_for,
+)
 from .queries import suggest_tasks
 from .storage import CATEGORIES, CATEGORY_KEYS
 from .theme import SIZE_BASE, SIZE_LG, SIZE_SM, font, px, style_text, tokens
@@ -794,3 +801,107 @@ class ShortcutsDialog(ModalDialog):
                     row=row, column=1, sticky="w"
                 )
         ttk.Button(self.body, text="Close", style="Outline.TButton", command=self.cancel).pack(anchor="e", pady=(14, 0))
+
+
+class HandoffDialog(ModalDialog):
+    """Hand a task to an agent, and say when it comes back.
+
+    Delegate is the quadrant most people cannot use, because "give it to
+    someone else" needs a someone else. This is that someone. The dialog asks
+    for two things only — which agent, and anything you want to say about the
+    task — and fills in the rest from what you already wrote down.
+
+    The follow-up date is not optional and not a reminder to be dismissed: it
+    is the difference between delegating a task and losing it.
+    """
+
+    def __init__(self, parent: tk.Misc, task_title: str, target_key: str = "",
+                 follow_up_days: int = DEFAULT_FOLLOW_UP_DAYS):
+        super().__init__(parent, "Hand this over", size=(520, None))
+        ttk.Label(self.body, text="Handing over", style="CardTitle.TLabel").pack(anchor="w")
+        ttk.Label(self.body, text=task_title, wraplength=px(self, 470),
+                  justify="left").pack(anchor="w", pady=(2, 12))
+
+        row = ttk.Frame(self.body)
+        row.pack(fill="x")
+        ttk.Label(row, text="To").pack(side="left")
+        current = target_for(target_key)
+        self.target_var = tk.StringVar(value=current.label)
+        ttk.Combobox(row, textvariable=self.target_var, values=list(TARGET_LABELS),
+                     state="readonly", width=18).pack(side="left", padx=(6, 16))
+        ttk.Label(row, text="Check back in").pack(side="left")
+        self.days_entry = ttk.Entry(row, width=4)
+        self.days_entry.pack(side="left", padx=(6, 0))
+        self.days_entry.insert(0, str(follow_up_days))
+        ttk.Label(row, text="days").pack(side="left", padx=(4, 0))
+
+        ttk.Label(
+            self.body,
+            text="Nothing is sent anywhere. A brief is written to a file and "
+                 "the command to run it goes on your clipboard — so you can "
+                 "read it, change it, or not use it at all.",
+            style="Muted.TLabel", wraplength=px(self, 470), justify="left",
+        ).pack(anchor="w", pady=(8, 10))
+
+        ttk.Label(self.body, text="Anything to say about it").pack(anchor="w")
+        self.note_text = tk.Text(self.body, height=4, wrap="word")
+        style_text(self.note_text)
+        self.note_text.pack(fill="both", expand=True, pady=(2, 0))
+        ttk.Label(
+            self.body,
+            text="Optional. The title, your details, the first step and the "
+                 "booked date all go with it already.",
+            style="Muted.TLabel", wraplength=px(self, 470), justify="left",
+        ).pack(anchor="w", pady=(2, 0))
+
+        self.button_row("Hand it over")
+
+    def collect(self) -> dict:
+        # An unreadable number of days is not worth a modal over: it falls
+        # back to the default the same way an unreadable estimate becomes
+        # "no guess". The task still gets a follow-up date, which is the part
+        # that matters.
+        try:
+            days = int(self.days_entry.get().strip())
+        except ValueError:
+            days = DEFAULT_FOLLOW_UP_DAYS
+        return {
+            "target": TARGET_KEY_BY_LABEL.get(self.target_var.get(), "")
+                      or TARGET_KEYS[0],
+            "follow_up_days": max(1, min(days, 365)),
+            "note": self.note_text.get("1.0", tk.END).strip(),
+        }
+
+
+class HandoffDoneDialog(ModalDialog):
+    """Where the brief went and what to run — shown once, copyable.
+
+    A status-bar line is the wrong place for a file path and a command: both
+    are things you need to look at while doing something else, which is the
+    exact moment this app's audience loses them.
+    """
+
+    def __init__(self, parent: tk.Misc, target, path, command: str):
+        super().__init__(parent, "Handed over", size=(560, None))
+        ttk.Label(self.body, text=f"Written for {target.label}",
+                  style="CardTitle.TLabel").pack(anchor="w")
+        ttk.Label(self.body, text=str(path), style="Muted.TLabel",
+                  wraplength=px(self, 510), justify="left").pack(anchor="w", pady=(2, 12))
+
+        ttk.Label(self.body, text="On your clipboard").pack(anchor="w")
+        box = tk.Text(self.body, height=3, wrap="word")
+        style_text(box)
+        box.insert("1.0", command)
+        box.configure(state="disabled")
+        box.pack(fill="x", pady=(2, 10))
+
+        ttk.Label(self.body, text=target.setup, style="Muted.TLabel",
+                  wraplength=px(self, 510), justify="left").pack(anchor="w")
+        ttk.Label(
+            self.body,
+            text="The task stays in Delegate, marked as waiting, until you "
+                 "mark it done or take it back.",
+            style="Muted.TLabel", wraplength=px(self, 510), justify="left",
+        ).pack(anchor="w", pady=(8, 0))
+        ttk.Button(self.body, text="Close", style="Outline.TButton",
+                   command=self.cancel).pack(anchor="e", pady=(14, 0))

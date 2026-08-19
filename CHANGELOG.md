@@ -5,6 +5,85 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.44.0 — Delegate is a quadrant you can actually use now
+"Give it to someone else" needs a someone else. For a lot of people there
+isn't one, so Delegate fills up and becomes a second Do First with a politer
+name. An agent is something to delegate *to*.
+
+- **"Hand off to an agent"**, the primary button in Delegate — the same way
+  "Book a time" is the primary button in Schedule, because each quadrant's own
+  verb should lead rather than sit among the ghosts. It writes a **brief** —
+  the title, your details, the first step, the booked date, the estimate and
+  the tags, plus anything you type — and puts the command to run it on your
+  clipboard. Targets: **Claude Desktop** (Markdown), **Codex** (Markdown),
+  **OpenClaw** (JSON).
+
+- **Nothing is sent anywhere.** No network request, no socket, no subprocess:
+  the app writes a file and copies a line of text, and the person starts the
+  agent. That keeps the zero-dependency promise, keeps the app working
+  offline, and — the real reason — means a brief written in thirty seconds by
+  someone trying not to lose a thought is **readable and editable before
+  anything acts on it**. Every brief also asks the agent to check first before
+  spending money, messaging another person, or doing anything that cannot be
+  undone; it comes from one constant, so the Markdown and the JSON cannot
+  drift into asking for different things.
+
+- **A handoff is not allowed to become a disappearance.** This is the half
+  that usually gets lost, and losing it is the ADHD failure mode of delegating
+  in the first place: hand it over, forget it, discover three weeks later that
+  nobody did it. The task stays in Delegate carrying **who has it, since when,
+  and a day to check back**. It wears a `waiting` badge, and on the check-back
+  day that becomes `check back` — a fact, not a telling-off, and never
+  "overdue". The waiting line takes the subtitle from the first step, because
+  the first step belongs to whoever has the task now. **Take it back** clears
+  it, and says "Back with you" rather than anything about failing. Both
+  actions are undoable with Ctrl+Z, like every other matrix command.
+
+- **The quoting is structural, not hopeful.** A handoff folder called
+  `~/My Documents` is ordinary, and an unquoted path there produces a command
+  that silently runs against the wrong thing. Shell targets get `shlex.quote`;
+  Claude Desktop's line is pasted into a chat window, where shell quoting is
+  only noise, so it gets the plain path. Codex uses `"$(cat {brief})"` rather
+  than embedding the path inside a prompt string, so `{brief}` stays a single
+  shell word — the first draft nested quotes and produced a broken command,
+  which is why there is now a test that **runs** the generated command against
+  a stub and reads `argv[1]`. Handoff filenames are hyphenated rather than
+  reusing `storage.slugify`, which keeps spaces on purpose and is right where
+  it lives — the same "correct at one boundary, wrong at another" trap as the
+  estimate coercion in v3.42.0.
+
+- **What this app cannot verify, it does not claim.** It cannot ask Claude
+  Desktop, Codex or OpenClaw what they currently accept, so the commands are
+  **conventions, stated as conventions** in `docs/AGENT_HANDOFF.md`, and every
+  one is overridable through `handoff_commands` in the config without editing
+  source. A template with a typo in it falls back to naming the file that was
+  written: the brief is the deliverable, the command is a convenience.
+
+- **The briefs live outside the app's data folder**, in
+  `~/CognitiveOffloadHandoff/`. Giving an agent access to the folder holding
+  all of your tasks and notes is a much bigger grant than most people realise
+  they are making; giving it access to a folder holding only what you chose to
+  hand over is not.
+
+- **One duplicated sentence collapsed on the way through.** `rows.py` exists
+  because the two tabs' subtitles were copy-pasted — and the drift arrived
+  exactly as predicted: moving the matrix subtitle into a conditional dropped
+  `→ {}` off the wording snapshot while the identical string in the main list
+  kept it looking covered. Both now come from one `_step_or_summary`.
+
+- 564 → 605 tests, Xvfb (`skipped=2`) and headless (`skipped=249`). **Fifteen
+  promises broken on purpose and all fifteen caught**: unquoted shell paths,
+  spaces back in filenames, the two formats asking for different things, an
+  unknown target raising instead of falling back, a follow-up date that never
+  moves, zero-day follow-ups, the first step beating the waiting line, "check
+  back" reworded to "overdue", `handed_to` not persisted, an exclusive
+  `is_due_back`, the task never marked waiting, the command never reaching the
+  clipboard, the handoff not registering an undo, marking a task waiting after
+  the write failed, and a cancelled dialog handing over anyway. The doc is
+  pinned to the code four ways and verified by corrupting each. The
+  cancellation test patches the confirmation dialog it asserts is never
+  reached — unpatched, that regression **hung** instead of failing.
+
 ## 3.43.0 — The week review can no longer run off the bottom of the screen
 The one screen whose whole job is to say "you did more than you think"
 was the one that could hide its own answer.

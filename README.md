@@ -183,6 +183,14 @@ reinstall from python.org).
 - "Focus on this" starts a session straight from a quadrant: one click moves
   the task to the main list, opens the start dialog, and runs the warm-up —
   instead of the four manual steps that booked work used to need on its day.
+- **"Hand off to an agent"** turns Delegate into a quadrant you can actually
+  use. It writes a brief — title, details, first step, booked date, estimate,
+  tags, plus whatever you add — to a file for **Claude Desktop**, **Codex** or
+  **OpenClaw**, and puts the command to run it on your clipboard. The task then
+  stays in Delegate wearing a `waiting` badge until you take it back or mark it
+  done, so a handoff cannot quietly become a disappearance. Nothing is sent
+  anywhere: the app writes a file, you start the agent. See
+  [docs/AGENT_HANDOFF.md](docs/AGENT_HANDOFF.md).
 - Send a selection back to the main task list, or copy a whole quadrant.
 - Each quadrant is a folder; each task is a `.task` JSON file, so the data stays
   readable and greppable outside the app.
@@ -225,6 +233,7 @@ tracks what changed, version by version.
 | Focus session log | `~/.cognitive_offload/sessions.json` |
 | Previous session backup | `~/.cognitive_offload/data.json.bak` |
 | Matrix quadrants | `~/MatrixTasks/{DoFirst,Schedule,Delegate,Eliminate}/*.task` |
+| Agent handoff briefs | `~/CognitiveOffloadHandoff/{ClaudeDesktop,Codex,OpenClaw}/` |
 | Preferences | `~/.cognitive_offload_config.json` |
 
 A session file that is valid JSON but not a Cognitive Offload session is
@@ -261,6 +270,7 @@ cognitive_offload/
     viewmodels.py           what a row shows, with no opinion on drawing it
     rows.py                 how a task renders as a row (shared by both tabs)
     ports.py                what the app needs from the platform underneath it
+    handoff.py              briefs for an AI agent: targets, rendering, files
     undo.py                 the Ctrl+Z stack, UI-free
     main_tab.py             layout of the capture/tasks/scratchpad tab
     matrix_tab.py           layout of the matrix tab

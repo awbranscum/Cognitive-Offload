@@ -89,9 +89,13 @@ def _build_quadrant(app, key: str) -> None:
 
     buttons = ttk.Frame(inner, style="Card.TFrame")
     buttons.grid(row=2, column=0, sticky="nw", padx=(0, 12))
+    # Each quadrant's own verb is the primary button: booking in Schedule,
+    # handing over in Delegate. "Delegate" is the quadrant most people cannot
+    # use, because giving it to someone else needs a someone else — so the
+    # button that supplies one leads, rather than sitting among the ghosts.
     actions = [
         ("Add", lambda k=key: app.add_matrix_task(k),
-         "Outline.TButton" if key == "schedule" else "Default.TButton"),
+         "Outline.TButton" if key in ("schedule", "delegate") else "Default.TButton"),
         ("Book a time", lambda k=key: app.book_matrix_time(k),
          "Default.TButton" if key == "schedule" else "Outline.TButton"),
         # The start machinery, reachable from the quadrant where booked work
@@ -103,6 +107,13 @@ def _build_quadrant(app, key: str) -> None:
         ("Copy all to tasks", lambda k=key: app.copy_matrix_to_tasks(k), "Ghost.TButton"),
         ("Delete", lambda k=key: app.delete_matrix_tasks(k), "Destructive.TButton"),
     ]
+    if key == "delegate":
+        actions[1:1] = [
+            ("Hand off to an agent", lambda k=key: app.hand_off_matrix_task(k),
+             "Default.TButton"),
+            ("Take it back", lambda k=key: app.take_back_matrix_task(k),
+             "Ghost.TButton"),
+        ]
     for text, command, style in actions:
         ttk.Button(buttons, text=text, style=style, command=command).pack(fill="x", pady=2)
 

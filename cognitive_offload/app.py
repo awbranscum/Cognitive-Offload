@@ -10,6 +10,8 @@ from tkinter import filedialog, messagebox, ttk
 
 from . import APP_TITLE, __version__
 from .dialogs import (
+    HandoffDialog,
+    HandoffDoneDialog,
     PromptDialog,
     QuadrantDialog,
     SessionEndDialog,
@@ -21,7 +23,7 @@ from .dialogs import (
 )
 from .main_tab import build_main_tab
 from .matrix_tab import build_matrix_tab
-from . import presenter
+from . import handoff, presenter
 from .models import (
     KIND_KEY_BY_LABEL,
     Task,
@@ -875,6 +877,89 @@ class CognitiveOffloadApp(tk.Tk):
         self._undo_matrix_change("edit matrix task", before, [task.id])
         self.refresh_matrix()
         self.set_status("Matrix task updated.")
+
+    def hand_off_matrix_task(self, category: str) -> None:
+        """Write a brief for an agent, and mark the task as waiting.
+
+        Nothing is sent: a file is written and a command goes on the
+        clipboard. The person is still the one who starts the agent, which is
+        the only version of this that is safe to ship — a brief written in
+        thirty seconds by someone mid-thought should be readable before
+        anything acts on it.
+        """
+        tasks = self._selected_matrix_tasks(category)
+        if len(tasks) != 1:
+            self.set_status("Select exactly one task to hand over.")
+            return
+        task = tasks[0]
+        result = HandoffDialog(
+            self, task.title, target_key=self.config_store.handoff_target,
+            follow_up_days=handoff.DEFAULT_FOLLOW_UP_DAYS,
+        ).show()
+        if not result:
+            return
+        target = handoff.target_for(result["target"])
+        brief = handoff.build_brief(task, note=result["note"])
+        try:
+            path = handoff.write_brief(self.config_store.handoff_root, target, brief)
+        except OSError as exc:
+            messagebox.showerror(
+                "Could not write the brief",
+                f"{exc}\n\nNothing was handed over and the task is unchanged.",
+            )
+            return
+        command = handoff.command_for(
+            target, path, self.config_store.handoff_commands.get(target.key, ""))
+        self._copy_to_clipboard(command)
+
+        before = [task.copy()]
+        handed_on = today_iso()
+        try:
+            self.matrix.set_handoff(
+                task, target.label, handed_on,
+                handoff.follow_up_date(handed_on, result["follow_up_days"]),
+            )
+        except StorageError as exc:
+            # The brief is already written, so say what did happen rather
+            # than implying the whole thing failed.
+            messagebox.showerror(
+                "Handed over, but not recorded",
+                f"The brief was written to {path}, but the task could not be "
+                f"marked as waiting: {exc}",
+            )
+            return
+        self.config_store.handoff_target = target.key
+        self._undo_matrix_change("hand a task over", before, [task.id])
+        self.refresh_matrix()
+        HandoffDoneDialog(self, target, path, command).show()
+        self.set_status(f"Handed to {target.label}. Ctrl+Z undoes it.")
+
+    def take_back_matrix_task(self, category: str) -> None:
+        """Clear the waiting mark. Not a failure, and never described as one."""
+        tasks = [t for t in self._selected_matrix_tasks(category) if t.is_waiting()]
+        if not tasks:
+            self.set_status("Select a task that is out with someone.")
+            return
+        before = [task.copy() for task in tasks]
+        try:
+            for task in tasks:
+                self.matrix.set_handoff(task, "", "", "")
+        except StorageError as exc:
+            messagebox.showerror("Save failed", str(exc))
+            return
+        self._undo_matrix_change("take a task back", before, [t.id for t in tasks])
+        self.refresh_matrix()
+        self.set_status("Back with you. Ctrl+Z undoes it.")
+
+    def _copy_to_clipboard(self, text: str) -> bool:
+        """Tk owns the clipboard while the app runs — no subprocess needed."""
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(text)
+            self.update_idletasks()
+            return True
+        except tk.TclError:
+            return False
 
     def delete_matrix_tasks(self, category: str) -> None:
         tasks = self._selected_matrix_tasks(category)

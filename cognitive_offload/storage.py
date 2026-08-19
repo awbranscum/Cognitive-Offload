@@ -139,6 +139,18 @@ class Config:
         self.popout_on_start = False
         self.theme = "light"
         self.calm_mode = False
+        # Where handoff briefs are written, and which agent the picker opens
+        # on. The folder is deliberately outside the app's own data directory:
+        # the point of a brief is that another program can read it, and asking
+        # someone to grant an agent access to the folder holding all their
+        # tasks would be a worse trade than they realise.
+        self.handoff_root = self.locations.home / "CognitiveOffloadHandoff"
+        self.handoff_target = "claude_desktop"
+        # key -> command template. Empty means "use the built-in default".
+        # These exist because this app cannot verify what any agent's CLI
+        # accepts, so the person has to be able to correct it without editing
+        # source.
+        self.handoff_commands: dict = {}
 
     @property
     def state_file(self) -> Path:
@@ -178,6 +190,18 @@ class Config:
         self.popout_on_start = bool(data.get("popout_on_start", False))
         self.theme = "dark" if data.get("theme") == "dark" else "light"
         self.calm_mode = bool(data.get("calm_mode", False))
+        self.handoff_root = _path_or(data.get("handoff_root"),
+                                     self.locations.home / "CognitiveOffloadHandoff")
+        from .handoff import TARGET_KEYS  # local: handoff imports storage
+
+        target = data.get("handoff_target")
+        self.handoff_target = target if target in TARGET_KEYS else TARGET_KEYS[0]
+        commands = data.get("handoff_commands")
+        if isinstance(commands, dict):
+            self.handoff_commands = {
+                str(k): str(v) for k, v in commands.items()
+                if k in TARGET_KEYS and isinstance(v, str) and v.strip()
+            }
         return self
 
     def save(self) -> None:
@@ -197,6 +221,9 @@ class Config:
                     "popout_on_start": self.popout_on_start,
                     "theme": self.theme,
                     "calm_mode": self.calm_mode,
+                    "handoff_root": str(self.handoff_root),
+                    "handoff_target": self.handoff_target,
+                    "handoff_commands": dict(self.handoff_commands),
                 },
             )
         except OSError as exc:
@@ -680,6 +707,23 @@ class MatrixStore:
     def set_scheduled(self, task: MatrixTask, when: str) -> MatrixTask:
         """Book (or clear, with ``""``) the time this task will happen."""
         task.scheduled_for = when or ""
+        task.updated_at = now_stamp()
+        if task.path is None:
+            task.path = self._new_path(task.category, task)
+        self._write(task)
+        return task
+
+    def set_handoff(self, task: MatrixTask, handed_to: str, handed_off_on: str,
+                    follow_up_on: str) -> MatrixTask:
+        """Record who has it, since when, and when it comes back.
+
+        Passing three empty strings takes it back — which is the whole point
+        of storing it here rather than in the brief file: the file is what the
+        agent reads, this is what stops the task disappearing.
+        """
+        task.handed_to = handed_to.strip()
+        task.handed_off_on = handed_off_on.strip()
+        task.follow_up_on = follow_up_on.strip()
         task.updated_at = now_stamp()
         if task.path is None:
             task.path = self._new_path(task.category, task)

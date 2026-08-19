@@ -88,10 +88,11 @@ rather than from a list here, which would rot.
 This is the part that does not port mechanically, and the part worth designing
 before writing any code.
 
-There are **8 rich dialogs** — the task editor, "Where do I start?", the start-a-
+There are **10 rich dialogs** — the task editor, "Where do I start?", the start-a-
 focus-block dialog, the quadrant picker, the one-line prompt, the session-end
-dialog, the week review, and the shortcuts sheet — plus **36 `messagebox` calls**
-(13 yes/no, 1 yes/no/cancel, 17 errors, 2 informational, 3 warnings) and **4
+dialog, the week review, the shortcuts sheet, and the two halves of the agent
+handoff (what to hand over, and where it went) — plus **39 `messagebox` calls**
+(13 yes/no, 1 yes/no/cancel, 20 errors, 2 informational, 3 warnings) and **4
 `filedialog` calls** (2 for a directory, 1 open, 1 save-as).
 
 The hard part is not their number. It is that a decision and the question it

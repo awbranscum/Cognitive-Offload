@@ -383,6 +383,13 @@ class MatrixTask:
     priority: int = 0
     pinned: bool = False
     estimate_minutes: int = 0
+    # Handing a task to an agent and then forgetting it is not delegating, it
+    # is losing it somewhere more respectable. These three are what make the
+    # Delegate quadrant safe to actually use: who has it, since when, and the
+    # day it comes back to you on its own.
+    handed_to: str = ""
+    handed_off_on: str = ""
+    follow_up_on: str = ""
     # Absolute path of the backing file; assigned by the store, never stored.
     path: object = None
 
@@ -410,6 +417,9 @@ class MatrixTask:
             "priority": self.priority,
             "pinned": self.pinned,
             "estimate_minutes": self.estimate_minutes,
+            "handed_to": self.handed_to,
+            "handed_off_on": self.handed_off_on,
+            "follow_up_on": self.follow_up_on,
         }
 
     @classmethod
@@ -428,6 +438,9 @@ class MatrixTask:
             priority=1 if data.get("priority") else 0,
             pinned=_as_bool(data.get("pinned")),
             estimate_minutes=_as_minutes(data.get("estimate_minutes")),
+            handed_to=_as_str(data.get("handed_to")),
+            handed_off_on=_as_str(data.get("handed_off_on")),
+            follow_up_on=_as_str(data.get("follow_up_on")),
         )
 
     def copy(self) -> "MatrixTask":
@@ -450,6 +463,17 @@ class MatrixTask:
         if not self.scheduled_for:
             return False
         return self.scheduled_for <= (on or today_iso())
+
+    def is_waiting(self) -> bool:
+        """Out with someone (or something) else, and not back yet."""
+        return bool(self.handed_to or self.handed_off_on)
+
+    def is_due_back(self, on: str | None = None) -> bool:
+        """Inclusive of the past, exactly like ``is_due``: a follow-up you
+        missed still deserves a route back rather than silently expiring."""
+        if not self.is_waiting() or not self.follow_up_on:
+            return False
+        return self.follow_up_on <= (on or today_iso())
 
     def to_task(self) -> Task:
         """Convert back into a main-list task, keeping every field."""

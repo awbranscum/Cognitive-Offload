@@ -446,6 +446,109 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(task.estimate_minutes, 45)
         self.assertEqual(task.kind, "admin")
 
+    # -- handing a task to an agent ------------------------------------
+    def _hand_off(self, target="claude_desktop", note="Draft it.", days=3):
+        """Drive the real command with the two dialogs stubbed out."""
+        with mock.patch("cognitive_offload.app.HandoffDialog") as ask, \
+             mock.patch("cognitive_offload.app.HandoffDoneDialog") as done:
+            ask.return_value.show.return_value = {
+                "target": target, "follow_up_days": days, "note": note}
+            self.app.hand_off_matrix_task("delegate")
+        return done
+
+    def test_handing_over_writes_a_brief_and_marks_the_task_waiting(self):
+        """Delegate is the quadrant people cannot use because "give it to
+        someone else" needs a someone else. This is that someone — and the
+        task must not vanish into it."""
+        root = Path(self._tmp.name) / "handoff"
+        self.app.config_store.handoff_root = root
+        self.app.matrix.create("delegate", "Chase the insurance claim")
+        self.app.refresh_matrix()
+        self.app.matrix_lists["delegate"].selection_set(0)
+        self._hand_off(note="Draft the appeal letter.")
+
+        written = list(root.rglob("*.md")) + list(root.rglob("*.json"))
+        self.assertEqual(len(written), 1, written)
+        text = written[0].read_text(encoding="utf-8")
+        self.assertIn("Chase the insurance claim", text)
+        self.assertIn("Draft the appeal letter.", text)
+
+        [task] = self.app.matrix.list("delegate")
+        self.assertTrue(task.is_waiting())
+        self.assertEqual(task.handed_to, "Claude Desktop")
+        # The half that stops a handoff becoming a disappearance.
+        self.assertTrue(task.follow_up_on > task.handed_off_on)
+
+    def test_the_command_reaches_the_clipboard(self):
+        root = Path(self._tmp.name) / "handoff"
+        self.app.config_store.handoff_root = root
+        self.app.matrix.create("delegate", "Ring the vet")
+        self.app.refresh_matrix()
+        self.app.matrix_lists["delegate"].selection_set(0)
+        done = self._hand_off(target="codex")
+        command = self.app.clipboard_get()
+        self.assertIn("codex", command)
+        # The dialog is told the same command the clipboard got: two copies
+        # of one string is exactly the drift this branch exists to stop.
+        self.assertEqual(done.call_args.args[-1], command)
+        self.assertIn(str(list(root.rglob("*.md"))[0]), command)
+
+    def test_ctrl_z_takes_back_a_handoff(self):
+        """Every other matrix command is undoable; this one moves a task out
+        of your own hands, so it had better be."""
+        self.app.config_store.handoff_root = Path(self._tmp.name) / "handoff"
+        self.app.matrix.create("delegate", "Chase the claim")
+        self.app.refresh_matrix()
+        self.app.matrix_lists["delegate"].selection_set(0)
+        self._hand_off()
+        self.assertTrue(self.app.matrix.list("delegate")[0].is_waiting())
+        self.app.undo()
+        self.assertFalse(self.app.matrix.list("delegate")[0].is_waiting())
+
+    def test_taking_it_back_is_never_described_as_a_failure(self):
+        self.app.config_store.handoff_root = Path(self._tmp.name) / "handoff"
+        self.app.matrix.create("delegate", "Chase the claim")
+        self.app.refresh_matrix()
+        self.app.matrix_lists["delegate"].selection_set(0)
+        self._hand_off()
+        self.app.matrix_lists["delegate"].selection_set(0)
+        self.app.take_back_matrix_task("delegate")
+        self.assertFalse(self.app.matrix.list("delegate")[0].is_waiting())
+        status = self.app.status_var.get().lower()
+        for scold in ("fail", "gave up", "abandon", "never"):
+            self.assertNotIn(scold, status)
+
+    def test_an_unwritable_handoff_folder_changes_nothing(self):
+        """The task must not be marked as waiting for an agent that was
+        never given anything."""
+        self.app.config_store.handoff_root = Path(self._tmp.name) / "handoff"
+        self.app.matrix.create("delegate", "Chase the claim")
+        self.app.refresh_matrix()
+        self.app.matrix_lists["delegate"].selection_set(0)
+        with mock.patch("cognitive_offload.handoff.write_brief",
+                        side_effect=OSError("read-only file system")), \
+             mock.patch("cognitive_offload.app.messagebox.showerror") as err:
+            self._hand_off()
+        self.assertTrue(err.called)
+        self.assertFalse(self.app.matrix.list("delegate")[0].is_waiting())
+
+    def test_cancelling_the_handoff_dialog_writes_nothing(self):
+        root = Path(self._tmp.name) / "handoff"
+        self.app.config_store.handoff_root = root
+        self.app.matrix.create("delegate", "Chase the claim")
+        self.app.refresh_matrix()
+        self.app.matrix_lists["delegate"].selection_set(0)
+        # HandoffDoneDialog is patched too even though a cancel must never
+        # reach it: unpatched, a regression here opens a real modal and the
+        # test HANGS instead of failing. A regression should fail.
+        with mock.patch("cognitive_offload.app.HandoffDialog") as ask, \
+             mock.patch("cognitive_offload.app.HandoffDoneDialog") as done:
+            ask.return_value.show.return_value = None
+            self.app.hand_off_matrix_task("delegate")
+        self.assertFalse(done.called, "a cancelled handoff still reported one")
+        self.assertFalse(root.exists())
+        self.assertFalse(self.app.matrix.list("delegate")[0].is_waiting())
+
     def test_matrix_add_save_failure_reports_and_stays_clean(self):
         from cognitive_offload.storage import StorageError
         with mock.patch("cognitive_offload.app.TaskEditorDialog") as editor, \

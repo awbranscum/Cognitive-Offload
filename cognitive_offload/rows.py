@@ -42,6 +42,20 @@ def _shared_badges(item) -> list[Badge]:
     return badges
 
 
+def _step_or_summary(first_step: str, body: str) -> str:
+    """The line under a task title, in one place for both tabs.
+
+    This module's whole reason for existing is that these two subtitles were
+    copy-pasted; the drift then arrived exactly as predicted, when the matrix
+    copy moved inside a conditional and fell off the wording snapshot while
+    the identical string in the main list kept it looking covered.
+    """
+    if first_step:
+        return f"→ {first_step}"
+    body = (body or "").strip()
+    return body.splitlines()[0][:80] if body else ""
+
+
 def task_row(task: Task) -> Row:
     """A task as a list row: title, first step underneath, badges alongside."""
     badges = []
@@ -55,22 +69,48 @@ def task_row(task: Task) -> Row:
 
     if task.done and task.completed_at:
         subtitle = f"done {task.completed_at}"
-    elif task.first_step:
-        subtitle = f"→ {task.first_step}"
-    elif task.description.strip():
-        subtitle = task.description.strip().splitlines()[0][:80]
     else:
-        subtitle = ""
+        subtitle = _step_or_summary(task.first_step, task.description)
 
     return Row(id=task.id, title=task.text, subtitle=subtitle, badges=badges,
                done=task.done, flagged=bool(task.priority))
 
 
+def waiting_line(task, on: str | None = None) -> str:
+    """One line for a task that is out with an agent, or "" if it is not.
+
+    States a fact and asks nothing. A handoff that has not come back is not
+    a failure — most of them are simply not due to be looked at yet, and the
+    ones that are get a badge rather than a scolding.
+    """
+    handed_to = (getattr(task, "handed_to", "") or "").strip()
+    handed_on = (getattr(task, "handed_off_on", "") or "").strip()
+    if not handed_to and not handed_on:
+        return ""
+    on = on or today_iso()
+    line = f"Waiting on {handed_to or 'an agent'}"
+    if handed_on:
+        line += f" since {humanize_date(handed_on, on)}"
+    follow_up = (getattr(task, "follow_up_on", "") or "").strip()
+    if follow_up:
+        line += f" · check back {humanize_date(follow_up, on)}"
+    return line
+
+
 def matrix_row(task) -> Row:
     badges = _shared_badges(task)
-    subtitle = f"→ {task.first_step}" if task.first_step else (
-        task.content.strip().splitlines()[0][:80] if task.content.strip() else ""
-    )
+    waiting = waiting_line(task)
+    if waiting:
+        # "check back" rather than "overdue" or "late": the task went out on
+        # purpose and the date arriving is information, not a verdict. It
+        # leads the badges because it is the one thing about this row that
+        # is not about you.
+        badges.insert(0, Badge(
+            "check back" if task.is_due_back() else "waiting", "booked"))
+    # The waiting line wins the subtitle. The first step belongs to whoever
+    # has the task now, and showing it here would read as something still
+    # sitting on your own plate.
+    subtitle = waiting or _step_or_summary(task.first_step, task.content)
     return Row(id=task.id, title=task.title, subtitle=subtitle, badges=badges,
                marker="·")
 
