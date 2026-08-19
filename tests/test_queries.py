@@ -39,13 +39,25 @@ class SortTests(unittest.TestCase):
         self.assertEqual([t.text for t in sort_tasks([older, newer], "priority")], ["newer", "older"])
 
     def test_a_snoozed_task_leaves_the_suggestions_but_not_the_list(self):
+        """"Not today" excuses a task from suggestions, and nothing else.
+
+        Asserted at BOTH layers deliberately. This used to check
+        ``filter_tasks`` alone — but the screen reads ``visible_tasks``,
+        which wraps it, so a snooze filter added in the wrapper left every
+        test green. That is the one change someone would plausibly make,
+        and it would take the task off your list for a day: the "my work
+        disappeared" moment this app exists to prevent.
+        """
         dreaded = make("dreaded")
         dreaded.snoozed_until = "2024-06-02"
         other = make("other")
         ranked = rank_for_starting([dreaded, other], on="2024-06-01")
         self.assertEqual([t.text for t in ranked], ["other"])
-        # The list itself never hides it.
+        # The list itself never hides it — checked where the UI reads it.
         self.assertEqual(len(filter_tasks([dreaded, other])), 2)
+        self.assertEqual(
+            sorted(t.text for t in visible_tasks([dreaded, other])),
+            ["dreaded", "other"])
 
     def test_a_snooze_expires_silently_on_its_day(self):
         dreaded = make("dreaded")
@@ -162,13 +174,65 @@ class StartingTests(unittest.TestCase):
         ready.first_step = "open the folder"
         self.assertEqual([t.text for t in rank_for_starting([vague, ready])], ["ready", "vague"])
 
-    def test_a_booked_task_that_is_due_comes_first(self):
-        plain = make("plain")
-        plain.first_step = "start it"
-        booked = make("booked")
+    #: every fixture below is named so that ALPHABETICAL order would give
+    #: the opposite answer. The old version of this group compared "booked"
+    #: with "plain" and passed on the first letter — swapping the names
+    #: reversed the result, so it never tested what it claimed.
+
+    def test_a_booking_and_a_first_step_both_beat_plain_work(self):
+        """Both lower the activation energy; both outrank a bare task."""
+        plain = make("aaa plain")
+        booked = make("zzz booked")
         booked.scheduled_for = "2020-01-01"  # long overdue is still due
-        order = [t.text for t in rank_for_starting([plain, booked])]
-        self.assertEqual(order[0], "booked")
+        ready = make("zzz ready")
+        ready.first_step = "start it"
+        order = [t.text for t in rank_for_starting([plain, booked, ready])]
+        self.assertEqual(order[-1], "aaa plain")
+
+    def test_a_booking_for_today_beats_one_that_was_missed(self):
+        """The day you chose is the thing you actually decided.
+
+        `is_due` is inclusive of the past on purpose, so both of these
+        score the same — and the order used to fall through to the first
+        letter of the text. Someone who misses bookings accumulates them,
+        so without this their backlog competes with today's plan and wins
+        on the alphabet.
+        """
+        missed = make("aaa missed")
+        missed.scheduled_for = "2026-07-19"
+        today = make("zzz today")
+        today.scheduled_for = "2026-08-18"
+        order = [t.text for t in
+                 rank_for_starting([missed, today], on="2026-08-18")]
+        self.assertEqual(order[0], "zzz today")
+
+    def test_a_booking_for_today_wins_a_tie_with_a_written_first_step(self):
+        """Not a claim that a booking outranks readiness — they SCORE the
+        same, and this only settles what used to be settled by spelling."""
+        ready = make("aaa ready")
+        ready.first_step = "start it"
+        today = make("zzz today")
+        today.scheduled_for = "2026-08-18"
+        order = [t.text for t in
+                 rank_for_starting([ready, today], on="2026-08-18")]
+        self.assertEqual(order[0], "zzz today")
+
+    def test_an_overdue_booking_and_a_first_step_still_tie(self):
+        """Recorded as the current behaviour, not endorsed as a decision.
+
+        `is_ready` and `is_due` are both weight 3, so a written first step
+        and a booking that arrived long ago are equal. The module docstring
+        lists them in an order that reads like a priority, and the code
+        does not implement one. Which should win is an open question for
+        the owner; until it is answered, this pins that the tie is broken
+        by AGE rather than by the first letter of the text.
+        """
+        older_ready = make("zzz ready", created="2024-01-01 00:00:00")
+        older_ready.first_step = "start it"
+        newer_booked = make("aaa booked", created="2025-01-01 00:00:00")
+        newer_booked.scheduled_for = "2020-01-01"
+        order = [t.text for t in rank_for_starting([newer_booked, older_ready])]
+        self.assertEqual(order[0], "zzz ready", "the older one wins the tie")
 
     def test_flagged_beats_unflagged_when_all_else_is_equal(self):
         plain = make("plain")
@@ -252,6 +316,27 @@ class StartingTests(unittest.TestCase):
         result = [t.text for t in due_tasks([today, late, future, finished])]
         self.assertEqual(result, ["late", "today"])
 
+    def test_scheduled_today_is_today_only_while_due_stays_inclusive(self):
+        """The two questions are different: "what may I still catch up on"
+        keeps the past; "what does the word today truthfully cover" does
+        not. Saying today about a date that is not today is a claim the
+        user can check, and finding it false costs the whole feature."""
+        from cognitive_offload.queries import scheduled_today
+
+        stale = make("booked weeks ago")
+        stale.scheduled_for = "2020-01-01"
+        now = make("booked for today")
+        now.scheduled_for = today_iso()
+        finished = make("done today", done=True)
+        finished.scheduled_for = today_iso()
+        pool = [stale, now, finished]
+        self.assertEqual([t.text for t in scheduled_today(pool)],
+                         ["booked for today"])
+        # due_tasks keeps its inclusive meaning — a missed booking still has
+        # a route back; it just stops being counted as today.
+        self.assertEqual([t.text for t in due_tasks(pool)],
+                         ["booked weeks ago", "booked for today"])
+
     def test_filter_by_kind(self):
         admin = make("admin task")
         admin.kind = "admin"
@@ -286,3 +371,67 @@ class SplitLineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WaitingIsNotYoursToStartTests(unittest.TestCase):
+    """A task handed to an agent must not be offered as the next thing to do.
+
+    Found by looking at the running app rather than by a failing assertion:
+    NEXT UP was showing "Start this" over a task that was out with Codex,
+    which is the app inviting you to duplicate work someone else is doing.
+    Same treatment as a snooze — it stays on the list wearing its badge and
+    only stops guarding the suggestion slot.
+    """
+
+    def waiting(self, follow_up="2099-01-01", **kw):
+        from cognitive_offload.models import Task
+
+        fields = dict(text="Chase the claim", first_step="ring them",
+                      handed_to="Codex", handed_off_on="2026-08-19",
+                      follow_up_on=follow_up)
+        fields.update(kw)
+        return Task(**fields)
+
+    def test_a_task_out_with_an_agent_is_not_suggested(self):
+        from cognitive_offload.models import Task
+        from cognitive_offload.queries import rank_for_starting
+
+        out = self.waiting()
+        mine = Task(text="Air the spare room", first_step="open the window")
+        ranked = rank_for_starting([out, mine], on="2026-08-20")
+        self.assertNotIn(out, ranked)
+        self.assertIn(mine, ranked)
+
+    def test_it_comes_back_into_the_running_on_the_check_back_day(self):
+        """Not excused for ever — from the check-back day on, picking it up
+        again is a real option."""
+        from cognitive_offload.queries import rank_for_starting
+
+        out = self.waiting(follow_up="2026-08-22")
+        self.assertNotIn(out, rank_for_starting([out], on="2026-08-21"))
+        self.assertIn(out, rank_for_starting([out], on="2026-08-22"))
+        self.assertIn(out, rank_for_starting([out], on="2026-09-30"))
+
+    def test_a_handoff_with_no_follow_up_date_is_still_excused(self):
+        """Belt and braces: the app always sets one, but a hand-edited file
+        must not turn a waiting task back into a suggestion."""
+        from cognitive_offload.queries import rank_for_starting
+
+        self.assertNotIn(self.waiting(follow_up=""),
+                         rank_for_starting([self.waiting(follow_up="")],
+                                           on="2026-08-20"))
+
+    def test_it_is_only_the_suggestion_slot_and_never_the_list(self):
+        """The task must still be there. Hiding it is the one thing this app
+        may not do."""
+        from cognitive_offload.queries import filter_tasks
+
+        out = self.waiting()
+        self.assertIn(out, filter_tasks([out], show_done=True))
+
+    def test_an_ordinary_task_is_unaffected(self):
+        from cognitive_offload.models import Task
+        from cognitive_offload.queries import rank_for_starting
+
+        plain = Task(text="Air the spare room", first_step="open the window")
+        self.assertIn(plain, rank_for_starting([plain], on="2026-08-20"))

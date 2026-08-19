@@ -24,6 +24,27 @@ def _display_available() -> bool:
     return True
 
 
+def _descendants(widget):
+    """Every widget anywhere inside, at any depth."""
+    found = []
+    for child in widget.winfo_children():
+        found.append(child)
+        found.extend(_descendants(child))
+    return found
+
+
+def _labels(widget):
+    """Every ttk.Label anywhere inside a dialog, however it is nested."""
+    from tkinter import ttk
+
+    found = []
+    for child in widget.winfo_children():
+        if isinstance(child, ttk.Label):
+            found.append(child)
+        found.extend(_labels(child))
+    return found
+
+
 @unittest.skipUnless(_display_available(), "tkinter display not available")
 class DialogCollectTests(unittest.TestCase):
     def setUp(self):
@@ -125,6 +146,38 @@ class DialogCollectTests(unittest.TestCase):
         dialog.destroy()
 
     # -- the snooze exit -----------------------------------------------
+    def test_the_editor_keeps_an_estimate_typed_with_its_unit(self):
+        """"20 mins" used to be saved as no guess at all.
+
+        estimate_minutes = 0 means "no guess", so a discarded estimate is
+        indistinguishable from a blank field — and the calibration line
+        ("You guessed ~20 min; it took about 35") then never appears, with
+        nothing to connect that silence to what was typed.
+        """
+        from cognitive_offload.dialogs import TaskEditorDialog
+        for typed, expected in (("20 mins", 20), ("1h", 60), ("~15", 15)):
+            with self.subTest(typed=typed):
+                dialog = TaskEditorDialog(self.root, title="a task")
+                dialog.estimate_entry.delete(0, "end")
+                dialog.estimate_entry.insert(0, typed)
+                dialog.ok()
+                self.assertEqual(dialog.result["estimate_minutes"], expected)
+                dialog.destroy()
+
+    def test_an_unreadable_estimate_stays_a_silent_no_guess(self):
+        """The dialog's own decision, kept: "junk is just 'no guess', never
+        an error dialog". An optional guess is not worth a modal."""
+        from unittest import mock
+        from cognitive_offload.dialogs import TaskEditorDialog
+        dialog = TaskEditorDialog(self.root, title="a task")
+        dialog.estimate_entry.delete(0, "end")
+        dialog.estimate_entry.insert(0, "half an hour")
+        with mock.patch("cognitive_offload.dialogs.messagebox") as box:
+            dialog.ok()
+        self.assertEqual(dialog.result["estimate_minutes"], 0)
+        self.assertFalse(box.showwarning.called, "no modal over an optional guess")
+        dialog.destroy()
+
     def test_a_snoozed_task_offers_a_way_back_into_the_running(self):
         from datetime import date, timedelta
 
@@ -146,21 +199,50 @@ class DialogCollectTests(unittest.TestCase):
         self.assertFalse(dialog.collect()["clear_snooze"])
         dialog.destroy()
 
+    def test_the_editor_offers_a_way_out_of_a_handoff_only_while_one_is_on(self):
+        """Built like the snooze exit above it: carrying the waiting mark onto
+        the main list without this would leave a task marked as out with
+        nothing able to clear it."""
+        from cognitive_offload.dialogs import TaskEditorDialog
+
+        plain = TaskEditorDialog(self.root, title="t")
+        self.assertIsNone(plain.unwait_var)
+        self.assertFalse(plain.collect()["take_back"])
+        plain.destroy()
+
+        out = TaskEditorDialog(self.root, title="t", handed_to="Codex",
+                               follow_up_on="2099-01-01")
+        self.assertIsNotNone(out.unwait_var)
+        self.assertFalse(out.collect()["take_back"])   # untouched = leave it
+        out.unwait_var.set(True)
+        self.assertTrue(out.collect()["take_back"])
+        # Checkbuttons, not Labels: _labels() would look straight past the
+        # only widget this test is about.
+        texts = " ".join(
+            str(w.cget("text")) for w in _descendants(out)
+            if "text" in (w.keys() if hasattr(w, "keys") else ())
+        )
+        self.assertIn("Codex", texts)
+        for scold in ("fail", "gave up", "should have", "never"):
+            self.assertNotIn(scold, texts.lower())
+        out.destroy()
+
     # -- the week in evidence ------------------------------------------
     def test_the_week_review_lists_days_titles_and_totals(self):
-        from tkinter import ttk
-
         from cognitive_offload.dialogs import WeekReviewDialog
+        from cognitive_offload.presenter import WeekDay
 
         days = [
-            {"label": "Tuesday", "sessions": 3, "minutes": 45,
-             "titles": ["Book the dentist"]},
-            {"label": "Today", "sessions": 0, "minutes": 0,
-             "titles": ["Water the plants"]},
+            WeekDay(label="Tuesday", sessions=3, minutes=45,
+                    titles=["Book the dentist"]),
+            WeekDay(label="Today", sessions=0, minutes=0,
+                    titles=["Water the plants"]),
         ]
         dialog = WeekReviewDialog(self.root, days, 3, 45)
-        texts = [w.cget("text") for w in dialog.body.winfo_children()
-                 if isinstance(w, ttk.Label)]
+        # Walk the whole dialog, not body's direct children: the day list
+        # lives inside a scrolled frame now, and what this test cares about
+        # is what the dialog SAYS, not which frame holds it.
+        texts = [w.cget("text") for w in _labels(dialog)]
         self.assertTrue(any("Tuesday · 3 sessions · 45 min" in t for t in texts))
         self.assertTrue(any("✓ Book the dentist" in t for t in texts))
         # A day with finished tasks but no sessions shows no "0 sessions".
@@ -171,17 +253,70 @@ class DialogCollectTests(unittest.TestCase):
         dialog.destroy()
 
     def test_a_quiet_week_is_just_a_quiet_week(self):
-        from tkinter import ttk
-
         from cognitive_offload.dialogs import WeekReviewDialog
 
         dialog = WeekReviewDialog(self.root, [], 0, 0)
-        texts = " ".join(w.cget("text") for w in dialog.body.winfo_children()
-                         if isinstance(w, ttk.Label))
+        texts = " ".join(w.cget("text") for w in _labels(dialog))
         self.assertIn("quiet week", texts)
         self.assertNotIn("0 session", texts)
         for scold in ("nothing done", "missed", "only"):
             self.assertNotIn(scold, texts.lower())
+        dialog.destroy()
+
+    def test_a_busy_week_keeps_its_total_and_its_way_out_on_screen(self):
+        """A week of long titles used to render taller than the screen.
+
+        The window is not resizable and did not scroll, so the totals line
+        and the Close button were simply gone — on exactly the week that
+        earned them. Escape still worked, but only if you knew.
+        """
+        from cognitive_offload.dialogs import WeekReviewDialog
+        from cognitive_offload.presenter import WeekDay
+
+        long_title = ("call the insurance company back about the rejected "
+                      "claim and get the appeal deadline in writing")
+        # Deliberately more than a real week: the count has to overflow
+        # whatever screen this runs on, or the assertions below pass for
+        # the wrong reason on a tall one.
+        days = [WeekDay(label=f"Day {n}", sessions=2, minutes=50,
+                        titles=[long_title] * 15) for n in range(7)]
+        dialog = WeekReviewDialog(self.root, days, 14, 350)
+        dialog.update_idletasks()
+        dialog._fit_to_content()  # what show() does, without blocking
+        dialog.deiconify()
+        dialog.update()
+
+        self.assertLessEqual(dialog.winfo_height(),
+                             dialog.winfo_screenheight(),
+                             "the review is taller than the screen")
+        # The dialog IS the clipping parent: both must end above its edge.
+        bottom = dialog.winfo_rooty() + dialog.winfo_height()
+        for control in (dialog.totals_label, dialog.close_button):
+            control_bottom = control.winfo_rooty() + control.winfo_height()
+            self.assertLessEqual(control_bottom, bottom, str(control))
+        dialog.destroy()
+
+    def test_a_quiet_week_does_not_grow_furniture_it_does_not_need(self):
+        """The fix must not cost the ordinary week anything: no scrollbar,
+        and no reserved empty space below the last day."""
+        from tkinter import ttk
+
+        from cognitive_offload.dialogs import WeekReviewDialog
+        from cognitive_offload.presenter import WeekDay
+
+        days = [WeekDay(label="Tuesday", sessions=1, minutes=25,
+                        titles=["Book the dentist"])]
+        dialog = WeekReviewDialog(self.root, days, 1, 25)
+        dialog.update_idletasks()
+        dialog._fit_to_content()
+        dialog.deiconify()
+        dialog.update()
+        bars = [w for w in _descendants(dialog) if isinstance(w, ttk.Scrollbar)]
+        self.assertTrue(bars, "the scrollbar should exist, just be unpacked")
+        self.assertFalse(any(b.winfo_ismapped() for b in bars),
+                         "a one-day week showed a scrollbar")
+        self.assertLess(dialog.winfo_height(), 400,
+                        "a one-day week reserved room it never used")
         dialog.destroy()
 
     # -- the start picker ----------------------------------------------

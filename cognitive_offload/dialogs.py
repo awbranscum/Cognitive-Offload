@@ -12,12 +12,23 @@ from tkinter import messagebox, ttk
 
 from .models import (
     KIND_KEY_BY_LABEL,
+    REPEAT_KEY_BY_LABEL,
+    REPEAT_LABELS,
     KIND_UNSET,
     TASK_KINDS,
     Task,
     humanize_date,
     parse_date_input,
+    parse_estimate_input,
+    repeat_label,
     today_iso,
+)
+from .handoff import (
+    DEFAULT_FOLLOW_UP_DAYS,
+    TARGET_KEY_BY_LABEL,
+    TARGET_KEYS,
+    TARGET_LABELS,
+    target_for,
 )
 from .queries import suggest_tasks
 from .storage import CATEGORIES, CATEGORY_KEYS
@@ -47,12 +58,31 @@ class ModalDialog(tk.Toplevel):
         elif size:
             self.minsize(*size)
             self.geometry(f"{size[0]}x{size[1]}")
+        # Opt-in ceiling for a dialog whose content has no natural bound.
+        # Fitting to content is right until the content is taller than the
+        # screen, at which point the controls at the bottom are simply gone
+        # and the window cannot be resized to reach them.
+        self._max_height = None
         self.body = ttk.Frame(self, padding=12)
         self.body.pack(fill="both", expand=True)
         self.protocol("WM_DELETE_WINDOW", self.cancel)
         # "or \"break\"" stops the global Escape binding from also pausing a
         # running session behind the dialog.
         self.bind("<Escape>", lambda _e: self.cancel() or "break")
+
+    def _fit_to_content(self) -> None:
+        """Grow to fit what was built, but never past the ceiling.
+
+        Three copies of this geometry line had drifted into the file — the
+        initial show, the suggestion refresh and the ladder editor — so a
+        cap added to one would have missed the others.
+        """
+        if not self._fit_width:
+            return
+        height = self.winfo_reqheight()
+        if self._max_height:
+            height = min(height, self._max_height)
+        self.geometry(f"{self._fit_width}x{height}")
 
     def button_row(self, ok_text: str = "OK") -> ttk.Frame:
         row = ttk.Frame(self.body)
@@ -78,8 +108,7 @@ class ModalDialog(tk.Toplevel):
     def show(self):
         """Centre, make modal, and block until closed. Returns ``self.result``."""
         self.update_idletasks()
-        if self._fit_width:
-            self.geometry(f"{self._fit_width}x{self.winfo_reqheight()}")
+        self._fit_to_content()
         self._center()
         try:
             self.wait_visibility()
@@ -120,7 +149,10 @@ class TaskEditorDialog(ModalDialog):
         kind: str = KIND_UNSET,
         scheduled_for: str = "",
         estimate_minutes: int = 0,
+        repeat: str = "",
         snoozed_until: str = "",
+        handed_to: str = "",
+        follow_up_on: str = "",
         window_title: str = "Task",
         with_tags: bool = False,
     ):
@@ -168,6 +200,11 @@ class TaskEditorDialog(ModalDialog):
         if estimate_minutes:
             self.estimate_entry.insert(0, str(estimate_minutes))
         ttk.Label(estimate_row, text="minutes, at a guess").pack(side="left", padx=(4, 0))
+        ttk.Label(estimate_row, text="Repeats").pack(side="left", padx=(16, 0))
+        self.repeat_var = tk.StringVar(value=repeat_label(repeat))
+        ttk.Combobox(estimate_row, textvariable=self.repeat_var,
+                     values=list(REPEAT_LABELS), state="readonly",
+                     width=15).pack(side="left", padx=(6, 0))
         ttk.Label(
             self.body,
             text="Dates can be \"today\", \"tomorrow\", a weekday like \"fri\", "
@@ -187,6 +224,22 @@ class TaskEditorDialog(ModalDialog):
                      f"{humanize_date(snoozed_until)} — put it back in the "
                      f"running now",
                 variable=self.unsnooze_var,
+            ).pack(anchor="w", pady=(0, 10))
+
+        # The exit from a handoff, built exactly like the one from "Not
+        # today" above it: visible only while a handoff is actually in
+        # effect. Carrying the waiting mark onto the main list without this
+        # would have left a task marked as out with nothing able to clear it.
+        self.unwait_var = None
+        if handed_to:
+            self.unwait_var = tk.BooleanVar(value=False)
+            waiting = f"Out with {handed_to}"
+            if follow_up_on:
+                waiting += f", checking back {humanize_date(follow_up_on)}"
+            ttk.Checkbutton(
+                self.body,
+                text=f"{waiting} — take it back and do it yourself",
+                variable=self.unwait_var,
             ).pack(anchor="w", pady=(0, 10))
 
         ttk.Label(self.body, text="Details").pack(anchor="w")
@@ -221,10 +274,15 @@ class TaskEditorDialog(ModalDialog):
             )
             self.date_entry.focus_set()
             return None
-        try:
-            estimate = max(0, min(480, int(self.estimate_entry.get().strip() or 0)))
-        except ValueError:
-            estimate = 0  # junk is just "no guess", never an error dialog
+        # "junk is just 'no guess', never an error dialog" — that decision
+        # stands. What changed is how much counts as junk: "20 mins", "20m",
+        # "1h" and "~15" all used to land here and vanish, which is the one
+        # thing worse than refusing them, because a discarded guess reads
+        # exactly like a blank field. parse_estimate_input understands them;
+        # what it still cannot read remains a silent "no guess".
+        estimate = parse_estimate_input(self.estimate_entry.get())
+        if estimate is None:
+            estimate = 0
         result = {
             "title": title,
             "content": self.content_text.get("1.0", "end").strip(),
@@ -232,7 +290,9 @@ class TaskEditorDialog(ModalDialog):
             "kind": KIND_KEY_BY_LABEL.get(self.kind_var.get(), KIND_UNSET),
             "scheduled_for": scheduled,
             "estimate_minutes": estimate,
+            "repeat": REPEAT_KEY_BY_LABEL.get(self.repeat_var.get(), ""),
             "clear_snooze": bool(self.unsnooze_var and self.unsnooze_var.get()),
+            "take_back": bool(self.unwait_var and self.unwait_var.get()),
         }
         if self.tags_entry is not None:
             tags = [t.strip().lower() for t in self.tags_entry.get().split(",")]
@@ -325,8 +385,7 @@ class StartHereDialog(ModalDialog):
                 ).pack(anchor="w")
         # The choice list's length just changed; follow it.
         self.update_idletasks()
-        if self._fit_width:
-            self.geometry(f"{self._fit_width}x{self.winfo_reqheight()}")
+        self._fit_to_content()
 
     def _cycle(self) -> None:
         self._offset += 3
@@ -464,8 +523,7 @@ class StartFocusDialog(ModalDialog):
                 entry.insert(0, self._steps[index])
             self._step_entries.append(entry)
         self.update_idletasks()
-        if self._fit_width:
-            self.geometry(f"{self._fit_width}x{self.winfo_reqheight()}")
+        self._fit_to_content()
 
     def collect(self):
         try:
@@ -639,27 +697,76 @@ class WeekReviewDialog(ModalDialog):
                      "happen.",
                 style="Muted.TLabel", wraplength=px(self, 430), justify="left",
             ).pack(anchor="w", pady=(6, 0))
+        # The days scroll; the total and the way out do not. A busy week of
+        # long titles ran past the bottom of a 1366x768 screen, and what fell
+        # off first was the totals line and the Close button — the single
+        # most reassuring number this app produces, lost on exactly the week
+        # that earned it, in a window that cannot be resized to reach it.
+        self._max_height = int(self.winfo_screenheight() * 0.8)
+        days_area = ttk.Frame(self.body)
+        days_area.pack(fill="both", expand=True)
+        canvas = tk.Canvas(days_area, highlightthickness=0, borderwidth=0,
+                           background=tokens().background)
+        canvas.pack(side="left", fill="both", expand=True)
+        bar = ttk.Scrollbar(days_area, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=bar.set)
+        inner = ttk.Frame(canvas)
+        window = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        def _resized(_event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            canvas.itemconfigure(window, width=canvas.winfo_width())
+            # The scrollbar only appears when it has something to do; an
+            # ordinary week should not grow furniture it does not need.
+            needed = inner.winfo_reqheight() > canvas.winfo_height()
+            if needed and not bar.winfo_ismapped():
+                bar.pack(side="right", fill="y")
+            elif not needed and bar.winfo_ismapped():
+                bar.pack_forget()
+
+        inner.bind("<Configure>", _resized)
+        canvas.bind("<Configure>", _resized)
+        for widget in (canvas, inner):
+            widget.bind("<MouseWheel>",
+                        lambda e: canvas.yview_scroll(-1 if e.delta > 0 else 1, "units"))
+            widget.bind("<Button-4>", lambda _e: canvas.yview_scroll(-1, "units"))
+            widget.bind("<Button-5>", lambda _e: canvas.yview_scroll(1, "units"))
+
         for entry in days:
-            line = entry["label"]
-            if entry["sessions"]:
-                plural = "s" if entry["sessions"] != 1 else ""
-                line += (f" · {entry['sessions']} session{plural}"
-                         f" · {entry['minutes']} min")
-            ttk.Label(self.body, text=line, font=font(SIZE_BASE, "bold")).pack(
+            line = entry.label
+            if entry.sessions:
+                plural = "s" if entry.sessions != 1 else ""
+                line += (f" · {entry.sessions} session{plural}"
+                         f" · {entry.minutes} min")
+            ttk.Label(inner, text=line, font=font(SIZE_BASE, "bold")).pack(
                 anchor="w", pady=(8, 0))
-            for title in entry["titles"]:
-                ttk.Label(self.body, text=f"   ✓ {title}", style="Muted.TLabel",
-                          wraplength=px(self, 430), justify="left").pack(anchor="w")
+            for title in entry.titles:
+                ttk.Label(inner, text=f"   ✓ {title}", style="Muted.TLabel",
+                          wraplength=px(self, 410), justify="left").pack(anchor="w")
+        # Ask for exactly as much room as the days need, up to the ceiling.
+        # Without this the canvas asks for nothing and even a quiet week
+        # would scroll — trading one wrong answer for another.
+        inner.update_idletasks()
+        room = int(self.winfo_screenheight() * 0.8) - px(self, 160)
+        canvas.configure(height=max(px(self, 80),
+                                    min(inner.winfo_reqheight(), room)))
+
+        # Named, because a test has to be able to ask where they ended up:
+        # these two are precisely what used to fall off the bottom.
+        self.totals_label = None
         if days:
             plural = "s" if total_sessions != 1 else ""
-            ttk.Label(
+            self.totals_label = ttk.Label(
                 self.body,
                 text=f"{total_sessions} session{plural} · {total_minutes} "
                      f"minutes across the week.",
                 style="Muted.TLabel",
-            ).pack(anchor="w", pady=(12, 0))
-        ttk.Button(self.body, text="Close", style="Outline.TButton",
-                   command=self.cancel).pack(anchor="e", pady=(14, 0))
+            )
+            self.totals_label.pack(anchor="w", pady=(12, 0))
+        self.close_button = ttk.Button(self.body, text="Close",
+                                       style="Outline.TButton",
+                                       command=self.cancel)
+        self.close_button.pack(anchor="e", pady=(14, 0))
 
 
 class ShortcutsDialog(ModalDialog):
@@ -678,7 +785,10 @@ class ShortcutsDialog(ModalDialog):
             ("Ctrl+B", "Send scratchpad lines to tasks"),
         ]),
         ("Tasks", [
-            ("Double click / Ctrl+D", "Edit details"),
+            # Enter was bound from the start and listed nowhere. It is the
+            # key a keyboard-first user reaches for, and the one editing
+            # route that needs no chord to remember.
+            ("Enter / Double click / Ctrl+D", "Edit details"),
             ("Space", "Toggle done"),
             ("Up / Down", "Move through the list"),
             ("Delete", "Delete selected"),
@@ -720,3 +830,107 @@ class ShortcutsDialog(ModalDialog):
                     row=row, column=1, sticky="w"
                 )
         ttk.Button(self.body, text="Close", style="Outline.TButton", command=self.cancel).pack(anchor="e", pady=(14, 0))
+
+
+class HandoffDialog(ModalDialog):
+    """Hand a task to an agent, and say when it comes back.
+
+    Delegate is the quadrant most people cannot use, because "give it to
+    someone else" needs a someone else. This is that someone. The dialog asks
+    for two things only — which agent, and anything you want to say about the
+    task — and fills in the rest from what you already wrote down.
+
+    The follow-up date is not optional and not a reminder to be dismissed: it
+    is the difference between delegating a task and losing it.
+    """
+
+    def __init__(self, parent: tk.Misc, task_title: str, target_key: str = "",
+                 follow_up_days: int = DEFAULT_FOLLOW_UP_DAYS):
+        super().__init__(parent, "Hand this over", size=(520, None))
+        ttk.Label(self.body, text="Handing over", style="CardTitle.TLabel").pack(anchor="w")
+        ttk.Label(self.body, text=task_title, wraplength=px(self, 470),
+                  justify="left").pack(anchor="w", pady=(2, 12))
+
+        row = ttk.Frame(self.body)
+        row.pack(fill="x")
+        ttk.Label(row, text="To").pack(side="left")
+        current = target_for(target_key)
+        self.target_var = tk.StringVar(value=current.label)
+        ttk.Combobox(row, textvariable=self.target_var, values=list(TARGET_LABELS),
+                     state="readonly", width=18).pack(side="left", padx=(6, 16))
+        ttk.Label(row, text="Check back in").pack(side="left")
+        self.days_entry = ttk.Entry(row, width=4)
+        self.days_entry.pack(side="left", padx=(6, 0))
+        self.days_entry.insert(0, str(follow_up_days))
+        ttk.Label(row, text="days").pack(side="left", padx=(4, 0))
+
+        ttk.Label(
+            self.body,
+            text="Nothing is sent anywhere. A brief is written to a file and "
+                 "the command to run it goes on your clipboard — so you can "
+                 "read it, change it, or not use it at all.",
+            style="Muted.TLabel", wraplength=px(self, 470), justify="left",
+        ).pack(anchor="w", pady=(8, 10))
+
+        ttk.Label(self.body, text="Anything to say about it").pack(anchor="w")
+        self.note_text = tk.Text(self.body, height=4, wrap="word")
+        style_text(self.note_text)
+        self.note_text.pack(fill="both", expand=True, pady=(2, 0))
+        ttk.Label(
+            self.body,
+            text="Optional. The title, your details, the first step and the "
+                 "booked date all go with it already.",
+            style="Muted.TLabel", wraplength=px(self, 470), justify="left",
+        ).pack(anchor="w", pady=(2, 0))
+
+        self.button_row("Hand it over")
+
+    def collect(self) -> dict:
+        # An unreadable number of days is not worth a modal over: it falls
+        # back to the default the same way an unreadable estimate becomes
+        # "no guess". The task still gets a follow-up date, which is the part
+        # that matters.
+        try:
+            days = int(self.days_entry.get().strip())
+        except ValueError:
+            days = DEFAULT_FOLLOW_UP_DAYS
+        return {
+            "target": TARGET_KEY_BY_LABEL.get(self.target_var.get(), "")
+                      or TARGET_KEYS[0],
+            "follow_up_days": max(1, min(days, 365)),
+            "note": self.note_text.get("1.0", tk.END).strip(),
+        }
+
+
+class HandoffDoneDialog(ModalDialog):
+    """Where the brief went and what to run — shown once, copyable.
+
+    A status-bar line is the wrong place for a file path and a command: both
+    are things you need to look at while doing something else, which is the
+    exact moment this app's audience loses them.
+    """
+
+    def __init__(self, parent: tk.Misc, target, path, command: str):
+        super().__init__(parent, "Handed over", size=(560, None))
+        ttk.Label(self.body, text=f"Written for {target.label}",
+                  style="CardTitle.TLabel").pack(anchor="w")
+        ttk.Label(self.body, text=str(path), style="Muted.TLabel",
+                  wraplength=px(self, 510), justify="left").pack(anchor="w", pady=(2, 12))
+
+        ttk.Label(self.body, text="On your clipboard").pack(anchor="w")
+        box = tk.Text(self.body, height=3, wrap="word")
+        style_text(box)
+        box.insert("1.0", command)
+        box.configure(state="disabled")
+        box.pack(fill="x", pady=(2, 10))
+
+        ttk.Label(self.body, text=target.setup, style="Muted.TLabel",
+                  wraplength=px(self, 510), justify="left").pack(anchor="w")
+        ttk.Label(
+            self.body,
+            text="The task stays in Delegate, marked as waiting, until you "
+                 "mark it done or take it back.",
+            style="Muted.TLabel", wraplength=px(self, 510), justify="left",
+        ).pack(anchor="w", pady=(8, 0))
+        ttk.Button(self.body, text="Close", style="Outline.TButton",
+                   command=self.cancel).pack(anchor="e", pady=(14, 0))

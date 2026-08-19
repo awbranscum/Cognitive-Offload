@@ -6,6 +6,7 @@ still runs on a headless box without X.
 
 import contextlib
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -54,6 +55,44 @@ class AppSmokeTests(unittest.TestCase):
             pass  # on_close tests already tore the window down
 
     # -- helpers -------------------------------------------------------
+    def _really_focus(self, widget):
+        """Map the window and wait for X focus to actually land on ``widget``.
+
+        setUp withdraws the window, and a withdrawn window receives no key
+        events at all — so ``event_generate`` on one is a no-op that any
+        "nothing happened" assertion passes vacuously. Modelled on
+        test_dialogs._focus, which is where the suite's two legitimate
+        skips come from: if the display will not give us focus, say so
+        rather than pretend the key was delivered.
+        """
+        import time
+
+        self.app.deiconify()
+        for _ in range(100):
+            self.app.update()
+            if self.app.focus_get() is widget:
+                return True
+            widget.focus_force()
+            time.sleep(0.01)
+        return False
+
+    def _assert_key_delivery(self, widget):
+        """Prove a key actually arrives before trusting a negative result.
+
+        Without this, a broken guard and an undelivered event look
+        identical — which is exactly how the test below passed for its
+        whole life with the guard removed.
+        """
+        landed = []
+        token = "<Key-F9>"
+        widget.bind(token, lambda _e: landed.append(True), add=True)
+        try:
+            widget.event_generate(token)
+            self.app.update()
+        finally:
+            widget.unbind(token)
+        return bool(landed)
+
     def capture(self, text):
         self.app.capture_entry.insert(0, text)
         self.app.add_task_from_capture()
@@ -197,7 +236,7 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual([t.text for t in self.app.tasks], ["third", "second", "first"])
 
     def test_brain_dump_moves_the_lines_out_of_the_pad(self):
-        """"Moved 3 line(s)" now means moved — a second dump used to
+        """"Moved 3 lines" now means moved — a second dump used to
         create every task again."""
         self.app.note_text.insert("1.0", "- first\n- second\n- third\n")
         self.app.brain_dump_into_tasks()
@@ -214,6 +253,37 @@ class AppSmokeTests(unittest.TestCase):
         self.assertNotIn("take me", pad)
         self.assertIn("keep me", pad)
         self.assertIn("keep me too", pad)
+
+    def test_moving_one_line_says_line_not_line_s(self):
+        """"Sent 1 line(s)" shipped on the button whose whole job is one line.
+
+        v3.26.0 removed "1 task(s)" from fifteen status messages and these
+        two survived, because they are passed positionally to _add_tasks —
+        the extractor could not see them until v3.35.0 taught it to read
+        that position. For Line → task the singular is not an edge case,
+        it is the case.
+        """
+        self.app.note_text.insert("1.0", "ring the bank\nsomething else\n")
+        self.app.note_text.mark_set("insert", "1.0")
+        self.app.send_scratch_line_to_tasks()
+        self.assertEqual(self.app.status_var.get(),
+                         "Sent 1 line to the task list.")
+
+    def test_dumping_one_line_says_line_not_line_s(self):
+        self.app.note_text.insert("1.0", "call the dentist\n")
+        self.app.brain_dump_into_tasks()
+        self.assertEqual(self.app.status_var.get(), "Moved 1 line into tasks.")
+
+    def test_several_lines_are_still_plural(self):
+        self.app.note_text.insert("1.0", "one\ntwo\nthree\n")
+        self.app.brain_dump_into_tasks()
+        self.assertEqual(self.app.status_var.get(), "Moved 3 lines into tasks.")
+
+    def test_a_status_template_with_no_count_is_left_alone(self):
+        """`.format` is given both keys, so a template using neither must
+        pass through untouched rather than raising or growing a stray word."""
+        self.capture("a thought")
+        self.assertEqual(self.app.status_var.get(), "Captured as task.")
 
     def test_undo_reverses_the_whole_move_pad_and_list_together(self):
         self.app.note_text.insert("1.0", "- one\n- two\n")
@@ -249,6 +319,72 @@ class AppSmokeTests(unittest.TestCase):
             self.assertGreater(len(dialog.body.winfo_children()), 4)
         finally:
             dialog.destroy()
+
+    # -- the cheat-sheet has to stay true ------------------------------
+    #
+    # A shortcuts dialog is a promise, and the README taught this branch
+    # that promises drift. These pin the property in both directions:
+    # everything listed is bound, and everything bound is listed.
+
+    #: how a row's accelerator label maps onto a tk sequence
+    KEY_SEQUENCES = {
+        "Ctrl+G": "<Control-Key-g>", "Ctrl+R": "<Control-Key-r>",
+        "Ctrl+N": "<Control-Key-n>", "Ctrl+B": "<Control-Key-b>",
+        "Ctrl+P": "<Control-Key-p>", "Ctrl+T": "<Control-Key-t>",
+        "Ctrl+M": "<Control-Key-m>", "Ctrl+Z": "<Control-Key-z>",
+        "Ctrl+F": "<Control-Key-f>", "Ctrl+S": "<Control-Key-s>",
+        "Ctrl+O": "<Control-Key-o>", "Ctrl+D": "<Control-Key-d>",
+        "Ctrl+Up": "<Control-Key-Up>", "Ctrl+1": "<Control-Key-1>",
+        "Ctrl+2": "<Control-Key-2>", "Escape": "<Key-Escape>",
+        "F1": "<Key-F1>",
+        # Named keys whose tk spelling is not the label: the sheet says what
+        # is printed on the keyboard, tk says what X calls it.
+        "Enter": "<Key-Return>", "Ctrl+Enter": "<Control-Key-Return>",
+        "Space": "<Key-space>", "Delete": "<Key-Delete>",
+        "Up": "<Key-Up>", "Down": "<Key-Down>",
+    }
+
+    def test_every_shortcut_the_help_lists_is_actually_bound(self):
+        """A cheat-sheet that lies is worse than no cheat-sheet.
+
+        It is read by someone who could not remember the key — exactly the
+        person who will not work out that the sheet is wrong.
+        """
+        from cognitive_offload.dialogs import ShortcutsDialog
+        bound = set(self.app.bind_all())
+        bound |= set(self.app.capture_entry.bind())
+        bound |= set(self.app.task_list.canvas.bind())
+        missing = []
+        for _section, rows in ShortcutsDialog.SHORTCUTS:
+            for accelerator, _what in rows:
+                for part in accelerator.split(" / "):
+                    key = part.split(" (")[0].strip()
+                    if key == "Double click":
+                        continue  # a mouse gesture, checked by on_activate
+                    sequence = self.KEY_SEQUENCES.get(key, f"<Key-{key}>")
+                    if sequence not in bound:
+                        missing.append(f"{accelerator!r} -> {sequence}")
+        self.assertEqual(missing, [], "the help lists a shortcut nothing binds")
+
+    def test_every_global_shortcut_is_in_the_help(self):
+        """The other direction: a key that works but is written down
+        nowhere may as well not exist, for the person this app is for."""
+        from cognitive_offload.dialogs import ShortcutsDialog
+        listed = {self.KEY_SEQUENCES.get(part.split(" (")[0].strip())
+                  for _s, rows in ShortcutsDialog.SHORTCUTS
+                  for accelerator, _w in rows
+                  for part in accelerator.split(" / ")}
+        # tk binds these itself on every Tk app; they are not ours to document.
+        tk_own = {"<<NextWindow>>", "<<PrevWindow>>", "<Alt-Key>", "<Key-F10>"}
+        undocumented = sorted(set(self.app.bind_all()) - listed - tk_own)
+        self.assertEqual(undocumented, [],
+                         "a global shortcut is bound but not in the help")
+
+    def test_enter_on_a_selected_task_opens_the_editor(self):
+        """The row added because the key worked and the sheet was silent."""
+        self.capture("write the letter")
+        self.select(0)
+        self.assertIn("<Key-Return>", self.app.task_list.canvas.bind())
 
     def test_change_folder_migrates_the_lock_and_the_logs(self):
         new = Path(self._tmp.name) / "elsewhere"
@@ -310,6 +446,444 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(task.estimate_minutes, 45)
         self.assertEqual(task.kind, "admin")
 
+    # -- repeating tasks -----------------------------------------------
+    def _make_repeating(self, text="Take the bins out", repeat="weekly",
+                        booked="2026-08-21"):
+        self.capture(text)
+        task = self.app.tasks[0]
+        task.repeat = repeat
+        task.scheduled_for = booked
+        self.app.refresh_tasks()
+        return task
+
+    def test_finishing_a_repeating_task_books_the_next_one(self):
+        task = self._make_repeating()
+        self.select(0)
+        self.app.toggle_selected_done()
+        self.assertTrue(task.done)
+        following = [t for t in self.app.tasks if not t.done and t.repeat == "weekly"]
+        self.assertEqual(len(following), 1)
+        self.assertGreater(following[0].scheduled_for, task.scheduled_for)
+
+    def test_the_finished_round_stays_finished_so_the_week_still_counts_it(self):
+        """A task that quietly reset its own date would erase the evidence
+        that you did it — which is the one thing the week review is for."""
+        task = self._make_repeating()
+        self.select(0)
+        self.app.toggle_selected_done()
+        self.assertTrue(task.done)
+        self.assertIsNotNone(task.completed_at)
+        self.assertEqual(len([t for t in self.app.tasks if t.done]), 1)
+
+    def test_doing_the_bins_six_weeks_running_looks_like_six_things_done(self):
+        for _ in range(6):
+            open_repeats = [t for t in self.app.tasks
+                            if not t.done and t.repeat == "weekly"]
+            if not open_repeats:
+                self._make_repeating()
+                continue
+            index = self.app._visible.index(open_repeats[0])
+            self.select(index)
+            self.app.toggle_selected_done()
+        self.assertEqual(len([t for t in self.app.tasks if t.done]), 5)
+        self.assertEqual(len([t for t in self.app.tasks if not t.done]), 1)
+
+    def test_finishing_a_one_off_books_nothing(self):
+        self.capture("a single thing")
+        self.select(0)
+        self.app.toggle_selected_done()
+        self.assertEqual(len(self.app.tasks), 1)
+
+    def test_a_task_already_done_is_not_completed_a_second_time(self):
+        """Marking a mixed selection done must not re-book the ones that were
+        already finished.
+
+        Single selection cannot see this: ``target`` is only True when
+        something selected is still open, so a lone done task takes the
+        no-op branch either way. The guard only bites on a MIXED selection,
+        which is exactly the shape the first version of this test missed.
+        """
+        first = self._make_repeating("Take the bins out")
+        self.select(0)
+        self.app.toggle_selected_done()          # first round done, next booked
+        self.assertTrue(first.done)
+        self._make_repeating("Water the plants", repeat="daily")
+        self.app.refresh_tasks()
+        before = len(self.app.tasks)
+
+        # Select the finished one AND an open one together.
+        open_task = [t for t in self.app.tasks if not t.done][0]
+        self.select(self.app._visible.index(first),
+                    self.app._visible.index(open_task))
+        self.app.toggle_selected_done()
+        # Exactly one new booking — from the open task, not from the finished
+        # one, which must not be completed twice.
+        self.assertEqual(len(self.app.tasks), before + 1)
+
+    def test_un_ticking_a_repeating_task_books_nothing(self):
+        """Un-ticking is a correction, not a completion."""
+        self._make_repeating()
+        self.select(0)
+        self.app.toggle_selected_done()
+        before = len(self.app.tasks)
+        done = [t for t in self.app.tasks if t.done][0]
+        self.select(self.app._visible.index(done))
+        self.app.toggle_selected_done()          # back to open
+        self.assertEqual(len(self.app.tasks), before)
+        self.assertFalse(done.done)
+
+    def test_ctrl_z_undoes_the_whole_thing_including_the_new_booking(self):
+        self._make_repeating()
+        before = len(self.app.tasks)
+        self.select(0)
+        self.app.toggle_selected_done()
+        self.assertEqual(len(self.app.tasks), before + 1)
+        self.app.undo()
+        self.assertEqual(len(self.app.tasks), before)
+        self.assertFalse(any(t.done for t in self.app.tasks))
+
+    def test_the_status_reads_correctly_whichever_form_the_date_takes(self):
+        """humanize_date returns "today", "tomorrow", "Sat", "in 9 days" and
+        "2026-09-30". Any preposition that fits a weekday is wrong for a
+        duration — "Next one booked for in 9 days." passed every test there
+        was, and was only visible by running the app."""
+        from cognitive_offload.models import humanize_date
+
+        for booked, repeat in (("2026-08-21", "weekly"), ("", "daily"),
+                               ("", "monthly"), ("", "fortnightly")):
+            with self.subTest(repeat=repeat):
+                self.app.tasks = []
+                task = self._make_repeating(f"thing {repeat}", repeat, booked)
+                self.select(self.app._visible.index(task))
+                self.app.toggle_selected_done()
+                status = self.app.status_var.get()
+                self.assertIn("Next one", status)
+                following = [t for t in self.app.tasks if not t.done][0]
+                phrase = humanize_date(following.scheduled_for)
+                self.assertIn(phrase, status)
+                # The tell: a preposition immediately before "in 9 days".
+                self.assertNotIn(f"for {phrase}", status)
+                self.assertNotIn(f"on {phrase}", status)
+                for scold in ("overdue", "missed", "forgot", "still", "again"):
+                    self.assertNotIn(scold, status.lower())
+
+    def test_the_editor_round_trips_a_repeat(self):
+        self.capture("bins")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.TaskEditorDialog") as editor:
+            editor.return_value.show.return_value = {
+                "title": "bins", "content": "", "tags": [], "first_step": "",
+                "kind": "", "scheduled_for": "", "estimate_minutes": 0,
+                "repeat": "monthly", "clear_snooze": False,
+            }
+            self.app.edit_selected_details()
+        self.assertEqual(self.app.tasks[0].repeat, "monthly")
+
+    def test_a_repeat_survives_a_save_and_reload(self):
+        self._make_repeating(repeat="fortnightly")
+        self.app.save_state()
+        self.app.tasks = []
+        self.app.load_state()
+        self.assertEqual(self.app.tasks[0].repeat, "fortnightly")
+
+    # -- how much is on screen at once ---------------------------------
+    def _clickable(self):
+        """(live, greyed) among everything you could click right now."""
+        def walk(w):
+            for child in w.winfo_children():
+                yield child
+                yield from walk(child)
+
+        self.app.update_idletasks()
+        live = greyed = 0
+        for widget in walk(self.app):
+            if not widget.winfo_ismapped():
+                continue
+            if widget.winfo_class() not in ("TButton", "TCheckbutton",
+                                            "TCombobox", "TSpinbox"):
+                continue
+            if "disabled" in widget.state():
+                greyed += 1
+            else:
+                live += 1
+        return live, greyed
+
+    def test_task_actions_are_not_offered_while_they_cannot_act(self):
+        """First run offered 32 clickable things and about half could do
+        nothing: every task action needs a selection, and there were no
+        tasks. A control that looks live and does nothing is a decision that
+        pays nothing back."""
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        self.capture("call the dentist")
+        self.app.task_list.selection_clear(0, tk.END)
+        self.app.on_task_selection_changed()
+        for button in self.app.needs_selection:
+            self.assertIn("disabled", button.state(), button.cget("text"))
+
+        self.select(0)
+        self.app.on_task_selection_changed()   # what a real click fires
+        for button in self.app.needs_selection:
+            self.assertNotIn("disabled", button.state(), button.cget("text"))
+
+    def test_selecting_a_task_lights_up_every_action_at_once(self):
+        """The correlation is the lesson: it teaches what they apply to
+        without a sentence and without a failed click."""
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        self.capture("call the dentist")
+        self.app.task_list.selection_clear(0, tk.END)
+        self.app.on_task_selection_changed()
+        before_live, before_grey = self._clickable()
+        self.select(0)
+        self.app.on_task_selection_changed()
+        after_live, after_grey = self._clickable()
+        self.assertGreater(after_live, before_live)
+        self.assertLess(after_grey, before_grey)
+
+    def test_greying_never_moves_anything(self):
+        """Greyed rather than hidden, deliberately: a row that changes shape
+        under you is its own kind of overwhelming."""
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        self.capture("call the dentist")
+        self.app.update()
+        places = {b: (b.winfo_rootx(), b.winfo_rooty(), b.winfo_width())
+                  for b in self.app.needs_selection}
+        self.select(0)
+        self.app.on_task_selection_changed()
+        self.app.update()
+        for button, before in places.items():
+            self.assertEqual(
+                (button.winfo_rootx(), button.winfo_rooty(), button.winfo_width()),
+                before, button.cget("text"))
+
+    def test_selecting_from_code_lights_the_actions_too(self):
+        """The "booked for today" banner selects a row without any click, so
+        the widget's own callback never fires. The actions stayed greyed over
+        a visibly selected task."""
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        from cognitive_offload.models import today_iso
+
+        self.capture("call the dentist")
+        self.app.tasks[0].scheduled_for = today_iso()
+        self.app.refresh_tasks()
+        self.app.task_list.selection_clear(0, tk.END)
+        self.app.on_task_selection_changed()
+        self.app.show_booked()
+        self.assertTrue(self.app.task_list.curselection())
+        for button in self.app.needs_selection:
+            self.assertNotIn("disabled", button.state(), button.cget("text"))
+
+    def test_clear_done_waits_for_something_to_clear(self):
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        self.capture("call the dentist")
+        self.assertIn("disabled", self.app.needs_done_task.state())
+        self.select(0)
+        self.app.on_task_selection_changed()
+        self.app.toggle_selected_done()
+        self.assertNotIn("disabled", self.app.needs_done_task.state())
+
+    def test_the_actions_come_back_when_the_selection_goes(self):
+        """Greyed state must follow the list, not just the click that set
+        it — deleting the selected task leaves nothing selected."""
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        self.capture("call the dentist")
+        self.select(0)
+        self.app.delete_selected()
+        for button in self.app.needs_selection:
+            self.assertIn("disabled", button.state(), button.cget("text"))
+
+    # -- handing a task to an agent ------------------------------------
+    def _hand_off(self, target="claude_desktop", note="Draft it.", days=3):
+        """Drive the real command with the two dialogs stubbed out."""
+        with mock.patch("cognitive_offload.app.HandoffDialog") as ask, \
+             mock.patch("cognitive_offload.app.HandoffDoneDialog") as done:
+            ask.return_value.show.return_value = {
+                "target": target, "follow_up_days": days, "note": note}
+            self.app.hand_off_matrix_task("delegate")
+        return done
+
+    def test_handing_over_writes_a_brief_and_marks_the_task_waiting(self):
+        """Delegate is the quadrant people cannot use because "give it to
+        someone else" needs a someone else. This is that someone — and the
+        task must not vanish into it."""
+        root = Path(self._tmp.name) / "handoff"
+        self.app.config_store.handoff_root = root
+        self.app.matrix.create("delegate", "Chase the insurance claim")
+        self.app.refresh_matrix()
+        self.app.matrix_lists["delegate"].selection_set(0)
+        self._hand_off(note="Draft the appeal letter.")
+
+        written = list(root.rglob("*.md")) + list(root.rglob("*.json"))
+        self.assertEqual(len(written), 1, written)
+        text = written[0].read_text(encoding="utf-8")
+        self.assertIn("Chase the insurance claim", text)
+        self.assertIn("Draft the appeal letter.", text)
+
+        [task] = self.app.matrix.list("delegate")
+        self.assertTrue(task.is_waiting())
+        self.assertEqual(task.handed_to, "Claude Desktop")
+        # The half that stops a handoff becoming a disappearance.
+        self.assertTrue(task.follow_up_on > task.handed_off_on)
+
+    def test_a_task_out_with_an_agent_stays_visibly_out_after_send_to_tasks(self):
+        """The bug this pass exists for. Hand a task to an agent, press
+        Send to tasks, and it used to arrive in the main list with no waiting
+        state, no badge and no subtitle — while the brief sat on disk and the
+        agent may have been working on it. That is the disappearance the
+        handoff exists to prevent, walked in through a different door."""
+        self.app.config_store.handoff_root = Path(self._tmp.name) / "handoff"
+        self.app.matrix.create("delegate", "Chase the insurance claim")
+        self.app.refresh_matrix()
+        self.app.matrix_lists["delegate"].selection_set(0)
+        self._hand_off()
+
+        self.app.matrix_lists["delegate"].selection_set(0)
+        self.app.matrix_to_tasks("delegate")
+
+        [task] = self.app.tasks
+        self.assertTrue(task.is_waiting(), "the handoff was forgotten")
+        self.assertEqual(task.handed_to, "Claude Desktop")
+        self.assertTrue(task.follow_up_on)
+        # ...and it must be visible, not merely stored.
+        from cognitive_offload.rows import task_row
+
+        row = task_row(task)
+        self.assertIn("Waiting on Claude Desktop", row.subtitle)
+        self.assertIn("waiting", [b.text for b in row.badges])
+
+    def test_taking_a_handoff_back_from_the_task_editor(self):
+        self.app.config_store.handoff_root = Path(self._tmp.name) / "handoff"
+        self.app.matrix.create("delegate", "Chase the claim")
+        self.app.refresh_matrix()
+        self.app.matrix_lists["delegate"].selection_set(0)
+        self._hand_off()
+        self.app.matrix_lists["delegate"].selection_set(0)
+        self.app.matrix_to_tasks("delegate")
+        self.assertTrue(self.app.tasks[0].is_waiting())
+
+        self.select(0)
+        with mock.patch("cognitive_offload.app.TaskEditorDialog") as editor:
+            editor.return_value.show.return_value = {
+                "title": "Chase the claim", "content": "", "tags": [],
+                "first_step": "", "kind": "", "scheduled_for": "",
+                "estimate_minutes": 0, "repeat": "", "clear_snooze": False,
+                "take_back": True,
+            }
+            self.app.edit_selected_details()
+        self.assertFalse(self.app.tasks[0].is_waiting())
+        # ...and it is a suggestion again, since it is yours now.
+        from cognitive_offload.queries import rank_for_starting
+
+        self.assertIn(self.app.tasks[0], rank_for_starting(self.app.tasks))
+
+    def test_a_repeat_survives_a_trip_through_the_matrix(self):
+        """The row said "every week"; a round trip through the matrix used to
+        take that away with nothing to connect the loss to the action."""
+        self.capture("Take the bins out")
+        self.app.tasks[0].repeat = "weekly"
+        self.app.refresh_tasks()
+        self.select(0)
+        with mock.patch("cognitive_offload.app.QuadrantDialog") as q:
+            q.return_value.show.return_value = "do_first"
+            self.app.send_selected_to_matrix()
+        self.assertEqual(self.app.matrix.list("do_first")[0].repeat, "weekly")
+        self.app.matrix_lists["do_first"].selection_set(0)
+        self.app.matrix_to_tasks("do_first")
+        self.assertEqual(self.app.tasks[0].repeat, "weekly")
+        # ...and it still books the next round when finished.
+        before = len(self.app.tasks)
+        self.select(0)
+        self.app.toggle_selected_done()
+        self.assertEqual(len(self.app.tasks), before + 1)
+
+    def test_a_snooze_survives_a_trip_through_the_matrix(self):
+        """"Not today" is about the task, not about where you filed it."""
+        self.capture("Ring the dentist")
+        self.app.tasks[0].snoozed_until = "2099-01-01"
+        self.app.refresh_tasks()
+        self.select(0)
+        with mock.patch("cognitive_offload.app.QuadrantDialog") as q:
+            q.return_value.show.return_value = "schedule"
+            self.app.send_selected_to_matrix()
+        self.app.matrix_lists["schedule"].selection_set(0)
+        self.app.matrix_to_tasks("schedule")
+        self.assertEqual(self.app.tasks[0].snoozed_until, "2099-01-01")
+
+    def test_the_command_reaches_the_clipboard(self):
+        root = Path(self._tmp.name) / "handoff"
+        self.app.config_store.handoff_root = root
+        self.app.matrix.create("delegate", "Ring the vet")
+        self.app.refresh_matrix()
+        self.app.matrix_lists["delegate"].selection_set(0)
+        done = self._hand_off(target="codex")
+        command = self.app.clipboard_get()
+        self.assertIn("codex", command)
+        # The dialog is told the same command the clipboard got: two copies
+        # of one string is exactly the drift this branch exists to stop.
+        self.assertEqual(done.call_args.args[-1], command)
+        self.assertIn(str(list(root.rglob("*.md"))[0]), command)
+
+    def test_ctrl_z_takes_back_a_handoff(self):
+        """Every other matrix command is undoable; this one moves a task out
+        of your own hands, so it had better be."""
+        self.app.config_store.handoff_root = Path(self._tmp.name) / "handoff"
+        self.app.matrix.create("delegate", "Chase the claim")
+        self.app.refresh_matrix()
+        self.app.matrix_lists["delegate"].selection_set(0)
+        self._hand_off()
+        self.assertTrue(self.app.matrix.list("delegate")[0].is_waiting())
+        self.app.undo()
+        self.assertFalse(self.app.matrix.list("delegate")[0].is_waiting())
+
+    def test_taking_it_back_is_never_described_as_a_failure(self):
+        self.app.config_store.handoff_root = Path(self._tmp.name) / "handoff"
+        self.app.matrix.create("delegate", "Chase the claim")
+        self.app.refresh_matrix()
+        self.app.matrix_lists["delegate"].selection_set(0)
+        self._hand_off()
+        self.app.matrix_lists["delegate"].selection_set(0)
+        self.app.take_back_matrix_task("delegate")
+        self.assertFalse(self.app.matrix.list("delegate")[0].is_waiting())
+        status = self.app.status_var.get().lower()
+        for scold in ("fail", "gave up", "abandon", "never"):
+            self.assertNotIn(scold, status)
+
+    def test_an_unwritable_handoff_folder_changes_nothing(self):
+        """The task must not be marked as waiting for an agent that was
+        never given anything."""
+        self.app.config_store.handoff_root = Path(self._tmp.name) / "handoff"
+        self.app.matrix.create("delegate", "Chase the claim")
+        self.app.refresh_matrix()
+        self.app.matrix_lists["delegate"].selection_set(0)
+        with mock.patch("cognitive_offload.handoff.write_brief",
+                        side_effect=OSError("read-only file system")), \
+             mock.patch("cognitive_offload.app.messagebox.showerror") as err:
+            self._hand_off()
+        self.assertTrue(err.called)
+        self.assertFalse(self.app.matrix.list("delegate")[0].is_waiting())
+
+    def test_cancelling_the_handoff_dialog_writes_nothing(self):
+        root = Path(self._tmp.name) / "handoff"
+        self.app.config_store.handoff_root = root
+        self.app.matrix.create("delegate", "Chase the claim")
+        self.app.refresh_matrix()
+        self.app.matrix_lists["delegate"].selection_set(0)
+        # HandoffDoneDialog is patched too even though a cancel must never
+        # reach it: unpatched, a regression here opens a real modal and the
+        # test HANGS instead of failing. A regression should fail.
+        with mock.patch("cognitive_offload.app.HandoffDialog") as ask, \
+             mock.patch("cognitive_offload.app.HandoffDoneDialog") as done:
+            ask.return_value.show.return_value = None
+            self.app.hand_off_matrix_task("delegate")
+        self.assertFalse(done.called, "a cancelled handoff still reported one")
+        self.assertFalse(root.exists())
+        self.assertFalse(self.app.matrix.list("delegate")[0].is_waiting())
+
     def test_matrix_add_save_failure_reports_and_stays_clean(self):
         from cognitive_offload.storage import StorageError
         with mock.patch("cognitive_offload.app.TaskEditorDialog") as editor, \
@@ -346,6 +920,34 @@ class AppSmokeTests(unittest.TestCase):
             self.app.move_matrix_tasks("eliminate")
         self.assertEqual(self.app.matrix_lists["eliminate"].size(), 0)
         self.assertEqual(self.app.matrix_lists["do_first"].size(), 1)
+
+    def test_the_quadrant_tabs_and_counts_reach_the_widgets(self):
+        """The wiring, not the wording: presenter decides, the tab shows it.
+
+        Nothing asserted this before — the tab text and the count label
+        were computed inside refresh_matrix and read by no test, so the
+        pairing of quadrant to notebook index was free to drift silently.
+        """
+        from cognitive_offload.storage import CATEGORY_KEYS
+        self.app.matrix.create("do_first", "one", "")
+        self.app.matrix.create("do_first", "two", "")
+        self.app.matrix.create("delegate", "hand off", "")
+        self.app.refresh_matrix()
+
+        # By index, not by membership: the tab must be paired with its own
+        # quadrant. An earlier version of this test used assertIn over the
+        # whole list and passed happily with the order reversed, which is
+        # the one thing it was written to catch.
+        tabs = [self.app.matrix_notebook.tab(i, "text")
+                for i in range(len(CATEGORY_KEYS))]
+        self.assertEqual(tabs, ["Do First (2)", "Schedule",
+                                "Delegate (1)", "Eliminate"])
+        # The empty ones carry no number at all, not "(0)".
+        self.assertNotIn("(0)", "".join(tabs))
+        self.assertEqual(
+            self.app.matrix_count_labels["do_first"].cget("text"), "2 tasks")
+        self.assertEqual(
+            self.app.matrix_count_labels["schedule"].cget("text"), "0 tasks")
 
     def test_matrix_copy_leaves_the_files_in_place(self):
         self.app.matrix.create("delegate", "hand off", "with notes")
@@ -692,13 +1294,61 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(window.task_var.get(), "deep work")
         self.assertIn("open it", window.step_var.get())
 
-        self.app._timer_deadline -= 60
-        self.app._tick_timer()
-        self.assertNotEqual(window.time_var.get(), "00:00")
+        # Not "the clock is not 00:00" — that passes for a clock frozen at
+        # its starting time, which is exactly what a broken sync produces.
+        # Assert the pop-out AGREES with the main window, across several
+        # ticks, so a change on either side is caught.
+        seen = []
+        for _ in range(3):
+            self.app._timer_deadline -= 60
+            self.app._tick_timer()
+            seen.append((self.app.timer_label.cget("text"), window.time_var.get()))
+        for main, popped in seen:
+            self.assertEqual(popped, main,
+                             "the pop-out drifted from the main window's clock")
+        self.assertEqual([m for m, _p in seen], ["14:00", "13:00", "12:00"],
+                         "and the clock has to actually count down")
 
         window.close()
         self.assertIsNone(self.app._focus_window)
         self.app.pause_timer()
+
+    def test_a_long_task_wraps_in_the_list_instead_of_being_cut_off(self):
+        """The list used to show about 78 characters of a 137-character task.
+
+        Not scrolled off and not shortened with an ellipsis — simply
+        absent, ending mid-word, behind a scrollbar that only goes down.
+        Two tasks that begin the same way looked identical. The capture
+        box invites exactly this ("Anything in your head — it does not
+        have to be tidy"), so the list has to be able to show it.
+        """
+        import tkinter.font as tkfont
+
+        long_text = ("ring the council about the bins and the recycling they "
+                     "keep missing on odd weeks, ask for the reference and "
+                     "whether it affects the charge")
+        self.capture("short one")
+        self.capture(long_text)
+        self.app.deiconify()  # withdrawn windows don't lay out
+        self.app.refresh_tasks()
+        self.app.update()
+        self.app.update_idletasks()
+
+        rows = {self.app.task_list._pool[i]["title"].cget("text"):
+                self.app.task_list._pool[i]["title"] for i in range(2)}
+        long_label, short_label = rows[long_text], rows["short one"]
+
+        def lines(label):
+            metrics = tkfont.Font(font=label.cget("font")).metrics("linespace")
+            return max(1, round(label.winfo_reqheight() / metrics))
+
+        viewport = self.app.task_list.canvas.winfo_width()
+        self.assertGreater(lines(long_label), 1,
+                           "the long task still sits on one clipped line")
+        self.assertLessEqual(long_label.winfo_reqwidth(), viewport,
+                             "the title is wider than the list can show")
+        # Short rows must not pay for it.
+        self.assertEqual(lines(short_label), 1)
 
     def test_focus_window_grows_to_keep_its_controls_when_the_title_wraps(self):
         """A four-line title used to push Pause and the Park row clean off
@@ -934,13 +1584,19 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(self.app.today_label.winfo_manager(), "")
 
     def test_the_ends_line_says_tomorrow_across_midnight(self):
+        """The wiring: a rolled-over block reaches the label.
+
+        This used to also assert that an un-patched 15-minute block says
+        nothing about tomorrow — which is false in the last quarter hour of
+        any day, so the suite failed for anyone running it near midnight.
+        The same-day case is now covered properly in test_presenter, against
+        a fixed clock, which is what timer_view taking `now` was for.
+        """
         self.app.start_timer(minutes=15)
         # Pretend the block ends 26 hours out so the date rolls over.
         with mock.patch.object(self.app.timer, "remaining", 26 * 3600):
             self.app._update_timer_label()
         self.assertIn("tomorrow", self.app.finish_var.get())
-        self.app._update_timer_label()  # back to a same-day block
-        self.assertNotIn("tomorrow", self.app.finish_var.get())
         self.app.pause_timer()
 
     def test_a_refused_start_keeps_the_running_blocks_parked_thoughts(self):
@@ -952,8 +1608,105 @@ class AppSmokeTests(unittest.TestCase):
 
     def test_the_window_floor_is_a_size_the_app_works_at(self):
         from cognitive_offload.theme import px
+        # Measured against the layout rather than chosen: nothing overflows
+        # its card down to 1100x670 in the worst legitimate state, so this
+        # keeps 20-30px of clearance. The old floor was 1160x790, and 790 is
+        # taller than a 768px laptop screen — which is the bug.
         self.assertEqual(self.app.wm_minsize(),
-                         (px(self.app, 1160), px(self.app, 790)))
+                         (px(self.app, 1120), px(self.app, 700)))
+
+    def _sized_for(self, width, height):
+        """(opening size, floor) for a screen of this size.
+
+        Against the pure helper rather than a real window: a withdrawn
+        window reports 1x1 for its geometry, and standing up one X display
+        per resolution is what made this bug invisible for so long.
+        """
+        from cognitive_offload.app import window_bounds
+        from cognitive_offload.theme import px
+
+        return window_bounds(
+            screen=(width, height),
+            design=(px(self.app, 1240), px(self.app, 880)),
+            floor=(px(self.app, 1120), px(self.app, 700)),
+            margin=(px(self.app, 16), px(self.app, 72)),
+        )
+
+    def test_the_window_never_opens_bigger_than_the_screen(self):
+        """It opened 880 tall on a 768px laptop — 113px past the bottom edge,
+        taking the whole toolbar, the whole footer, the status bar and the
+        only route into the week review with it."""
+        for width, height in ((1024, 768), (1280, 720), (1366, 768),
+                              (1440, 900), (1920, 1080)):
+            with self.subTest(screen=f"{width}x{height}"):
+                (opened_w, opened_h), _floor = self._sized_for(width, height)
+                self.assertLessEqual(opened_h, height,
+                                     "opens taller than the screen")
+                self.assertLessEqual(opened_w, width,
+                                     "opens wider than the screen")
+
+    def test_the_floor_is_never_taller_than_the_screen_can_show(self):
+        """The half that made the old bug unrecoverable: the floor was 790,
+        which is itself taller than a 768px screen, so dragging the corner
+        stopped while the window was still overflowing."""
+        for width, height in ((1024, 768), (1280, 720), (1366, 768)):
+            with self.subTest(screen=f"{width}x{height}"):
+                _opened, (floor_w, floor_h) = self._sized_for(width, height)
+                self.assertLess(floor_h, height,
+                                "cannot be resized to fit the screen")
+                self.assertLess(floor_w, width)
+
+    def test_a_big_screen_still_gets_the_designed_size(self):
+        """Fitting small screens must not shrink the app for everyone else."""
+        from cognitive_offload.theme import px
+
+        (opened_w, opened_h), floor = self._sized_for(1920, 1080)
+        self.assertEqual((opened_w, opened_h),
+                         (px(self.app, 1240), px(self.app, 880)))
+        self.assertEqual(floor, (px(self.app, 1120), px(self.app, 700)))
+
+    def test_the_room_left_for_a_taskbar_is_real(self):
+        """A window that fills the screen exactly still hides its footer under
+        the taskbar, and the footer is where Undo lives.
+
+        Asserted unconditionally. The first version of this test only checked
+        when `opened_h < height`, which is false in precisely the case that
+        matters — a margin of zero makes the window exactly screen-height and
+        skipped the assertion instead of failing it.
+        """
+        for width, height in ((1024, 768), (1280, 720), (1366, 768)):
+            with self.subTest(screen=f"{width}x{height}"):
+                (_opened_w, opened_h), _floor = self._sized_for(width, height)
+                self.assertLessEqual(
+                    opened_h, height - 40,
+                    "no room left for a taskbar: the footer, and Undo with "
+                    "it, would sit underneath it",
+                )
+
+    def test_the_window_really_takes_the_size_it_worked_out(self):
+        """Drives the real window, not just the arithmetic.
+
+        `window_bounds` being correct says nothing about whether
+        `_fit_to_screen` uses its answer — replacing the geometry call with
+        the old unclamped constant left every other test in this group
+        passing, which is the wrong-layer trap one level up.
+        """
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        for width, height in ((1366, 768), (1280, 720)):
+            with self.subTest(screen=f"{width}x{height}"):
+                with mock.patch.object(type(self.app), "winfo_screenwidth",
+                                       return_value=width), \
+                     mock.patch.object(type(self.app), "winfo_screenheight",
+                                       return_value=height):
+                    self.app._fit_to_screen()
+                self.app.update()
+                self.assertLessEqual(self.app.winfo_height(), height - 40)
+                self.assertLessEqual(self.app.winfo_width(), width)
+                floor_w, floor_h = self.app.wm_minsize()
+                self.assertLess(floor_h, height)
+                self.assertLess(floor_w, width)
+        self.app._fit_to_screen()  # put it back for the rest of the suite
 
     def test_px_carries_design_pixels_to_the_screens_dpi(self):
         from cognitive_offload.theme import px
@@ -970,7 +1723,7 @@ class AppSmokeTests(unittest.TestCase):
         """At the app's own minimum, with a session running, the list and
         the search entry must both still exist — they didn't."""
         self.app.deiconify()  # withdrawn windows don't lay out
-        self.app.geometry("1160x790")
+        self.app.geometry("1120x700")  # the floor
         # The worst legitimate state, not the demo state: a title long
         # enough to wrap in NEXT UP, plus a wrapping first step. Short
         # titles made this test pass while real ones clipped the toolbar.
@@ -1059,17 +1812,41 @@ class AppSmokeTests(unittest.TestCase):
         self.assertNotEqual(str(cell["frame"].cget("background")), hover_colour)
 
     def test_typing_in_the_capture_box_never_triggers_task_shortcuts(self):
-        """The while-typing guard: capture must never fight your fingers."""
+        """The while-typing guard: capture must never fight your fingers.
+
+        This test used to pass with the guard deleted. It generated its
+        keys into a window setUp had withdrawn, so nothing was delivered
+        and "nothing happened" was true for the wrong reason — for its
+        whole life it could not fail. The window is now mapped, focus is
+        waited for, and a probe key is proved to arrive before any
+        negative result is believed.
+
+        What it protects is worth the ceremony: typing "Delete the old
+        files" into the capture box must not delete the selected task, and
+        Ctrl+P/T/Up must not fire mid-word.
+        """
         self.capture("precious task")
         self.select(0)
-        self.app.capture_entry.focus_set()
+        if not self._really_focus(self.app.capture_entry):
+            self.skipTest("could not obtain X focus")
+        if not self._assert_key_delivery(self.app.capture_entry):
+            self.skipTest("key events are not being delivered")
         # Keys that are destructive shortcuts when the list has focus.
-        for sequence in ("<Delete>", "<Control-p>", "<Control-t>", "<Control-Up>"):
-            self.app.capture_entry.event_generate(sequence)
-        self.app.update()
+        # The dialogs are patched not to weaken the test — with the guard
+        # working none of them is ever reached — but so that a regression
+        # FAILS instead of hanging: Ctrl+T opens a modal prompt, and a
+        # blocked CI runner is a far worse signal than a red one.
+        with mock.patch("cognitive_offload.app.PromptDialog") as prompt, \
+                mock.patch("cognitive_offload.app.messagebox"):
+            prompt.return_value.show.return_value = None
+            for sequence in ("<Delete>", "<Control-p>", "<Control-t>",
+                             "<Control-Up>"):
+                self.app.capture_entry.event_generate(sequence)
+            self.app.update()
         self.assertEqual([t.text for t in self.app.tasks], ["precious task"])
         self.assertEqual(self.app.tasks[0].priority, 0)
         self.assertFalse(self.app.tasks[0].pinned)
+        self.assertFalse(prompt.called, "Ctrl+T opened a dialog mid-word")
 
     def test_opening_a_file_with_unreadable_records_warns_and_blocks(self):
         import json as _json
@@ -1106,10 +1883,10 @@ class AppSmokeTests(unittest.TestCase):
         days, total_sessions, total_minutes = review.call_args.args[1:4]
         self.assertEqual(total_sessions, 2)
         self.assertEqual(total_minutes, 45)
-        self.assertEqual([d["label"] for d in days], ["Yesterday", "Today"])
-        self.assertEqual(days[0]["sessions"], 2)
-        self.assertEqual(days[1]["titles"], ["finished thing"])
-        self.assertEqual(days[1]["sessions"], 0)
+        self.assertEqual([d.label for d in days], ["Yesterday", "Today"])
+        self.assertEqual(days[0].sessions, 2)
+        self.assertEqual(days[1].titles, ["finished thing"])
+        self.assertEqual(days[1].sessions, 0)
 
     def test_a_vanished_matrix_folder_is_named_not_silent(self):
         import shutil as _shutil
@@ -1220,6 +1997,45 @@ class AppSmokeTests(unittest.TestCase):
         self.app.refresh_tasks()
         self.assertIn("booked tomorrow", self.visible_texts()[0])
 
+    def test_only_a_booking_dated_today_says_today(self):
+        """Twelve rows all claiming "today" when two of them are today makes
+        the badge carry no information, and the honest response to a badge
+        that lies is to disbelieve every one of them."""
+        from datetime import date, timedelta
+        from cognitive_offload.models import today_iso
+
+        self.capture("booked weeks ago")
+        self.capture("booked for today")
+        stale = next(t for t in self.app.tasks if t.text == "booked weeks ago")
+        stale.scheduled_for = (date.today() - timedelta(days=54)).isoformat()
+        now = next(t for t in self.app.tasks if t.text == "booked for today")
+        now.scheduled_for = today_iso()
+        self.app.refresh_tasks()
+        rows = {t.text: self.visible_texts()[i]
+                for i, t in enumerate(self.app._visible)}
+        self.assertIn("today", rows["booked for today"])
+        self.assertNotIn("today", rows["booked weeks ago"])
+        # It still says WHEN it was for — a missed booking is a nudge, not
+        # a telling-off, and never a bare ISO date.
+        self.assertIn("booked", rows["booked weeks ago"])
+        self.assertNotIn(stale.scheduled_for, rows["booked weeks ago"])
+
+    def test_the_banner_counts_and_opens_todays_bookings_only(self):
+        from datetime import date, timedelta
+        from cognitive_offload.models import today_iso
+
+        for text, offset in (("ancient", 60), ("old", 12), ("actually today", 0)):
+            self.capture(text)
+            task = next(t for t in self.app.tasks if t.text == text)
+            task.scheduled_for = (date.today() - timedelta(days=offset)).isoformat()
+        self.app.refresh_tasks()
+        self.assertIn("1 booked for today", self.app.due_var.get())
+        # ...and the click lands on that one, not the oldest.
+        self.app.show_booked()
+        self.assertIn("actually today", self.app.status_var.get())
+        self.assertEqual(today_iso(),
+                         self.app.selected_tasks()[0].scheduled_for)
+
     def test_clearing_a_snooze_from_the_editor(self):
         from datetime import date, timedelta
 
@@ -1313,6 +2129,100 @@ class AppSmokeTests(unittest.TestCase):
             self.app.finish_session_early()
         self.app.refresh_next_up()
         self.assertEqual(self.app.next_title_var.get(), "worked on recently")
+
+    def test_reset_keeps_the_minutes_you_actually_did(self):
+        """Quitting mid-block already banks them and so does "Done early".
+        Reset binning them charged the person who tidied up before
+        stopping — on a depleted afternoon, the only person pressing it."""
+        self.capture("book the dentist")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "", "warmup_done": 0,
+            }
+            self.app.focus_on_selected()
+        task_id = self.app.tasks[0].id
+        self.app._timer_deadline -= 4 * 60
+        self.app._tick_timer()
+        self.app.reset_timer()
+        self.assertEqual(self.app.session_log.minutes_today(), 4)
+        [record] = self.app.session_log.sessions
+        self.assertEqual(record.task, "book the dentist")
+        self.assertEqual(record.task_id, task_id)  # so it warms tomorrow
+        self.assertIn("banked", self.app.status_var.get())  # not "Timer reset."
+
+    def test_reset_banks_nothing_when_there_is_nothing_to_bank(self):
+        # An untouched timer, a second press, and a break must all stay silent
+        # — the rule is "count what happened", never "manufacture a number".
+        self.app.reset_timer()
+        self.assertEqual(self.app.session_log.sessions, [])
+        self.assertIn("Timer reset", self.app.status_var.get())
+
+        self.capture("something")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "", "warmup_done": 0,
+            }
+            self.app.focus_on_selected()
+        self.app._timer_deadline -= 3 * 60
+        self.app._tick_timer()
+        self.app.reset_timer()
+        self.app.reset_timer()  # idempotent: bank_early guards on timer.banked
+        self.assertEqual(len(self.app.session_log.sessions), 1)
+
+        self.app.start_timer(minutes=5, mode="break")
+        self.app._timer_deadline -= 2 * 60
+        self.app._tick_timer()
+        self.app.reset_timer()
+        self.assertEqual(len(self.app.session_log.sessions), 1)  # break: no record
+
+    def test_replacing_a_paused_block_still_banks_its_minutes(self):
+        self.capture("the big one")
+        self.capture("something smaller")
+        self.select(0)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 25, "first_step": "", "warmup_done": 0,
+            }
+            self.app.focus_on_selected()
+        self.app._timer_deadline -= 6 * 60
+        self.app._tick_timer()
+        self.app.pause_timer()  # stopped, thought better of it
+        self.select(1)
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter, \
+             mock.patch("cognitive_offload.app.messagebox.askyesno") as asked:
+            starter.return_value.show.return_value = {
+                "minutes": 10, "first_step": "", "warmup_done": 0,
+            }
+            self.app.focus_on_selected()
+        asked.assert_not_called()  # a pause must not be interrogated
+        self.assertEqual(self.app.session_log.minutes_today(), 6)
+        self.app.pause_timer()
+
+    def test_next_up_steps_out_of_sight_while_a_block_runs(self):
+        """The largest button on the window said "Start this" on a different
+        task, sixty seconds into the block you fought to begin."""
+        self.capture("the other thing")
+        self.capture("the one I chose")
+        chosen = next(t for t in self.app.tasks if t.text == "the one I chose")
+        self.select(next(i for i, t in enumerate(self.app._visible)
+                         if t.id == chosen.id))
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "", "warmup_done": 0,
+            }
+            self.app.focus_on_selected()
+        self.assertEqual(self.app.next_frame.grid_info(), {})
+        # The keyboard path is deliberately untouched: only the soliciting
+        # button goes away, not the deliberate keystroke.
+        self.assertEqual(self.app.next_title_var.get(), "the other thing")
+        # A pause is exactly when "what should I do instead?" is fair.
+        self.app.pause_timer()
+        self.app.refresh_next_up()
+        self.assertNotEqual(self.app.next_frame.grid_info(), {})
+        self.app.reset_timer()
+        self.assertNotEqual(self.app.next_frame.grid_info(), {})
 
     def test_next_up_never_pitches_the_task_you_are_focusing_on(self):
         """Mid-session, "what should I start?" is not the thing in progress."""
@@ -1475,7 +2385,8 @@ class AppSmokeTests(unittest.TestCase):
         self.select(buried)
         self.app.promote_selected()
         self.assertEqual(self.app._visible[0].text, "old and buried")
-        self.assertIn("Pinned 1 task(s) to the top.", self.app.status_var.get())
+        # "1 task", not "1 task(s)" — the status bar speaks one way now.
+        self.assertIn("Pinned 1 task to the top.", self.app.status_var.get())
         self.assertIn("pinned", self.visible_texts()[0])
 
     def test_pinning_again_unpins(self):
@@ -1550,6 +2461,83 @@ class AppSmokeTests(unittest.TestCase):
         # The bank notice must survive start_timer's own status message.
         self.assertIn('5 min banked on "old thing"', self.app.status_var.get())
         self.app.pause_timer()
+
+    def _replace_question(self, seconds_in):
+        """What you are asked when starting a block over a running one."""
+        self.capture("the one I am on")
+        self.capture("the one I want")
+        old = next(t for t in self.app.tasks if t.text == "the one I am on")
+        new = next(t for t in self.app.tasks if t.text == "the one I want")
+        with mock.patch("cognitive_offload.app.StartFocusDialog") as starter:
+            starter.return_value.show.return_value = {
+                "minutes": 15, "first_step": "", "warmup_done": 0,
+            }
+            self.app.begin_focus(old)
+        self.app._timer_deadline -= seconds_in
+        self.app._tick_timer()
+        with mock.patch("cognitive_offload.app.messagebox.askyesno",
+                        return_value=False) as ask:
+            self.app.begin_focus(new)
+        self.addCleanup(self.app.pause_timer)
+        return ask.call_args.args[1]
+
+    def test_replacing_a_block_no_longer_says_the_minutes_are_dropped(self):
+        """The question contradicted the code twelve lines below it.
+
+        Replacing a block banks its minutes — "Drop it" told the person they
+        were about to lose the work they managed, which is the fear that
+        keeps someone pinned in a block they cannot work in.
+        """
+        question = self._replace_question(seconds_in=300)
+        self.assertNotIn("Drop it", question)
+        self.assertIn("kept, not lost", question)
+        self.assertIn("5 minutes into", question)
+
+    def test_the_number_asked_about_is_the_number_that_gets_banked(self):
+        """A promise about "those minutes" must name the right figure.
+
+        Floor division said "0 minutes" for a block the timer would still
+        bank one minute of.
+        """
+        question = self._replace_question(seconds_in=20)
+        self.assertIn("1 minute into", question)
+        self.assertNotIn("0 minute", question)
+
+    def test_the_question_and_the_log_agree_on_a_part_minute(self):
+        """The promise, at a length where rounding rules actually differ.
+
+        Both existing checks use 300s and 20s. Five minutes is 300 seconds
+        exactly, where `round` and floor division give the same answer — so
+        swapping one for the other changed nothing any test could see, and
+        the number in the question was free to drift away from the number
+        in the log. That drift is the defect this promise was written for,
+        in the other direction.
+
+        342s is 5.7 minutes: `round` says 6, floor says 5. The assertion is
+        that the two sides AGREE, not that either equals 6 — the promise is
+        the agreement, and pinning the arithmetic would just re-state the
+        implementation.
+        """
+        question = self._replace_question(seconds_in=342)
+        asked = int(re.search(r"You are (\d+) minute", question).group(1))
+
+        # What the timer would actually bank for the same block.
+        from cognitive_offload.timer import FocusTimer
+        clock = FocusTimer()
+        clock.total = self.app._timer_total
+        clock.remaining = self.app._timer_total - 342
+        clock.running = True
+        _mode, banked = clock.bank_early(fallback_minutes=5)
+
+        self.assertEqual(asked, banked,
+                         "the question named a different number from the log")
+        self.assertEqual(asked, 6, "5.7 minutes rounds to 6, it does not floor to 5")
+
+    def test_declining_the_replacement_leaves_the_block_running(self):
+        """So "kept either way" is true on both branches, not just one."""
+        self._replace_question(seconds_in=300)
+        self.assertTrue(self.app._timer_running)
+        self.assertEqual(self.app.session_log.count_today(), 0)
 
     def test_pausing_updates_the_pop_out_button(self):
         self.app.start_timer(minutes=10)
@@ -1682,9 +2670,84 @@ class AppSmokeTests(unittest.TestCase):
         self.run_session(minutes=15, choice="carry_on")
         self.assertFalse(self.app.tasks[0].done)
 
+    def test_a_filter_that_empties_the_list_says_the_work_is_still_there(self):
+        """The end of the wire: presenter decides, the empty label shows it.
+
+        Left alone, an empty list told you to take the win and stop while
+        three tasks sat behind a search term you had forgotten. The app's
+        promise is that you can put something down and it will be there.
+        """
+        for text in ("email the landlord", "book dentist", "file the tax thing"):
+            self.capture(text)
+        self.app.search_var.set("budget")
+        self.app.refresh_tasks()
+
+        self.assertEqual(self.app.task_list.size(), 0)
+        shown = self.app.task_list._empty_label.cget("text")
+        self.assertEqual(
+            shown, "3 tasks still here — the filters above are hiding them.")
+        self.assertTrue(self.app.task_list._empty_label.winfo_manager(),
+                        "the message has to actually be on screen")
+        self.assertEqual(len(self.app.tasks), 3, "and nothing was lost")
+
+    def test_clearing_the_filter_restores_the_ordinary_empty_message(self):
+        """It has to go back, or the reassurance becomes the new wrong text."""
+        self.capture("something")
+        self.app.search_var.set("no match")
+        self.app.refresh_tasks()
+        self.assertIn("still here", self.app.task_list._empty_label.cget("text"))
+        self.app.clear_search()
+        self.app.refresh_tasks()
+        self.assertEqual(self.app.task_list.size(), 1)
+        self.assertEqual(self.app.task_list._empty_label.cget("text"),
+                         "Nothing here. Capture a thought above — "
+                         "or take the win and stop.")
+
+    def test_everything_done_and_hidden_is_still_told_to_take_the_win(self):
+        """The case that must not change: nothing outstanding is a real win."""
+        self.capture("a")
+        self.capture("b")
+        self.select(0, 1)  # both at once: marking done re-sorts the list
+        self.app.toggle_selected_done()
+        self.app.show_done_var.set(False)
+        self.app.refresh_tasks()
+        self.assertEqual(self.app.task_list.size(), 0)
+        self.assertIn("take the win and stop",
+                      self.app.task_list._empty_label.cget("text"))
+
+    def test_the_folder_labels_and_the_counts_line_reach_the_screen(self):
+        """Three labels the controller writes that no test used to read.
+
+        The "which folder am I in" label is one this branch already spent a
+        commit on; nothing guarded it. Checked here rather than assumed,
+        because a label whose variable quietly stops being updated looks
+        exactly like a label that is correct.
+        """
+        self.capture("one")
+        self.capture("two")
+        self.select(0)
+        self.app.toggle_selected_done()
+        self.app.refresh_all()
+        self.assertEqual(self.app.counts_var.get(), "1 open · 1 done")
+        self.assertIn(self.app.state_store.path.name, self.app.path_var.get())
+        self.assertTrue(self.app.matrix_path_var.get(),
+                        "the matrix tab's folder label must say something")
+
     def test_finish_time_is_shown_while_running_and_cleared_when_not(self):
+        """Whether the line appears at all — not what it says.
+
+        The " tomorrow" suffix is optional here on purpose. This assertion
+        used to be anchored without it, so the suite failed for anyone
+        running it between 23:50 and midnight, when a ten-minute block
+        genuinely does end tomorrow. That is the same wall-clock assumption
+        already fixed in test_the_ends_line_says_tomorrow_across_midnight,
+        pointing the other way. Both halves of the suffix are pinned
+        against a fixed clock in test_presenter; this one only cares that
+        a running block shows a time and a paused one shows nothing.
+        """
         self.app.start_timer(minutes=10)
-        self.assertRegex(self.app.finish_var.get(), r"^ends \d{2}:\d{2}$")
+        self.assertRegex(self.app.finish_var.get(),
+                         r"^ends \d{2}:\d{2}( tomorrow)?$")
         self.app.pause_timer()
         self.assertEqual(self.app.finish_var.get(), "")
 
@@ -1738,6 +2801,195 @@ class AppSmokeTests(unittest.TestCase):
         self.app.undo()
         self.assertEqual([t.text for t in self.app.tasks], ["goes to the matrix"])
         self.assertEqual(self.app.matrix.list("schedule"), [])  # not in two places
+
+    # -- the matrix keeps its own promises about Ctrl+Z ------------------
+    def _matrix_select(self, category, *indices):
+        listing = self.app.matrix_lists[category]
+        listing.selection_clear(0, tk.END)
+        for index in indices:
+            listing.selection_set(index)
+
+    def _delete_selected_matrix(self, category):
+        with mock.patch("cognitive_offload.app.messagebox.askyesno",
+                        return_value=True):
+            self.app.delete_matrix_tasks(category)
+
+    def test_every_matrix_command_registers_an_undo(self):
+        """The README promises this; this is the fact behind the promise.
+
+        Prose cannot be pinned the way strings can, so pin the property it
+        describes instead. A sixth matrix command added without undo would
+        make the README's safety claim wrong again, silently — that is
+        exactly how it went wrong the first time — and this notices.
+        """
+        editor = {"title": "t", "content": "", "first_step": "",
+                  "kind": "", "scheduled_for": ""}
+        depth = lambda: len(self.app._undo_stack._entries)  # noqa: E731
+
+        def run(label, command, **patches):
+            self.app.matrix.create("do_first", f"seed for {label}", "")
+            self.app.refresh_matrix()
+            self._matrix_select("do_first", 0)
+            before = depth()
+            with contextlib.ExitStack() as stack:
+                for target, value in patches.items():
+                    patched = stack.enter_context(
+                        mock.patch(f"cognitive_offload.app.{target}"))
+                    if target == "messagebox":
+                        patched.askyesno.return_value = value
+                    else:
+                        patched.return_value.show.return_value = value
+                command()
+            self.assertEqual(depth(), before + 1,
+                             f"{label} left the undo stack untouched")
+            self.assertIsNotNone(self.app._undo_stack._entries[-1].restore,
+                                 f"{label} pushed an entry that undoes nothing")
+
+        run("add", lambda: self.app.add_matrix_task("do_first"),
+            TaskEditorDialog=editor)
+        run("edit", lambda: self.app.edit_matrix_task("do_first"),
+            TaskEditorDialog=editor)
+        run("move", lambda: self.app.move_matrix_tasks("do_first"),
+            QuadrantDialog="eliminate")
+        run("book", lambda: self.app.book_matrix_time("do_first"),
+            PromptDialog="tomorrow")
+        run("delete", lambda: self.app.delete_matrix_tasks("do_first"),
+            messagebox=True)
+
+    def test_deleting_one_matrix_task_no_longer_asks(self):
+        """The guard's only justification went away when undo arrived.
+
+        The task list has always confirmed for a batch and not for one,
+        because Ctrl+Z covers the single case. The matrix asked every time
+        — correct while it had no undo, pure friction once it did.
+        """
+        self.app.matrix.create("do_first", "just this one", "")
+        self.app.refresh_matrix()
+        self._matrix_select("do_first", 0)
+        with mock.patch("cognitive_offload.app.messagebox.askyesno") as ask:
+            self.app.delete_matrix_tasks("do_first")
+            ask.assert_not_called()
+        self.assertEqual(self.app.matrix.list("do_first"), [])
+        self.assertIn("Ctrl+Z", self.app.status_var.get())
+        self.app.undo()
+        self.assertEqual([t.title for t in self.app.matrix.list("do_first")],
+                         ["just this one"])
+
+    def test_deleting_several_matrix_tasks_still_asks(self):
+        for title in ("one", "two", "three"):
+            self.app.matrix.create("do_first", title, "")
+        self.app.refresh_matrix()
+        self._matrix_select("do_first", 0, 1, 2)
+        with mock.patch("cognitive_offload.app.messagebox.askyesno",
+                        return_value=False) as ask:
+            self.app.delete_matrix_tasks("do_first")
+            ask.assert_called_once()
+            self.assertIn("3 tasks", ask.call_args.args[1])
+        self.assertEqual(len(self.app.matrix.list("do_first")), 3,
+                         "declining must delete nothing")
+
+    def test_undo_brings_a_deleted_matrix_task_back(self):
+        self.app.matrix.create("do_first", "matters a lot", "the details")
+        self.app.refresh_matrix()
+        self._matrix_select("do_first", 0)
+        self._delete_selected_matrix("do_first")
+        self.assertEqual(self.app.matrix.list("do_first"), [])
+
+        self.app.undo()
+        restored = self.app.matrix.list("do_first")
+        self.assertEqual([t.title for t in restored], ["matters a lot"])
+        self.assertEqual(restored[0].content, "the details")
+
+    def test_undoing_a_matrix_delete_leaves_unrelated_work_alone(self):
+        """The other half, and the reason this was worse than "no undo".
+
+        With the matrix silent about undo, Ctrl+Z popped whatever older entry
+        was on the stack: the deleted task stayed deleted *and* a change the
+        user was not thinking about was reverted instead.
+        """
+        self.capture("flag this one")
+        self.select(0)
+        self.app.toggle_selected_priority()
+        self.assertTrue(self.app.tasks[0].priority)
+
+        self.app.matrix.create("do_first", "matters a lot", "")
+        self.app.refresh_matrix()
+        self._matrix_select("do_first", 0)
+        self._delete_selected_matrix("do_first")
+
+        self.app.undo()
+        self.assertEqual([t.title for t in self.app.matrix.list("do_first")],
+                         ["matters a lot"])
+        self.assertTrue(self.app.tasks[0].priority, "the flag was not the target")
+        self.assertIn("matrix", self.app.status_var.get())
+
+    def test_the_deleted_status_only_promises_undo_when_it_happened(self):
+        self.app.matrix.create("do_first", "gone", "")
+        self.app.refresh_matrix()
+        self._matrix_select("do_first", 0)
+        self._delete_selected_matrix("do_first")
+        self.assertIn("Ctrl+Z", self.app.status_var.get())
+
+        self._matrix_select("do_first")  # nothing selected
+        self.app.delete_matrix_tasks("do_first")
+        self.assertNotIn("Ctrl+Z", self.app.status_var.get())
+
+    def test_undo_removes_a_task_added_to_the_matrix(self):
+        with mock.patch("cognitive_offload.app.TaskEditorDialog") as dialog:
+            dialog.return_value.show.return_value = {
+                "title": "added by hand", "content": "", "first_step": "",
+                "kind": "", "scheduled_for": "",
+            }
+            self.app.add_matrix_task("delegate")
+        self.assertEqual(len(self.app.matrix.list("delegate")), 1)
+        self.app.undo()
+        self.assertEqual(self.app.matrix.list("delegate"), [])
+
+    def test_undo_restores_the_wording_of_an_edited_matrix_task(self):
+        """An edit renames the file, so the old copy must know its own path."""
+        self.app.matrix.create("schedule", "original title", "original content")
+        self.app.refresh_matrix()
+        self._matrix_select("schedule", 0)
+        with mock.patch("cognitive_offload.app.TaskEditorDialog") as dialog:
+            dialog.return_value.show.return_value = {
+                "title": "renamed title", "content": "new content",
+                "first_step": "", "kind": "", "scheduled_for": "",
+            }
+            self.app.edit_matrix_task("schedule")
+        self.assertEqual([t.title for t in self.app.matrix.list("schedule")],
+                         ["renamed title"])
+
+        self.app.undo()
+        back = self.app.matrix.list("schedule")
+        self.assertEqual([t.title for t in back], ["original title"])
+        self.assertEqual(back[0].content, "original content")
+
+    def test_undo_moves_a_task_back_to_the_quadrant_it_came_from(self):
+        self.app.matrix.create("do_first", "wandering task", "")
+        self.app.refresh_matrix()
+        self._matrix_select("do_first", 0)
+        with mock.patch("cognitive_offload.app.QuadrantDialog") as dialog:
+            dialog.return_value.show.return_value = "eliminate"
+            self.app.move_matrix_tasks("do_first")
+        self.assertEqual(len(self.app.matrix.list("eliminate")), 1)
+
+        self.app.undo()
+        self.assertEqual([t.title for t in self.app.matrix.list("do_first")],
+                         ["wandering task"])
+        self.assertEqual(self.app.matrix.list("eliminate"), [],
+                         "a moved task must not end up in both quadrants")
+
+    def test_undo_clears_a_booking_made_on_a_matrix_task(self):
+        self.app.matrix.create("schedule", "needs a date", "")
+        self.app.refresh_matrix()
+        self._matrix_select("schedule", 0)
+        with mock.patch("cognitive_offload.app.PromptDialog") as dialog:
+            dialog.return_value.show.return_value = "tomorrow"
+            self.app.book_matrix_time("schedule")
+        self.assertTrue(self.app.matrix.list("schedule")[0].scheduled_for)
+
+        self.app.undo()
+        self.assertEqual(self.app.matrix.list("schedule")[0].scheduled_for, "")
 
     def test_undo_still_finds_a_matrix_file_renamed_after_the_send(self):
         """The undo entry must survive the file being renamed or moved."""
@@ -2115,6 +3367,31 @@ class AppSmokeTests(unittest.TestCase):
         self.assertTrue(self.app.tasks[0].done)
         self.assertEqual(self.app.tasks[0].first_step, "open the doc")
 
+    def test_which_finish_message_appears_and_in_what_order(self):
+        """Pinned because the wording net cannot see this.
+
+        The snapshot watches which strings EXIST, not which one is shown.
+        The rotation index is read after the session count has already been
+        incremented, so the first block after opening the app gets the
+        SECOND message, not the first. That is easy to "tidy" into an
+        off-by-one while every string still exists and the snapshot diff
+        comes back empty — silently changing the sentence every person sees
+        first, at the most loaded moment the app has.
+        """
+        seen = []
+        for _ in range(4):
+            with mock.patch("cognitive_offload.app.messagebox.askyesno",
+                            return_value=False):
+                self.app._finish_session(10)
+            seen.append(self.app.status_var.get())
+
+        self.assertEqual(seen, [
+            "10 minutes done — that counts, however it went.",
+            "Session finished. The hard part was starting, and you did that.",
+            "That's 10 minutes on it. Banked.",
+            "10 minutes done — that counts, however it went.",
+        ])
+
     def test_the_hand_off_is_undoable(self):
         self.capture("the long job")
         self.app.tasks[0].first_step = "open the doc"
@@ -2228,6 +3505,50 @@ class InstanceGuardTests(unittest.TestCase):
         self.addCleanup(app.destroy)
         self.assertFalse(app.aborted)
         self.assertTrue((config.db_path / ".lock").exists())
+
+    def _ask_for(self, uncertain):
+        """What the second copy is asked when the lock refuses."""
+        from cognitive_offload.app import CognitiveOffloadApp
+        from cognitive_offload.storage import InstanceLock
+
+        app = CognitiveOffloadApp.__new__(CognitiveOffloadApp)
+        lock = InstanceLock.__new__(InstanceLock)
+        lock.uncertain = uncertain
+        lock.acquire = lambda: False
+        lock.holder = lambda: "started yesterday"
+        lock.takeover = lambda: None
+        with mock.patch("cognitive_offload.app.messagebox.askyesno",
+                        return_value=False) as ask:
+            CognitiveOffloadApp._claim_instance_lock(app, lock)
+        return ask.call_args.args
+
+    def test_a_running_copy_is_not_called_safe_to_override(self):
+        """The reassurance that made this dangerous.
+
+        While a crashed copy was indistinguishable from a live one, "that is
+        safe if the other copy crashed" was kind and usually right. Now a
+        crashed copy is claimed silently and never reaches this dialog, so
+        offering that line here would be talking someone into the exact
+        overwrite the warning is about.
+        """
+        title, body = self._ask_for(uncertain=False)
+        self.assertEqual(title, "Already open")
+        self.assertNotIn("crashed", body)
+        self.assertNotIn("safe", body)
+        self.assertIn("already open — switch to it", body)
+
+    def test_when_the_folder_cannot_tell_the_reassurance_stays(self):
+        """It is still true there, so it is still said."""
+        title, body = self._ask_for(uncertain=True)
+        self.assertEqual(title, "Already running?")
+        self.assertIn("cannot say for certain", body)
+        self.assertIn("crashed", body)
+
+    def test_both_wordings_still_name_the_holder_and_the_stake(self):
+        for uncertain in (True, False):
+            _, body = self._ask_for(uncertain=uncertain)
+            self.assertIn("started yesterday", body)
+            self.assertIn("session folder", body)
 
     def test_declining_the_takeover_aborts_the_second_copy(self):
         from cognitive_offload.app import CognitiveOffloadApp

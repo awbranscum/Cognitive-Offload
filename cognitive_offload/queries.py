@@ -124,6 +124,20 @@ def due_tasks(tasks: list[Task], on: str | None = None) -> list[Task]:
     return sorted(due, key=lambda t: t.scheduled_for)
 
 
+def scheduled_today(tasks: list[Task], on: str | None = None) -> list[Task]:
+    """Open tasks booked for today itself — not "today or earlier".
+
+    ``due_tasks`` is deliberately inclusive of the past, because a booking
+    you missed still deserves a route back. But saying "today" about a date
+    that is not today is a claim the user can check, and finding it false
+    teaches them to disbelieve the whole feature. Anything ranked, warmed
+    or nudged still uses ``due_tasks``; only the places that say the word
+    "today" use this.
+    """
+    on = on or today_iso()
+    return [t for t in tasks if not t.done and t.scheduled_for == on]
+
+
 def rank_for_starting(tasks: list[Task], kind: str | None = None, on: str | None = None,
                       warm: set | None = None) -> list[Task]:
     """Order open tasks by how easy they are to *start*, best first.
@@ -145,6 +159,14 @@ def rank_for_starting(tasks: list[Task], kind: str | None = None, on: str | None
     # "Not today" means not today: the task stays on the list and in every
     # search, it just stops guarding the suggestion slot until tomorrow.
     candidates = [t for t in candidates if not t.snoozed_until or t.snoozed_until <= on]
+    # A task that is out with an agent is not yours to start — suggesting it
+    # is the app inviting you to duplicate work someone else is already
+    # doing. Same treatment as a snooze, and for the same reason: it stays on
+    # the list, wearing its "waiting" badge, and only stops guarding the
+    # suggestion slot. It comes back into the running on the check-back day,
+    # because from then on picking it up again is a real option.
+    candidates = [t for t in candidates
+                  if not t.is_waiting() or t.is_due_back(on)]
     if kind:
         candidates = [t for t in candidates if t.kind == kind or t.kind == KIND_UNSET]
 
@@ -166,6 +188,20 @@ def rank_for_starting(tasks: list[Task], kind: str | None = None, on: str | None
             # Captured today: it is the thing currently on your mind, and the
             # age tiebreak below would otherwise bury it under everything old.
             - (1 if task.created_at[:10] == on else 0),
+            # Among work that ties on everything above, the day you booked
+            # is the thing you actually decided, so today's plan comes
+            # first. `is_due` is deliberately inclusive of the past, which
+            # left a booking for today and one missed a month ago scoring
+            # identically — and the order then fell to the tiebreaks below,
+            # ending at the first letter of the text. Someone who misses
+            # bookings accumulates them, so without this their backlog
+            # competes with today's plan and wins by alphabet.
+            #
+            # A tiebreak, not a score: as a weighted term it would beat a
+            # written first step, which is a different claim and not one
+            # anyone has made. Missed bookings keep their order among
+            # themselves, oldest first, on created_at.
+            0 if task.scheduled_for == on else 1,
             task.created_at,  # older first: it has waited long enough
             task.text.casefold(),
         )

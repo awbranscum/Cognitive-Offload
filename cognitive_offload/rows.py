@@ -3,35 +3,78 @@
 The badge and subtitle logic used to be copy-pasted between the main list
 and the matrix quadrants, so any wording change had to be made twice and
 drift would mean the same task reading differently on the two tabs. Both
-builders now feed from the same helpers. (Badge/Row come from widgets, so
-tkinter is imported transitively — but never a display: these functions
-build plain data and test headless.)
+builders now feed from the same helpers.
+
+This module decides what a row *says*; it never draws one. It imports no
+UI toolkit, so a front-end on any platform can reuse these decisions
+instead of re-deriving which tasks read as "ready" — which is exactly why
+a task's badges stay identical wherever it appears.
 """
 
 from __future__ import annotations
 
-from .models import Task, humanize_date, kind_label
+from .models import Task, humanize_date, kind_label, repeat_label, today_iso
 from .queries import SORT_ORDERS
-from .widgets import Badge, Row
+from .viewmodels import Badge, Row
 
 
 def _shared_badges(item) -> list[Badge]:
     """Badges every open task shows, main list or matrix alike."""
     badges = []
+    if waiting_line(item):
+        # Leads, because it is the one thing about this row that is not about
+        # you. "check back" rather than "overdue" or "late": the task went out
+        # on purpose and the date arriving is information, not a verdict.
+        badges.append(Badge(
+            "check back" if item.is_due_back() else "waiting", "booked"))
     if item.kind:
         badges.append(Badge(kind_label(item.kind).split(" ")[0].lower(), item.kind))
     if item.is_ready:
         badges.append(Badge("ready", "ready"))
     if item.scheduled_for:
-        # An overdue booking is a nudge, not a telling-off.
+        # An overdue booking is a nudge, not a telling-off — so a missed
+        # booking says when it was for, in the same quiet tone a future one
+        # uses. It must not say "today": twelve rows all claiming today
+        # when two of them are today makes the badge carry no information,
+        # and the honest response to that is to disbelieve all of them.
+        booked_today = item.scheduled_for == today_iso()
         badges.append(Badge(
-            "today" if item.is_due()
+            "today" if booked_today
             else f"booked {humanize_date(item.scheduled_for)}",
-            "today" if item.is_due() else "booked",
+            "today" if booked_today else "booked",
         ))
     if item.estimate_minutes:
         badges.append(Badge(f"~{item.estimate_minutes} min", "estimate"))
+    if getattr(item, "repeat", ""):
+        # Without this a repeating task is indistinguishable from a one-off,
+        # and the reasonable thing to do with a finished one-off is delete it
+        # — taking the recurrence with it.
+        badges.append(Badge(repeat_label(item.repeat).lower(), "repeat"))
     return badges
+
+
+def _step_or_summary(first_step: str, body: str) -> str:
+    """The line under a task title, in one place for both tabs.
+
+    This module's whole reason for existing is that these two subtitles were
+    copy-pasted; the drift then arrived exactly as predicted, when the matrix
+    copy moved inside a conditional and fell off the wording snapshot while
+    the identical string in the main list kept it looking covered.
+    """
+    if first_step:
+        return f"→ {first_step}"
+    body = (body or "").strip()
+    return body.splitlines()[0][:80] if body else ""
+
+
+def _subtitle(item, body: str) -> str:
+    """What sits under the title, wherever the task is shown.
+
+    The waiting line wins: the first step belongs to whoever has the task
+    now, and showing it would read as something still on your own plate.
+    """
+    return waiting_line(item) or _step_or_summary(
+        getattr(item, "first_step", ""), body)
 
 
 def task_row(task: Task) -> Row:
@@ -47,24 +90,38 @@ def task_row(task: Task) -> Row:
 
     if task.done and task.completed_at:
         subtitle = f"done {task.completed_at}"
-    elif task.first_step:
-        subtitle = f"→ {task.first_step}"
-    elif task.description.strip():
-        subtitle = task.description.strip().splitlines()[0][:80]
     else:
-        subtitle = ""
+        subtitle = _subtitle(task, task.description)
 
     return Row(id=task.id, title=task.text, subtitle=subtitle, badges=badges,
                done=task.done, flagged=bool(task.priority))
 
 
+def waiting_line(task, on: str | None = None) -> str:
+    """One line for a task that is out with an agent, or "" if it is not.
+
+    States a fact and asks nothing. A handoff that has not come back is not
+    a failure — most of them are simply not due to be looked at yet, and the
+    ones that are get a badge rather than a scolding.
+    """
+    handed_to = (getattr(task, "handed_to", "") or "").strip()
+    handed_on = (getattr(task, "handed_off_on", "") or "").strip()
+    if not handed_to and not handed_on:
+        return ""
+    on = on or today_iso()
+    line = f"Waiting on {handed_to or 'an agent'}"
+    if handed_on:
+        line += f" since {humanize_date(handed_on, on)}"
+    follow_up = (getattr(task, "follow_up_on", "") or "").strip()
+    if follow_up:
+        line += f" · check back {humanize_date(follow_up, on)}"
+    return line
+
+
 def matrix_row(task) -> Row:
-    badges = _shared_badges(task)
-    subtitle = f"→ {task.first_step}" if task.first_step else (
-        task.content.strip().splitlines()[0][:80] if task.content.strip() else ""
-    )
-    return Row(id=task.id, title=task.title, subtitle=subtitle, badges=badges,
-               marker="·")
+    return Row(id=task.id, title=task.title,
+               subtitle=_subtitle(task, task.content),
+               badges=_shared_badges(task), marker="·")
 
 
 def focus_caption(task: Task | None, first_step: str) -> str:

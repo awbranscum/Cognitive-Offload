@@ -67,6 +67,58 @@ def parse_date_input(text: str) -> str | None:
         return None
 
 
+def parse_estimate_input(text: str) -> int | None:
+    """Turn what a person types into a minutes estimate, or ``None``.
+
+    The field is labelled "About ⬚ minutes, at a guess" with the word
+    *minutes* printed to the RIGHT of the box, so typing "20 mins" into it
+    is the natural thing to do — and that was the input most reliably
+    thrown away, along with "20m", "1h" and "~15". A guess that vanishes is
+    worse than no field at all: ``estimate_minutes = 0`` means "no guess",
+    so a discarded estimate is indistinguishable from a blank one, and the
+    calibration line ("You guessed ~20 min; it took about 35") then never
+    appears, with nothing to connect that silence to what was typed.
+
+    Deliberately forgiving rather than strict, and deliberately silent on
+    what it still cannot read. The dialog's own comment — "junk is just
+    'no guess', never an error dialog" — is a decision worth keeping: an
+    optional guess is not worth stopping someone with a modal. So this
+    understands more instead of complaining more, which removes most of the
+    loss without adding the dialog that was ruled out.
+
+    Returns ``None`` for text it cannot read, so a caller can tell that
+    apart from a real zero; the editor maps both to "no guess".
+    """
+    text = (text or "").strip().lower()
+    if not text:
+        return 0
+    if text.startswith("~"):
+        text = text[1:].strip()
+    if text.startswith("about "):
+        text = text[6:].strip()
+
+    unit, factor = "", 1
+    for suffix, scale in (("minutes", 1), ("minute", 1), ("mins", 1), ("min", 1),
+                          ("hours", 60), ("hour", 60), ("hrs", 60), ("hr", 60),
+                          ("m", 1), ("h", 60)):
+        if text.endswith(suffix):
+            unit, factor = suffix, scale
+            break
+    if unit:
+        text = text[: -len(unit)].strip()
+    if not text:
+        return None  # a bare "mins" says no number at all
+
+    try:
+        amount = float(text)
+    except ValueError:
+        return None
+    if amount < 0:
+        return None
+    # Same ceiling the store uses; a guess is a guess, not a workday plan.
+    return max(0, min(480, round(amount * factor)))
+
+
 def humanize_date(iso: str, on: str | None = None) -> str:
     """A date in the units a time-blind brain actually acts on.
 
@@ -88,7 +140,26 @@ def humanize_date(iso: str, on: str | None = None) -> str:
         return target.strftime("%a")
     if 7 <= delta <= 14:
         return f"in {delta} days"
-    return iso  # far future (and the past) stays a plain date
+    if delta == -1:
+        return "yesterday"
+    if delta < 0:
+        # A short, plain date — deliberately NOT the weekday form used for
+        # the near future. "Thu" two days ahead is unambiguous; "Thu" in
+        # the past could be four days ago or eleven, and a date you cannot
+        # place is the thing this function exists to prevent. (%-d is not
+        # available on Windows, and this app ships a run.bat.)
+        #
+        # The year is carried only when it differs, for the same reason.
+        # Without it "22 Dec" on a task booked last year reads as the
+        # *coming* December, especially beside a row saying "in 7 days" —
+        # and a two-year-old booking was indistinguishable from a
+        # two-week-old one. This app is built for people who keep tasks
+        # around, so a stale booking is the ordinary case, not an edge.
+        # Same-year dates stay short: "1 Aug" is already placeable.
+        if target.year != base.year:
+            return f"{target.day} {target.strftime('%b')} {target.year}"
+        return f"{target.day} {target.strftime('%b')}"
+    return iso  # far future stays a plain date
 
 
 def kind_label(kind: str) -> str:
@@ -130,6 +201,99 @@ def _as_tags(value) -> list[str]:
     return tags
 
 
+# key -> (label, how the next date is worked out). Deliberately small: a
+# recurrence grammar with "every 3rd Tuesday" in it is a second app, and the
+# things this audience actually loses are bins, meds, bills and standing
+# appointments — all of which fit here.
+REPEATS: dict[str, str] = {
+    "": "Does not repeat",
+    "daily": "Every day",
+    "weekdays": "Every weekday",
+    "weekly": "Every week",
+    "fortnightly": "Every two weeks",
+    "monthly": "Every month",
+}
+REPEAT_KEYS = tuple(REPEATS)
+REPEAT_LABELS = tuple(REPEATS.values())
+REPEAT_KEY_BY_LABEL = {label: key for key, label in REPEATS.items()}
+
+
+def repeat_label(repeat: str) -> str:
+    return REPEATS.get(repeat, REPEATS[""])
+
+
+def next_occurrence(repeat: str, scheduled_for: str = "", on: str | None = None) -> str:
+    """The next day a repeating task is wanted, or "" if it does not repeat.
+
+    Two rules, and the second one is the whole reason this is a function
+    rather than a line of arithmetic:
+
+    **Never generate a backlog.** The next date is worked out from *today*
+    whenever the booking has already passed. Miss the bins for a fortnight and
+    you come back to one task asking about the next collection — not fourteen
+    copies of a task you already feel bad about. A pile of overdue duplicates
+    is the single most reliable way to make someone stop opening an app.
+
+    **Keep the rhythm when you are on time.** If the booking is still ahead
+    (you did it early), the next one is counted from the booking, so a
+    Tuesday task stays a Tuesday task instead of drifting a day earlier every
+    week.
+    """
+    if repeat not in REPEATS or not repeat:
+        return ""
+    from datetime import date, timedelta
+
+    today = on or today_iso()
+    try:
+        base = date.fromisoformat(scheduled_for) if scheduled_for else None
+    except ValueError:
+        base = None
+    try:
+        floor = date.fromisoformat(today)
+    except ValueError:
+        floor = date.fromisoformat(today_iso())
+    if base is None or base < floor:
+        base = floor
+
+    if repeat == "daily":
+        return (base + timedelta(days=1)).isoformat()
+    if repeat == "weekdays":
+        nxt = base + timedelta(days=1)
+        while nxt.weekday() >= 5:  # Saturday, Sunday
+            nxt += timedelta(days=1)
+        return nxt.isoformat()
+    if repeat == "weekly":
+        return (base + timedelta(days=7)).isoformat()
+    if repeat == "fortnightly":
+        return (base + timedelta(days=14)).isoformat()
+    # monthly: the same day next month, pulled back to the last day of a
+    # shorter one so the 31st does not silently skip February.
+    year, month = base.year + (base.month // 12), base.month % 12 + 1
+    import calendar
+
+    day = min(base.day, calendar.monthrange(year, month)[1])
+    return date(year, month, day).isoformat()
+
+
+def _is_waiting(item) -> bool:
+    """Out with someone (or something) else, and not back yet.
+
+    A free function rather than a method on each model, because both tabs ask
+    it and two copies of a predicate is how the two tabs' answers drift apart
+    — which is the bug this whole area exists to stop.
+    """
+    return bool(getattr(item, "handed_to", "") or getattr(item, "handed_off_on", ""))
+
+
+def _is_due_back(item, on: str | None = None) -> bool:
+    """Inclusive of the past, exactly like ``is_due``: a follow-up you missed
+    still deserves a route back rather than silently expiring."""
+    follow_up = getattr(item, "follow_up_on", "")
+    if not _is_waiting(item) or not follow_up:
+        return False
+    return follow_up <= (on or today_iso())
+
+
 @dataclass
 class Task:
     """A single item on the active stack.
@@ -166,6 +330,18 @@ class Task:
     # what makes time-sense calibrate: compared later with what the sessions
     # actually took — as data, never as a mark.
     estimate_minutes: int = 0
+    # How often this comes back round (see REPEATS). Finishing a repeating
+    # task completes *this* one and books the next, so the week review still
+    # holds the evidence that you did it — a task that quietly reset its own
+    # date would erase the record, which is the one thing that screen is for.
+    repeat: str = ""
+    # Who has it, since when, and when it comes back. These live on both
+    # models: a task handed to an agent and then moved to the main list used
+    # to arrive with no trace of the handoff at all, which is exactly the
+    # disappearance the feature exists to prevent.
+    handed_to: str = ""
+    handed_off_on: str = ""
+    follow_up_on: str = ""
 
     def __post_init__(self) -> None:
         self.text = _as_str(self.text).strip()
@@ -177,6 +353,9 @@ class Task:
         self.snoozed_until = _as_str(self.snoozed_until).strip()
         self.estimate_minutes = _as_minutes(self.estimate_minutes)
         self.first_step = _as_str(self.first_step).strip()
+        # An unknown repeat becomes "does not repeat" rather than an error:
+        # same reason an unknown kind becomes Unsorted.
+        self.repeat = self.repeat if self.repeat in REPEATS else ""
         self.kind = self.kind if self.kind in TASK_KINDS else KIND_UNSET
         self.scheduled_for = _as_str(self.scheduled_for).strip()
         if not self.created_at:
@@ -199,6 +378,36 @@ class Task:
     def set_done(self, done: bool) -> None:
         self.done = bool(done)
         self.completed_at = now_stamp() if self.done else None
+
+    def is_waiting(self) -> bool:
+        return _is_waiting(self)
+
+    def is_due_back(self, on: str | None = None) -> bool:
+        return _is_due_back(self, on)
+
+    def next_instance(self, on: str | None = None) -> "Task | None":
+        """The next round of a repeating task, or ``None`` if it does not.
+
+        A fresh, open task rather than a reset of this one. Resetting would
+        quietly delete the evidence that you did it, and the week review — the
+        screen whose whole job is answering "I did nothing this week" — reads
+        exactly that evidence. Doing the bins six weeks running should look
+        like six things done, not like one task that is somehow never
+        finished.
+        """
+        when = next_occurrence(self.repeat, self.scheduled_for, on)
+        if not when:
+            return None
+        nxt = Task.from_dict(self.to_dict())
+        nxt.id = new_id()
+        nxt.created_at = now_stamp()
+        nxt.done = False
+        nxt.completed_at = None
+        nxt.scheduled_for = when
+        # A snooze belongs to the round it was taken in; carrying it forward
+        # would silently excuse the next one too.
+        nxt.snoozed_until = ""
+        return nxt
 
 
     def add_tag(self, tag: str) -> bool:
@@ -242,6 +451,10 @@ class Task:
             "pinned": self.pinned,
             "snoozed_until": self.snoozed_until,
             "estimate_minutes": self.estimate_minutes,
+            "repeat": self.repeat,
+            "handed_to": self.handed_to,
+            "handed_off_on": self.handed_off_on,
+            "follow_up_on": self.follow_up_on,
         }
 
     @classmethod
@@ -265,6 +478,10 @@ class Task:
             pinned=_as_bool(data.get("pinned")),
             snoozed_until=_as_str(data.get("snoozed_until")),
             estimate_minutes=_as_minutes(data.get("estimate_minutes")),
+            repeat=_as_str(data.get("repeat")),
+            handed_to=_as_str(data.get("handed_to")),
+            handed_off_on=_as_str(data.get("handed_off_on")),
+            follow_up_on=_as_str(data.get("follow_up_on")),
         )
 
     def copy(self) -> "Task":
@@ -312,6 +529,18 @@ class MatrixTask:
     priority: int = 0
     pinned: bool = False
     estimate_minutes: int = 0
+    # Handing a task to an agent and then forgetting it is not delegating, it
+    # is losing it somewhere more respectable. These three are what make the
+    # Delegate quadrant safe to actually use: who has it, since when, and the
+    # day it comes back to you on its own.
+    handed_to: str = ""
+    handed_off_on: str = ""
+    follow_up_on: str = ""
+    # Inert in a quadrant — the matrix has no "done" to trigger the next
+    # round, and nothing here reads a snooze — but both are carried so a trip
+    # through the matrix does not quietly strip them off a task.
+    repeat: str = ""
+    snoozed_until: str = ""
     # Absolute path of the backing file; assigned by the store, never stored.
     path: object = None
 
@@ -323,6 +552,7 @@ class MatrixTask:
         self.priority = 1 if self.priority else 0
         self.pinned = _as_bool(self.pinned)
         self.estimate_minutes = _as_minutes(self.estimate_minutes)
+        self.repeat = self.repeat if self.repeat in REPEATS else ""
 
     def to_dict(self) -> dict:
         return {
@@ -339,6 +569,11 @@ class MatrixTask:
             "priority": self.priority,
             "pinned": self.pinned,
             "estimate_minutes": self.estimate_minutes,
+            "handed_to": self.handed_to,
+            "handed_off_on": self.handed_off_on,
+            "follow_up_on": self.follow_up_on,
+            "repeat": self.repeat,
+            "snoozed_until": self.snoozed_until,
         }
 
     @classmethod
@@ -357,7 +592,24 @@ class MatrixTask:
             priority=1 if data.get("priority") else 0,
             pinned=_as_bool(data.get("pinned")),
             estimate_minutes=_as_minutes(data.get("estimate_minutes")),
+            handed_to=_as_str(data.get("handed_to")),
+            handed_off_on=_as_str(data.get("handed_off_on")),
+            follow_up_on=_as_str(data.get("follow_up_on")),
+            repeat=_as_str(data.get("repeat")),
+            snoozed_until=_as_str(data.get("snoozed_until")),
         )
+
+    def copy(self) -> "MatrixTask":
+        """A detached duplicate, including the file it came from.
+
+        ``path`` is carried across deliberately even though ``to_dict`` omits
+        it: it is *where this task lives*, not part of what it says. An undo
+        that wrote the old data to a freshly chosen filename would leave the
+        task on screen twice.
+        """
+        clone = MatrixTask.from_dict(self.to_dict(), self.category)
+        clone.path = self.path
+        return clone
 
     @property
     def is_ready(self) -> bool:
@@ -368,8 +620,25 @@ class MatrixTask:
             return False
         return self.scheduled_for <= (on or today_iso())
 
+    def is_waiting(self) -> bool:
+        return _is_waiting(self)
+
+    def is_due_back(self, on: str | None = None) -> bool:
+        return _is_due_back(self, on)
+
     def to_task(self) -> Task:
-        """Convert back into a main-list task, keeping every field."""
+        """Convert back into a main-list task.
+
+        Carries everything the two models share, including the handoff marks
+        — a task out with an agent used to arrive here with no trace of that
+        at all, which is the disappearance the handoff exists to prevent,
+        walked in through a different door.
+
+        Four things deliberately do not cross, and ``tests/test_conversions``
+        holds the list with a reason for each: the id and ``created_at``
+        (a move makes a new record), and ``done``/``completed_at`` (a
+        quadrant has no finished state to come back from).
+        """
         return Task(
             text=self.title,
             description=self.content,
@@ -381,4 +650,9 @@ class MatrixTask:
             priority=self.priority,
             pinned=self.pinned,
             estimate_minutes=self.estimate_minutes,
+            repeat=self.repeat,
+            snoozed_until=self.snoozed_until,
+            handed_to=self.handed_to,
+            handed_off_on=self.handed_off_on,
+            follow_up_on=self.follow_up_on,
         )

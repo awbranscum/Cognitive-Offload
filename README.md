@@ -175,6 +175,25 @@ reinstall from python.org).
   are pooled and refilled rather than rebuilt, so a 300-task list re-renders in
   ~50ms instead of locking the window for a second on every keystroke.
 
+- **Repeating tasks** — daily, weekdays, weekly, fortnightly or monthly, set
+  in the task editor. Finishing one **completes that round and books the next**
+  rather than resetting the date, so doing the bins six weeks running looks
+  like six things done in the week review instead of one task that is somehow
+  never finished. A missed repeat **never piles up**: the next date is worked
+  out from today whenever the booking has passed, so two weeks off the bins
+  gets you one task, not fourteen. Do it early and the rhythm holds — a Friday
+  task stays a Friday task.
+
+- **The first launch starts calm.** A brand-new install opens in Calm mode:
+  17 things you can click instead of 32, with the capture box and "Where do I
+  start?" carrying the screen. The checkbox that turns it off is in plain
+  sight, one flat sentence in the status bar says where the rest went, and the
+  choice is remembered from then on. An existing install is never rearranged.
+- **Nothing is offered while it cannot act.** Every task action needs a
+  selection, so they stay greyed until there is one — and then seven of them
+  come on at once, which teaches what they apply to without a sentence and
+  without a failed click. Greyed rather than hidden, so nothing moves.
+
 **Matrix**
 - Add, edit, delete and move tasks between any two quadrants (not just into
   "Do First").
@@ -183,6 +202,15 @@ reinstall from python.org).
 - "Focus on this" starts a session straight from a quadrant: one click moves
   the task to the main list, opens the start dialog, and runs the warm-up —
   instead of the four manual steps that booked work used to need on its day.
+- **"Hand off to an agent"** turns Delegate into a quadrant you can actually
+  use. It writes a brief — title, details, first step, booked date, estimate,
+  tags, plus whatever you add — to a file for **Claude Desktop**, **Codex** or
+  **OpenClaw**, and puts the command to run it on your clipboard. The task then
+  then wears a `waiting` badge on **both tabs** until you take it back or mark
+  it done, so a handoff cannot quietly become a disappearance — and it stops
+  being offered as the next thing to start, since starting it would duplicate
+  the agent's work. Nothing is sent anywhere: the app writes a file, you start
+  the agent. See [docs/AGENT_HANDOFF.md](docs/AGENT_HANDOFF.md).
 - Send a selection back to the main task list, or copy a whole quadrant.
 - Each quadrant is a folder; each task is a `.task` JSON file, so the data stays
   readable and greppable outside the app.
@@ -196,12 +224,18 @@ reinstall from python.org).
   block banks the elapsed time to the session log before the app goes, so
   closing the laptop lid without ceremony is a normal end of day, not a
   forfeit. Breaks and blocks that never started record nothing.
-- A second copy of the app opening the same session folder is caught by a
-  lock file and asked before it can silently overwrite the first copy's
-  saves. (After a crash, answering "open anyway" takes over cleanly.)
-- `Ctrl+Z` reaches across the task list and the matrix: undoing a "to matrix"
-  move deletes the file it created, and undoing the reverse writes it back, so
-  a task is never left in both places or neither.
+- A second copy of the app opening the same session folder is caught before it
+  can silently overwrite the first copy's saves. The lock is held by the
+  operating system on an open handle rather than being a file that merely
+  exists, so a copy that crashed or was force-closed leaves nothing behind to
+  ask about — the next launch takes the folder over without a question. You
+  are asked only when a copy really is running, or when the folder cannot
+  answer the question at all (network and synced folders often cannot).
+- `Ctrl+Z` reaches across the task list and the matrix. Adding, editing,
+  moving, booking a time for and deleting a matrix task are all undoable, just
+  as they are in the list. So are the moves between the two: undoing a "to
+  matrix" move deletes the file it created, and undoing the reverse writes it
+  back, so a task is never left in both places or neither.
 - The `.bak` is written once per run, so it still holds the session as you
   opened it rather than being overwritten by an autosave 30 seconds later.
 - Writes are atomic (temp file + rename) and the previous version is kept as
@@ -219,6 +253,7 @@ tracks what changed, version by version.
 | Focus session log | `~/.cognitive_offload/sessions.json` |
 | Previous session backup | `~/.cognitive_offload/data.json.bak` |
 | Matrix quadrants | `~/MatrixTasks/{DoFirst,Schedule,Delegate,Eliminate}/*.task` |
+| Agent handoff briefs | `~/CognitiveOffloadHandoff/{ClaudeDesktop,Codex,OpenClaw}/` |
 | Preferences | `~/.cognitive_offload_config.json` |
 
 A session file that is valid JSON but not a Cognitive Offload session is
@@ -251,7 +286,11 @@ cognitive_offload/
     storage.py              config, atomic session file, matrix file store
     app.py                  the controller: commands, autosave, Tk wiring
     timer.py                the focus/break clock as a pure state machine
+    presenter.py            what each screen says, with nothing to say it on
+    viewmodels.py           what a row shows, with no opinion on drawing it
     rows.py                 how a task renders as a row (shared by both tabs)
+    ports.py                what the app needs from the platform underneath it
+    handoff.py              briefs for an AI agent: targets, rendering, files
     undo.py                 the Ctrl+Z stack, UI-free
     main_tab.py             layout of the capture/tasks/scratchpad tab
     matrix_tab.py           layout of the matrix tab
@@ -261,8 +300,15 @@ cognitive_offload/
 tests/                      unittest suite (no third-party runner needed)
 ```
 
-The model, query and storage layers never import tkinter, which is what makes
-them testable without a display.
+Ten of those modules never import tkinter — the model, query, session, storage,
+timer, undo, view-model, row, presenter and ports layers — which is what makes
+them testable without a display. That boundary is not a convention but a test:
+`tests/test_portability.py` imports each of them in a subprocess with tkinter
+made unavailable, and fails if any of them needs it.
+
+[`docs/PORTING.md`](docs/PORTING.md) describes what a second front-end would
+have to build and what it would reuse unchanged — including why tkinter itself
+cannot ship on Android.
 
 ## Tests
 

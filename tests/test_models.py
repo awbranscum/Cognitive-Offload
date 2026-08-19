@@ -76,8 +76,54 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(humanize_date("2026-08-12", on), "in 7 days")
         self.assertEqual(humanize_date("2026-08-19", on), "in 14 days")
         self.assertEqual(humanize_date("2026-08-20", on), "2026-08-20")  # far: plain
-        self.assertEqual(humanize_date("2026-08-01", on), "2026-08-01")  # past: plain
         self.assertEqual(humanize_date("not-a-date", on), "not-a-date")
+
+    def test_humanize_date_places_the_past_without_arithmetic(self):
+        """A missed booking has to say when it was for. An ISO string is
+        precisely the flat data this function exists to remove."""
+        from cognitive_offload.models import humanize_date
+
+        on = "2026-08-05"  # a Wednesday
+        self.assertEqual(humanize_date("2026-08-04", on), "yesterday")
+        self.assertEqual(humanize_date("2026-08-01", on), "1 Aug")
+        self.assertEqual(humanize_date("2026-06-16", on), "16 Jun")
+        # Deliberately NOT the weekday form the near future uses: "Thu"
+        # ahead is unambiguous, "Thu" behind could be four days ago or
+        # eleven — a date you cannot place is the failure being fixed.
+        self.assertNotEqual(humanize_date("2026-07-30", on), "Thu")
+
+    def test_a_past_date_in_another_year_says_which_year(self):
+        """"22 Dec" on a booking from last year reads as the coming December.
+
+        Same failure the weekday form was rejected for, one scale up: a
+        two-year-old booking rendered identically to a two-week-old one,
+        on a screen that also says "in 7 days". This app is for people who
+        keep tasks around, so a stale booking is the ordinary case.
+        """
+        from cognitive_offload.models import humanize_date
+
+        on = "2026-08-18"
+        self.assertEqual(humanize_date("2025-12-22", on), "22 Dec 2025")
+        self.assertEqual(humanize_date("2024-08-18", on), "18 Aug 2024")
+
+    def test_a_past_date_in_the_same_year_stays_short(self):
+        """The year is carried only when it is doing work.
+
+        "1 Aug" in August is already placeable, and every extra token on a
+        row is one more thing to read past.
+        """
+        from cognitive_offload.models import humanize_date
+
+        self.assertEqual(humanize_date("2026-08-01", "2026-08-18"), "1 Aug")
+        self.assertNotIn("2026", humanize_date("2026-01-04", "2026-08-18"))
+
+    def test_the_year_reads_as_a_fact_not_as_lateness(self):
+        """Nothing here may imply a person is behind. It is a date, not a mark."""
+        from cognitive_offload.models import humanize_date
+
+        said = humanize_date("2025-12-22", "2026-08-18").lower()
+        for scolding in ("overdue", "late", "missed", "still", "should"):
+            self.assertNotIn(scolding, said)
 
     def test_estimate_round_trips_clamps_and_tolerates_junk(self):
         task = Task(text="x", estimate_minutes=25)
@@ -170,6 +216,45 @@ class DateInputTests(unittest.TestCase):
             self.assertIsNone(parse_date_input(value))
 
 
+class EstimateInputTests(unittest.TestCase):
+    """What a person types into "About ⬚ minutes, at a guess"."""
+
+    def setUp(self):
+        from cognitive_offload.models import parse_estimate_input
+        self.parse = parse_estimate_input
+
+    def test_a_bare_number_is_minutes(self):
+        self.assertEqual(self.parse("20"), 20)
+        self.assertEqual(self.parse(" 90 "), 90)
+
+    def test_the_units_people_actually_type_are_understood(self):
+        """The label prints "minutes" to the RIGHT of the box, so typing the
+        unit as well is the natural thing to do — and it was the input most
+        reliably thrown away."""
+        for typed, expected in (("20 mins", 20), ("20m", 20), ("20 minutes", 20),
+                                ("1h", 60), ("2 hours", 120), ("1.5h", 90),
+                                ("~15", 15), ("about 25", 25)):
+            with self.subTest(typed=typed):
+                self.assertEqual(self.parse(typed), expected)
+
+    def test_an_empty_field_is_no_guess_not_a_failure(self):
+        self.assertEqual(self.parse(""), 0)
+        self.assertEqual(self.parse("   "), 0)
+
+    def test_it_keeps_the_same_ceiling_as_the_store(self):
+        self.assertEqual(self.parse("9999"), 480)
+        self.assertEqual(self.parse("40 hours"), 480)
+
+    def test_what_it_cannot_read_is_reported_rather_than_guessed(self):
+        """None, not 0 — so a caller can tell junk from a real zero. The
+        editor still maps both to "no guess" without a dialog, which is a
+        decision the dialog states in its own comment."""
+        for typed in ("soon", "half an hour", "mins", "-5", "later today"):
+            with self.subTest(typed=typed):
+                self.assertIsNone(self.parse(typed))
+        self.assertEqual(self.parse("0"), 0, "a typed zero is a real answer")
+
+
 class NoteTests(unittest.TestCase):
     def test_render_includes_timestamp(self):
         note = Note(text="idea", created_at="2024-05-05 09:00:00")
@@ -208,3 +293,140 @@ class MatrixTaskTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RepeatTests(unittest.TestCase):
+    """Bins, meds, bills and standing appointments — the things this audience
+    loses, and the things the app could not hold at all until now."""
+
+    def test_a_missed_repeat_never_becomes_a_backlog(self):
+        """The single most reliable way to make someone stop opening an app
+        is to greet them with fourteen copies of a task they feel bad about."""
+        from cognitive_offload.models import next_occurrence
+
+        # Booked six weeks ago and never done: still exactly one next date,
+        # and it is in the future.
+        nxt = next_occurrence("weekly", "2026-07-01", "2026-08-19")
+        self.assertGreater(nxt, "2026-08-19")
+        self.assertEqual(nxt, "2026-08-26")
+
+    def test_being_on_time_keeps_the_rhythm(self):
+        """Done early, a Friday task stays a Friday task instead of drifting
+        a day earlier every week."""
+        from cognitive_offload.models import next_occurrence
+
+        # Booked Friday 21st, ticked off on Wednesday 19th.
+        self.assertEqual(next_occurrence("weekly", "2026-08-21", "2026-08-19"),
+                         "2026-08-28")
+
+    def test_weekdays_skips_the_weekend(self):
+        from cognitive_offload.models import next_occurrence
+
+        # Friday 21 Aug 2026 -> Monday 24th, not Saturday 22nd.
+        self.assertEqual(next_occurrence("weekdays", "2026-08-21", "2026-08-19"),
+                         "2026-08-24")
+        # ...and an ordinary weekday just moves on one.
+        self.assertEqual(next_occurrence("weekdays", "2026-08-19", "2026-08-19"),
+                         "2026-08-20")
+
+    def test_monthly_does_not_skip_february(self):
+        from cognitive_offload.models import next_occurrence
+
+        self.assertEqual(next_occurrence("monthly", "2026-01-31", "2026-01-31"),
+                         "2026-02-28")
+        self.assertEqual(next_occurrence("monthly", "2026-12-15", "2026-12-15"),
+                         "2027-01-15")
+
+    def test_every_interval_moves_forward(self):
+        from cognitive_offload.models import REPEAT_KEYS, next_occurrence
+
+        for key in REPEAT_KEYS:
+            if not key:
+                continue
+            self.assertGreater(next_occurrence(key, "2026-08-19", "2026-08-19"),
+                               "2026-08-19", key)
+
+    def test_a_task_that_does_not_repeat_produces_no_next_date(self):
+        from cognitive_offload.models import next_occurrence
+
+        self.assertEqual(next_occurrence("", "2026-08-19", "2026-08-19"), "")
+        self.assertEqual(next_occurrence("every other tuesday", "", "2026-08-19"), "")
+
+    def test_an_unreadable_stored_repeat_becomes_no_repeat(self):
+        from cognitive_offload.models import Task
+
+        self.assertEqual(Task(text="x", repeat="nonsense").repeat, "")
+        self.assertEqual(Task.from_dict({"text": "x", "repeat": 7}).repeat, "")
+
+    def test_a_nonsense_booking_still_yields_a_real_next_date(self):
+        from cognitive_offload.models import next_occurrence
+
+        self.assertRegex(next_occurrence("weekly", "not a date", "2026-08-19"),
+                         r"^\d{4}-\d{2}-\d{2}$")
+
+    def test_the_next_round_is_a_new_open_task_not_a_reset(self):
+        """Resetting would delete the evidence that you did it, and the week
+        review exists to hold exactly that evidence."""
+        from cognitive_offload.models import Task
+
+        task = Task(text="Take the bins out", repeat="weekly",
+                    scheduled_for="2026-08-21", first_step="wheel it to the kerb",
+                    tags=["home"], estimate_minutes=5)
+        nxt = task.next_instance("2026-08-19")
+        self.assertIsNotNone(nxt)
+        self.assertNotEqual(nxt.id, task.id)
+        self.assertFalse(nxt.done)
+        self.assertIsNone(nxt.completed_at)
+        self.assertEqual(nxt.scheduled_for, "2026-08-28")
+        # Everything you set up once is carried, so it stays set up.
+        self.assertEqual(nxt.first_step, "wheel it to the kerb")
+        self.assertEqual(nxt.tags, ["home"])
+        self.assertEqual(nxt.estimate_minutes, 5)
+        self.assertEqual(nxt.repeat, "weekly")
+
+    def test_a_snooze_does_not_carry_into_the_next_round(self):
+        """"Not today" was about today, not about every future Tuesday."""
+        from cognitive_offload.models import Task
+
+        task = Task(text="bins", repeat="weekly", scheduled_for="2026-08-21",
+                    snoozed_until="2026-08-20")
+        self.assertEqual(task.next_instance("2026-08-19").snoozed_until, "")
+
+    def test_a_non_repeating_task_has_no_next_instance(self):
+        from cognitive_offload.models import Task
+
+        self.assertIsNone(Task(text="one off").next_instance("2026-08-19"))
+
+    def test_the_repeat_survives_a_round_trip(self):
+        from cognitive_offload.models import Task
+
+        task = Task(text="bins", repeat="fortnightly")
+        self.assertEqual(Task.from_dict(task.to_dict()).repeat, "fortnightly")
+
+    def test_a_file_written_before_repeats_existed_still_loads(self):
+        from cognitive_offload.models import Task
+
+        self.assertEqual(Task.from_dict({"text": "older"}).repeat, "")
+
+    def test_the_labels_and_keys_agree_in_both_directions(self):
+        from cognitive_offload.models import (
+            REPEAT_KEY_BY_LABEL,
+            REPEATS,
+            repeat_label,
+        )
+
+        for key, label in REPEATS.items():
+            self.assertEqual(REPEAT_KEY_BY_LABEL[label], key)
+            self.assertEqual(repeat_label(key), label)
+        self.assertEqual(repeat_label("nonsense"), REPEATS[""])
+
+    def test_a_repeating_task_is_visibly_different_from_a_one_off(self):
+        """Otherwise the reasonable thing to do with a finished one is delete
+        it, which takes the recurrence with it."""
+        from cognitive_offload.models import Task
+        from cognitive_offload.rows import task_row
+
+        badges = [b.text for b in task_row(Task(text="bins", repeat="weekly")).badges]
+        self.assertIn("every week", badges)
+        plain = [b.text for b in task_row(Task(text="once")).badges]
+        self.assertNotIn("every week", plain)

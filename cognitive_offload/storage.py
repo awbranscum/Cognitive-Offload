@@ -6,6 +6,7 @@ UI decides how to report them.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
@@ -16,12 +17,17 @@ import time
 from pathlib import Path
 
 from .models import MatrixTask, Note, Task, now_stamp
+from .ports import Locations, desktop_locations
 
 STATE_VERSION = 2
 
-DEFAULT_DB_PATH = Path.home() / ".cognitive_offload"
-DEFAULT_MATRIX_PATH = Path.home() / "MatrixTasks"
-CONFIG_PATH = Path.home() / ".cognitive_offload_config.json"
+# The desktop layout, resolved once at import exactly as it always was. Code
+# that wants to be told where to write takes a Locations instead; these remain
+# so that every existing caller keeps finding the same files.
+DEFAULT_LOCATIONS = desktop_locations()
+DEFAULT_DB_PATH = DEFAULT_LOCATIONS.data_dir
+DEFAULT_MATRIX_PATH = DEFAULT_LOCATIONS.matrix_dir
+CONFIG_PATH = DEFAULT_LOCATIONS.config_file
 
 STATE_FILENAME = "data.json"
 SESSIONS_FILENAME = "sessions.json"
@@ -49,10 +55,15 @@ class StorageError(Exception):
     """Raised when data cannot be read from or written to disk."""
 
 
-def display_path(path, limit: int = 58) -> str:
-    """Shorten a path for a label: ``~`` for home, an ellipsis for the rest."""
+def display_path(path, limit: int = 58, home=None) -> str:
+    """Shorten a path for a label: ``~`` for home, an ellipsis for the rest.
+
+    ``home`` defaults to the running user's, which is what every current caller
+    wants; a platform whose files live somewhere else passes its own so the
+    label still shortens instead of showing an absolute path nobody recognises.
+    """
     text = str(path)
-    home = str(Path.home())
+    home = str(home if home is not None else Path.home())
     if text.startswith(home):
         text = "~" + text[len(home):]
     if len(text) > limit:
@@ -109,10 +120,13 @@ def read_json(path: Path):
 class Config:
     """User preferences, stored next to the home directory."""
 
-    def __init__(self, path: Path = CONFIG_PATH):
-        self.path = Path(path)
-        self.db_path = DEFAULT_DB_PATH
-        self.matrix_db_path = DEFAULT_MATRIX_PATH
+    def __init__(self, path: Path | None = None, locations: Locations | None = None):
+        # A platform describes itself once, here; everything below reads its
+        # answer rather than asking the operating system a second time.
+        self.locations = locations or DEFAULT_LOCATIONS
+        self.path = Path(path) if path is not None else self.locations.config_file
+        self.db_path = self.locations.data_dir
+        self.matrix_db_path = self.locations.matrix_dir
         self.show_done = True
         self.sort_order = "priority"
         self.autosave = True
@@ -125,6 +139,22 @@ class Config:
         self.popout_on_start = False
         self.theme = "light"
         self.calm_mode = False
+        # True only until the first save: a brand-new install has no config
+        # file, and that is the one moment the app can know it is someone's
+        # first look at it.
+        self.first_run = False
+        # Where handoff briefs are written, and which agent the picker opens
+        # on. The folder is deliberately outside the app's own data directory:
+        # the point of a brief is that another program can read it, and asking
+        # someone to grant an agent access to the folder holding all their
+        # tasks would be a worse trade than they realise.
+        self.handoff_root = self.locations.home / "CognitiveOffloadHandoff"
+        self.handoff_target = "claude_desktop"
+        # key -> command template. Empty means "use the built-in default".
+        # These exist because this app cannot verify what any agent's CLI
+        # accepts, so the person has to be able to correct it without editing
+        # source.
+        self.handoff_commands: dict = {}
 
     @property
     def state_file(self) -> Path:
@@ -135,18 +165,29 @@ class Config:
         return self.db_path / SESSIONS_FILENAME
 
     def load(self) -> "Config":
-        """Load config, falling back to defaults for anything unusable."""
+        """Load config, falling back to defaults for anything unusable.
+
+        A missing config file means nobody has ever used this copy, and that
+        first screen starts in Calm mode. The app is for people who find a
+        wall of controls expensive, and the wall was thirty-two clickable
+        things before a single task existed. Calm is the honest first
+        impression; the checkbox that turns it off is in plain sight, and the
+        choice is remembered from then on.
+        """
         try:
             data = read_json(self.path)
         except FileNotFoundError:
+            self.first_run = True
+            self.calm_mode = True
             return self
         except (OSError, json.JSONDecodeError, UnicodeDecodeError):
             # A corrupt config must never stop the app from starting.
             return self
         if not isinstance(data, dict):
             return self
-        self.db_path = _path_or(data.get("db_path"), DEFAULT_DB_PATH)
-        self.matrix_db_path = _path_or(data.get("matrix_db_path"), DEFAULT_MATRIX_PATH)
+        self.db_path = _path_or(data.get("db_path"), self.locations.data_dir)
+        self.matrix_db_path = _path_or(data.get("matrix_db_path"),
+                                       self.locations.matrix_dir)
         self.show_done = bool(data.get("show_done", True))
         order = data.get("sort_order")
         from .queries import DEFAULT_SORT, VALID_SORT_KEYS  # here to avoid an import cycle risk
@@ -163,6 +204,18 @@ class Config:
         self.popout_on_start = bool(data.get("popout_on_start", False))
         self.theme = "dark" if data.get("theme") == "dark" else "light"
         self.calm_mode = bool(data.get("calm_mode", False))
+        self.handoff_root = _path_or(data.get("handoff_root"),
+                                     self.locations.home / "CognitiveOffloadHandoff")
+        from .handoff import TARGET_KEYS  # local: handoff imports storage
+
+        target = data.get("handoff_target")
+        self.handoff_target = target if target in TARGET_KEYS else TARGET_KEYS[0]
+        commands = data.get("handoff_commands")
+        if isinstance(commands, dict):
+            self.handoff_commands = {
+                str(k): str(v) for k, v in commands.items()
+                if k in TARGET_KEYS and isinstance(v, str) and v.strip()
+            }
         return self
 
     def save(self) -> None:
@@ -182,6 +235,9 @@ class Config:
                     "popout_on_start": self.popout_on_start,
                     "theme": self.theme,
                     "calm_mode": self.calm_mode,
+                    "handoff_root": str(self.handoff_root),
+                    "handoff_target": self.handoff_target,
+                    "handoff_commands": dict(self.handoff_commands),
                 },
             )
         except OSError as exc:
@@ -201,6 +257,45 @@ def _int_or(value, fallback: int, low: int, high: int) -> int:
         return fallback
 
 
+try:  # POSIX
+    import fcntl as _fcntl
+except ImportError:  # pragma: no cover - exercised on Windows
+    _fcntl = None
+try:  # Windows
+    import msvcrt as _msvcrt
+except ImportError:  # pragma: no cover - exercised off Windows
+    _msvcrt = None
+
+# Errors that mean "somebody else holds this", as opposed to "this filesystem
+# does not do locking". Anything else is treated as the latter, because
+# refusing to start over an unexpected errno would be the worse failure.
+_BUSY_ERRNOS = frozenset({errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK})
+
+
+def _take_lock(fd: int) -> bool | None:
+    """Try to take an exclusive OS lock: True ours, False taken, None can't.
+
+    ``flock`` is deliberate. POSIX record locks (``fcntl.lockf``) are owned by
+    the *process*, so a second lock inside one process succeeds and the guard
+    quietly stops guarding — including in this app's own tests. ``flock`` is
+    owned by the open file, which is the behaviour wanted here.
+    """
+    if _fcntl is not None:
+        try:
+            _fcntl.flock(fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+            return True
+        except OSError as exc:
+            return False if exc.errno in _BUSY_ERRNOS else None
+    if _msvcrt is not None:  # pragma: no cover - Windows only
+        try:
+            os.lseek(fd, 0, os.SEEK_SET)
+            _msvcrt.locking(fd, _msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError as exc:
+            return False if exc.errno in _BUSY_ERRNOS else None
+    return None  # pragma: no cover - neither module exists
+
+
 class InstanceLock:
     """Guards a session folder against a second running copy.
 
@@ -215,6 +310,15 @@ class InstanceLock:
     def __init__(self, folder: Path):
         self.path = Path(folder) / ".lock"
         self.owned = False
+        # Set when a refusal could not be explained: this filesystem does not
+        # do locking, or the file would not open. The caller needs to know the
+        # difference, because "a copy is running" and "we cannot tell whether
+        # a copy is running" deserve different things said to the person.
+        self.uncertain = False
+        # Held open for as long as this copy runs: the operating system lock
+        # lives on the open file, not on the file's existence, so letting the
+        # handle close would hand the lock straight back.
+        self._fd: int | None = None
 
     def _stamp(self) -> dict:
         return {
@@ -223,27 +327,76 @@ class InstanceLock:
             "started": now_stamp(),
         }
 
+    def _write_stamp(self, fd: int) -> None:
+        try:
+            os.lseek(fd, 0, os.SEEK_SET)
+            os.truncate(fd, 0)
+            os.write(fd, json.dumps(self._stamp()).encode("utf-8"))
+        except OSError:
+            pass
+
     def acquire(self) -> bool:
-        """Take the lock. False when another copy seems to hold it."""
+        """Take the lock. False only when another copy is genuinely running.
+
+        A lock file left behind by a crash used to be indistinguishable from a
+        copy that is running right now, so the next launch opened with a
+        question — at exactly the moment the app promises to take a thought
+        off your hands. Worse, it was a question nobody can answer: you cannot
+        know whether the process that wrote a pid two days ago is alive.
+
+        So the file's existence no longer decides anything. Ownership is an
+        operating-system lock held on the open handle, which the kernel drops
+        when the holding process dies, however it dies. A running second copy
+        is still refused; a crashed one leaves nothing to ask about.
+        """
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_RDWR)
         except FileExistsError:
-            return False
+            return self._claim_existing()
         except OSError:
             # An unwritable folder will fail loudly at the first save; a
             # second refusal here would just be in the way.
             return True
+        # Nobody had the file at all. Take the OS lock if this platform offers
+        # one, but do not refuse to start if it does not.
+        _take_lock(fd)
+        self._fd = fd
+        self._write_stamp(fd)
+        self.owned = True
+        return True
+
+    def _claim_existing(self) -> bool:
+        """The file is already there. Is anyone actually behind it?"""
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                json.dump(self._stamp(), fh)
+            fd = os.open(self.path, os.O_RDWR)
         except OSError:
-            pass
+            self.uncertain = True  # cannot even look; say so rather than guess
+            return False
+        held = _take_lock(fd)
+        if held is not True:
+            # False means a live copy is holding the lock right now, which we
+            # can state as fact. None means this filesystem does not do
+            # locking — network and synced folders often do not — and then a
+            # leftover file from a crash is still a real possibility. Both
+            # refuse; only one of them is certain.
+            self.uncertain = held is None
+            os.close(fd)
+            return False
+        # The lock was free, so whoever wrote this file is gone. Claiming it
+        # silently is the whole point: there is no question worth asking.
+        self._fd = fd
+        self._write_stamp(fd)
         self.owned = True
         return True
 
     def takeover(self) -> None:
-        """The user says the other copy is gone: claim the lock anyway."""
+        """The user says the other copy is gone: claim the lock anyway.
+
+        Only reachable now when the OS lock could not answer the question —
+        a genuinely running copy, or a filesystem that cannot lock. The
+        override stays because the second case is real.
+        """
         try:
             self.path.write_text(json.dumps(self._stamp()), encoding="utf-8")
         except OSError:
@@ -268,7 +421,18 @@ class InstanceLock:
             self.path.unlink()
         except OSError:
             pass
+        self._close()
         self.owned = False
+
+    def _close(self) -> None:
+        """Drop the handle, and with it the OS lock."""
+        if self._fd is None:
+            return
+        try:
+            os.close(self._fd)
+        except OSError:
+            pass
+        self._fd = None
 
 
 class NotASessionError(StorageError):
@@ -563,6 +727,23 @@ class MatrixStore:
         self._write(task)
         return task
 
+    def set_handoff(self, task: MatrixTask, handed_to: str, handed_off_on: str,
+                    follow_up_on: str) -> MatrixTask:
+        """Record who has it, since when, and when it comes back.
+
+        Passing three empty strings takes it back — which is the whole point
+        of storing it here rather than in the brief file: the file is what the
+        agent reads, this is what stops the task disappearing.
+        """
+        task.handed_to = handed_to.strip()
+        task.handed_off_on = handed_off_on.strip()
+        task.follow_up_on = follow_up_on.strip()
+        task.updated_at = now_stamp()
+        if task.path is None:
+            task.path = self._new_path(task.category, task)
+        self._write(task)
+        return task
+
     def move(self, task: MatrixTask, category: str) -> MatrixTask:
         if category == task.category:
             return task
@@ -596,13 +777,26 @@ class MatrixStore:
             self._unlink(Path(task.path))
 
     def add_from_task(self, category: str, task: Task) -> MatrixTask:
-        """Move a main-list task into a quadrant without dropping any fields."""
+        """Move a main-list task into a quadrant.
+
+        Carries each field the two models share. Four do not cross, each for
+        a stated reason kept in ``tests/test_conversions``: the id and
+        ``created_at`` (a move makes a new record) and ``done`` /
+        ``completed_at`` (a quadrant has no finished state).
+
+        The old version of this docstring claimed to drop nothing, and by the
+        time anyone checked it was dropping four. That claim is now a test,
+        keyed on the models' own fields, rather than a sentence.
+        """
         created = MatrixTask(
             title=task.text, content=task.description, category=category,
             first_step=task.first_step, kind=task.kind,
             scheduled_for=task.scheduled_for, tags=list(task.tags),
             priority=task.priority, pinned=task.pinned,
             estimate_minutes=task.estimate_minutes,
+            repeat=task.repeat, snoozed_until=task.snoozed_until,
+            handed_to=task.handed_to, handed_off_on=task.handed_off_on,
+            follow_up_on=task.follow_up_on,
         )
         created.path = self._new_path(category, created)
         self._write(created)

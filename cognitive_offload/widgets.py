@@ -11,11 +11,11 @@ sentence.
 from __future__ import annotations
 
 import tkinter as tk
-from dataclasses import dataclass, field
 from tkinter import ttk
 
 from . import theme
 from .theme import RADIUS_PILL, font, px, rounded_rect, tokens
+from .viewmodels import Badge, Row
 
 
 # Badge texts are a small closed set ("admin", "ready", "#work", dates), so
@@ -35,31 +35,10 @@ def _mix(base: str, other: str, amount: float) -> str:
     return "#" + "".join(f"{round(x + (y - x) * amount):02x}" for x, y in zip(a, b))
 
 
-@dataclass
-class Badge:
-    text: str
-    variant: str = "tag"  # key into Tokens.badges
-
-
-@dataclass
-class Row:
-    """One entry in a :class:`RowList`."""
-
-    id: str
-    title: str
-    subtitle: str = ""
-    badges: list = field(default_factory=list)
-    done: bool = False
-    flagged: bool = False
-    marker: str = ""  # optional leading glyph override
-
-    def as_text(self) -> str:
-        """Flat text of the whole row (used by tests and accessibility)."""
-        parts = [self.title]
-        parts.extend(badge.text for badge in self.badges)
-        if self.subtitle:
-            parts.append(self.subtitle)
-        return "  ".join(parts)
+# Badge and Row now live in viewmodels, which imports no UI toolkit — so
+# the logic that builds rows can run on a platform without tkinter. They
+# are re-exported here because this is where every drawing caller already
+# looks for them.
 
 
 class BadgeStrip(tk.Canvas):
@@ -248,6 +227,21 @@ class RowList(ttk.Frame):
             return
         self._paint_selection()
 
+    def set_empty_text(self, text: str) -> None:
+        """Change what an empty list says, after the widget already exists.
+
+        It used to be fixed at construction, so one sentence had to serve
+        every reason a list can be empty — including the case where the
+        right thing to say is the opposite of "take the win and stop".
+        Repaints only when the list is actually empty; there is nothing to
+        see otherwise.
+        """
+        if text == self._empty_text:
+            return
+        self._empty_text = text
+        if not self._rows:
+            self.render()
+
     def _ensure_row(self, index: int) -> dict:
         """Return the pooled widgets for a row, building them the first time."""
         while len(self._pool) <= index:
@@ -285,6 +279,12 @@ class RowList(ttk.Frame):
             # One shared bindtag instead of nine bindings per widget: at 300
             # rows that was ~14k bind calls per refresh.
             widget.bindtags((self._row_tag,) + widget.bindtags())
+        # Pooled rows are built lazily, so one created after the last
+        # <Configure> would otherwise keep the un-wrapped default.
+        wrap = getattr(self, "_wrap_at", None)
+        if wrap:
+            title.configure(wraplength=wrap)
+            subtitle.configure(wraplength=wrap)
         return {"frame": frame, "mark": mark, "title": title, "badges": badges,
                 "subtitle": subtitle, "separator": separator, "cells": cells,
                 "visible": True}
@@ -498,6 +498,34 @@ class RowList(ttk.Frame):
 
     def _on_canvas_configure(self, event) -> None:
         self.canvas.itemconfigure(self._window, width=event.width)
+        self._rewrap(event.width)
+
+    #: room a title has after the marker column, the padding and a little
+    #: slack for a badge strip sitting to its right
+    TEXT_INSET = 2 * ROW_PAD_X + 40
+
+    def _rewrap(self, width: int) -> None:
+        """Let a long task use as many lines as it needs.
+
+        The row frame is clamped to the canvas width, and the labels used to
+        have no wraplength at all — so a 137-character task showed about 78
+        characters and the rest was gone. Not scrolled off, not shortened
+        with an ellipsis: simply absent, ending mid-word, with a vertical
+        scrollbar that cannot reach it.
+
+        That is a poor trade in an app whose capture box says "Anything in
+        your head — it does not have to be tidy": it invites the long
+        untidy thought and then shows two thirds of it. The pop-out window
+        has wrapped its task and step labels all along; this is the same
+        treatment for the surface people actually work in.
+        """
+        room = max(80, width - self.TEXT_INSET)
+        if room == getattr(self, "_wrap_at", None):
+            return
+        self._wrap_at = room
+        for cell in self._pool:
+            cell["title"].configure(wraplength=room)
+            cell["subtitle"].configure(wraplength=room)
 
     def _on_wheel(self, event):
         if getattr(event, "num", None) == 4:
