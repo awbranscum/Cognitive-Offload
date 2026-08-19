@@ -5,6 +5,76 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.46.0 — Moving a task between the tabs no longer loses part of it
+Two docstrings promised totality and neither kept it. `add_from_task` said it
+moved a task *"without dropping any fields"*; `to_task` said it kept *"every
+field"*. Both were true when written, and both were made false by later
+commits on this same branch — the failure this branch keeps finding, this
+time in its own new code.
+
+- **Four fields were being dropped.** Measured on a real round trip:
+  `repeat` (added v3.45.0), the three handoff marks `handed_to` /
+  `handed_off_on` / `follow_up_on` (added v3.44.0), and `snoozed_until`
+  (pre-existing). Both conversions are hand-written lists of assignments and
+  **nothing checked the list against the models**.
+
+- **The worst case was a regression in a feature one release old.** Hand a
+  task to Claude Desktop, press **Send to tasks**, and it left Delegate
+  entirely and arrived in the main list with no waiting state, no badge and
+  no subtitle — while the brief sat on disk and the agent may have been
+  working on it. That is exactly the disappearance the handoff exists to
+  prevent, walked in through a different door, in one click, with no warning.
+  The `repeat` case was the same shape quieter: the row said "every week",
+  and a trip through the matrix took that away with nothing connecting the
+  loss to the action.
+
+- **The fix leads with the test, because the symptom was four fields and the
+  disease was that the next one would go the same way.**
+  `tests/test_conversions.py` is keyed on `dataclasses.fields()` of both
+  models: a field on one side with a home on the other must be carried, or
+  **named in an exemption list with a reason**. Four are named — the id and
+  `created_at` (a move makes a new record) and `done`/`completed_at` (a
+  quadrant has no finished state) — and each exemption has its own test, so
+  the list cannot become a place to hide a bug. It is not silenceable either:
+  adding a genuinely-lost field to the exemption list still fails, because a
+  separate test compares the two models' fields directly.
+
+- **The fixture is guarded too.** A field left at its default compares equal
+  after being dropped entirely, so a fixture built from defaults would pass
+  no matter how broken the conversion was. A test asserts every field of both
+  fixtures is set away from its default, and another checks the round trip
+  **through the disk** — a field carried by the conversion but missing from
+  `to_dict` would pass in memory and still be gone by morning.
+
+- **Both docstrings now state what is actually true**, and a test refuses the
+  unbounded phrasings that caused this, so the claim cannot loosely return.
+
+- **The waiting mark now follows the task**, and both tabs say the same thing
+  from the same code: the badge and the "Waiting on …" line moved into the
+  shared row helpers rather than living only in `matrix_row`.
+
+- **A task that is out with an agent is no longer offered as the next thing
+  to start.** *Found by looking at the running app, not by a failing test:*
+  NEXT UP was showing **"Start this"** over a task that was out with Codex —
+  the app inviting you to duplicate work someone else was already doing. It
+  now gets the same treatment as "Not today": it stays in the list and in
+  every search, and only stops guarding the suggestion slot. On the
+  check-back day it returns to the running, because from then on picking it
+  up again is a real option.
+
+- **A way back that does not depend on which tab you are on.** Carrying the
+  mark onto the main list would otherwise have left a task marked as out with
+  nothing able to clear it. The task editor now offers *"Out with Claude
+  Desktop, checking back Friday — take it back and do it yourself"*, built
+  exactly like the existing exit from "Not today" and visible only while a
+  handoff is actually in effect.
+
+- 630 → 651 tests, Xvfb (`skipped=2`) and headless (`skipped=264`). **Fourteen
+  promises broken on purpose and all fourteen caught**, including reverting
+  each half of the fix to confirm the new tests reproduce the original bug,
+  and an attempt to silence the completeness guard by widening its own
+  exemption list.
+
 ## 3.45.0 — Things that come back round
 The app could not hold a recurring task at all. Every task was one-shot,
 which leaves out bins, meds, bills and standing appointments — precisely the

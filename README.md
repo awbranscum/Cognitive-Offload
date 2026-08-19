@@ -196,10 +196,11 @@ reinstall from python.org).
   use. It writes a brief — title, details, first step, booked date, estimate,
   tags, plus whatever you add — to a file for **Claude Desktop**, **Codex** or
   **OpenClaw**, and puts the command to run it on your clipboard. The task then
-  stays in Delegate wearing a `waiting` badge until you take it back or mark it
-  done, so a handoff cannot quietly become a disappearance. Nothing is sent
-  anywhere: the app writes a file, you start the agent. See
-  [docs/AGENT_HANDOFF.md](docs/AGENT_HANDOFF.md).
+  then wears a `waiting` badge on **both tabs** until you take it back or mark
+  it done, so a handoff cannot quietly become a disappearance — and it stops
+  being offered as the next thing to start, since starting it would duplicate
+  the agent's work. Nothing is sent anywhere: the app writes a file, you start
+  the agent. See [docs/AGENT_HANDOFF.md](docs/AGENT_HANDOFF.md).
 - Send a selection back to the main task list, or copy a whole quadrant.
 - Each quadrant is a folder; each task is a `.task` JSON file, so the data stays
   readable and greppable outside the app.

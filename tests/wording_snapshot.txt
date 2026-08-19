@@ -315,6 +315,7 @@ dialogs.py | text= | __init__ | minutes, at a guess
 dialogs.py | text= | __init__ | was: {}
 dialogs.py | text= | __init__ | {} session{} · {} minutes across the week.
 dialogs.py | text= | __init__ | {} thought{} parked in the scratchpad while you worked — safe there.
+dialogs.py | text= | __init__ | {} — take it back and do it yourself
 dialogs.py | text= | _build_ladder | Edit steps…
 dialogs.py | text= | _build_ladder | Step down towards the task instead of leaping at it. Tick what you've done — skipping them is fine too.
 dialogs.py | text= | _build_ladder | Warm-up ladder
@@ -323,6 +324,7 @@ dialogs.py | text= | _edit_steps | Your own downshift, in your own words. Blank 
 dialogs.py | text= | _refresh |     → {}
 dialogs.py | text= | _refresh | Nothing open in that shape. Try 'Anything', or capture something new — an empty list is allowed.
 dialogs.py | text= | button_row | Cancel
+dialogs.py | waiting= | __init__ | Out with {}
 handoff.py | REPORT_BACK= | <module> | When you are done, reply with what you did, anything you could not do, and anything you need from me. Ask before doing anything that spends money, sends a message to another person, or cannot be undone.
 handoff.py | arg | _lines_common | Rough size: about {} minutes, as guessed by a human who is bad at guessing.
 handoff.py | arg | _lines_common | Start with: {}
@@ -429,8 +431,8 @@ presenter.py | text= | finished_message | {} min, and it's finished. Nice.
 queries.py | ALL_KINDS= | <module> | (any feel)
 queries.py | in-list | split_lines | [ ] 
 rows.py | arg | _shared_badges | booked {}
+rows.py | arg | _shared_badges | check back
 rows.py | arg | _shared_badges | ~{} min
-rows.py | arg | matrix_row | check back
 rows.py | line= | waiting_line | Waiting on {an agent}
 rows.py | returns | _step_or_summary | → {}
 rows.py | returns | focus_caption | Free focus

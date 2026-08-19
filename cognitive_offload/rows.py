@@ -21,6 +21,12 @@ from .viewmodels import Badge, Row
 def _shared_badges(item) -> list[Badge]:
     """Badges every open task shows, main list or matrix alike."""
     badges = []
+    if waiting_line(item):
+        # Leads, because it is the one thing about this row that is not about
+        # you. "check back" rather than "overdue" or "late": the task went out
+        # on purpose and the date arriving is information, not a verdict.
+        badges.append(Badge(
+            "check back" if item.is_due_back() else "waiting", "booked"))
     if item.kind:
         badges.append(Badge(kind_label(item.kind).split(" ")[0].lower(), item.kind))
     if item.is_ready:
@@ -61,6 +67,16 @@ def _step_or_summary(first_step: str, body: str) -> str:
     return body.splitlines()[0][:80] if body else ""
 
 
+def _subtitle(item, body: str) -> str:
+    """What sits under the title, wherever the task is shown.
+
+    The waiting line wins: the first step belongs to whoever has the task
+    now, and showing it would read as something still on your own plate.
+    """
+    return waiting_line(item) or _step_or_summary(
+        getattr(item, "first_step", ""), body)
+
+
 def task_row(task: Task) -> Row:
     """A task as a list row: title, first step underneath, badges alongside."""
     badges = []
@@ -75,7 +91,7 @@ def task_row(task: Task) -> Row:
     if task.done and task.completed_at:
         subtitle = f"done {task.completed_at}"
     else:
-        subtitle = _step_or_summary(task.first_step, task.description)
+        subtitle = _subtitle(task, task.description)
 
     return Row(id=task.id, title=task.text, subtitle=subtitle, badges=badges,
                done=task.done, flagged=bool(task.priority))
@@ -103,21 +119,9 @@ def waiting_line(task, on: str | None = None) -> str:
 
 
 def matrix_row(task) -> Row:
-    badges = _shared_badges(task)
-    waiting = waiting_line(task)
-    if waiting:
-        # "check back" rather than "overdue" or "late": the task went out on
-        # purpose and the date arriving is information, not a verdict. It
-        # leads the badges because it is the one thing about this row that
-        # is not about you.
-        badges.insert(0, Badge(
-            "check back" if task.is_due_back() else "waiting", "booked"))
-    # The waiting line wins the subtitle. The first step belongs to whoever
-    # has the task now, and showing it here would read as something still
-    # sitting on your own plate.
-    subtitle = waiting or _step_or_summary(task.first_step, task.content)
-    return Row(id=task.id, title=task.title, subtitle=subtitle, badges=badges,
-               marker="·")
+    return Row(id=task.id, title=task.title,
+               subtitle=_subtitle(task, task.content),
+               badges=_shared_badges(task), marker="·")
 
 
 def focus_caption(task: Task | None, first_step: str) -> str:

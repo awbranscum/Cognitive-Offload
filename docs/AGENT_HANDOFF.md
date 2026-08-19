@@ -21,11 +21,25 @@ Select a task in **Delegate** and press **Hand off to an agent**. The app:
 
 That third step is the point. Handing a task to something and then forgetting
 it is not delegating; it is losing it somewhere more respectable. The task
-stays in Delegate, wearing a `waiting` badge, until you mark it done or press
-**Take it back**. When the check-back day arrives the badge changes to
-`check back` — a fact, not a telling-off.
+keeps its `waiting` badge until you mark it done or take it back, and when the
+check-back day arrives the badge changes to `check back` — a fact, not a
+telling-off.
 
-Both actions are undoable with Ctrl+Z, like every other matrix command.
+**The mark follows the task.** Send it to the main list and it arrives still
+saying who has it; that used to be a one-click way to lose the handoff
+entirely. Both tabs show the same line and the same badge, from the same code.
+
+**A task that is out is not offered as the next thing to start.** It stays in
+the list and in every search — hiding it is the one thing this app will not do
+— but it stops guarding the NEXT UP slot and "Where do I start?", exactly the
+way "Not today" does, because starting it would mean duplicating work someone
+else is already doing. On the check-back day it comes back into the running,
+since from then on picking it up again is a real option.
+
+**Two ways back.** In Delegate, **Take it back**. Anywhere else, the task
+editor offers *"Out with Claude Desktop, checking back Friday — take it back
+and do it yourself"*, visible only while a handoff is actually in effect. Both
+are undoable with Ctrl+Z, like every other command.
 
 ## What it does not do
 

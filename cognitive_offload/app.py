@@ -646,6 +646,8 @@ class CognitiveOffloadApp(tk.Tk):
             estimate_minutes=task.estimate_minutes,
             repeat=task.repeat,
             snoozed_until=task.snoozed_until,
+            handed_to=task.handed_to,
+            follow_up_on=task.follow_up_on,
             window_title="Edit task",
             with_tags=True,
         ).show()
@@ -662,6 +664,8 @@ class CognitiveOffloadApp(tk.Tk):
         task.repeat = result.get("repeat", task.repeat)
         if result.get("clear_snooze"):
             task.snoozed_until = ""
+        if result.get("take_back"):
+            task.handed_to = task.handed_off_on = task.follow_up_on = ""
         self.refresh_tasks()
         self.mark_dirty()
         self.set_status("Task updated.")

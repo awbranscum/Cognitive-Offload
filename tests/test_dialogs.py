@@ -199,6 +199,34 @@ class DialogCollectTests(unittest.TestCase):
         self.assertFalse(dialog.collect()["clear_snooze"])
         dialog.destroy()
 
+    def test_the_editor_offers_a_way_out_of_a_handoff_only_while_one_is_on(self):
+        """Built like the snooze exit above it: carrying the waiting mark onto
+        the main list without this would leave a task marked as out with
+        nothing able to clear it."""
+        from cognitive_offload.dialogs import TaskEditorDialog
+
+        plain = TaskEditorDialog(self.root, title="t")
+        self.assertIsNone(plain.unwait_var)
+        self.assertFalse(plain.collect()["take_back"])
+        plain.destroy()
+
+        out = TaskEditorDialog(self.root, title="t", handed_to="Codex",
+                               follow_up_on="2099-01-01")
+        self.assertIsNotNone(out.unwait_var)
+        self.assertFalse(out.collect()["take_back"])   # untouched = leave it
+        out.unwait_var.set(True)
+        self.assertTrue(out.collect()["take_back"])
+        # Checkbuttons, not Labels: _labels() would look straight past the
+        # only widget this test is about.
+        texts = " ".join(
+            str(w.cget("text")) for w in _descendants(out)
+            if "text" in (w.keys() if hasattr(w, "keys") else ())
+        )
+        self.assertIn("Codex", texts)
+        for scold in ("fail", "gave up", "should have", "never"):
+            self.assertNotIn(scold, texts.lower())
+        out.destroy()
+
     # -- the week in evidence ------------------------------------------
     def test_the_week_review_lists_days_titles_and_totals(self):
         from cognitive_offload.dialogs import WeekReviewDialog

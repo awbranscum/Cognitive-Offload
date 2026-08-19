@@ -151,6 +151,8 @@ class TaskEditorDialog(ModalDialog):
         estimate_minutes: int = 0,
         repeat: str = "",
         snoozed_until: str = "",
+        handed_to: str = "",
+        follow_up_on: str = "",
         window_title: str = "Task",
         with_tags: bool = False,
     ):
@@ -224,6 +226,22 @@ class TaskEditorDialog(ModalDialog):
                 variable=self.unsnooze_var,
             ).pack(anchor="w", pady=(0, 10))
 
+        # The exit from a handoff, built exactly like the one from "Not
+        # today" above it: visible only while a handoff is actually in
+        # effect. Carrying the waiting mark onto the main list without this
+        # would have left a task marked as out with nothing able to clear it.
+        self.unwait_var = None
+        if handed_to:
+            self.unwait_var = tk.BooleanVar(value=False)
+            waiting = f"Out with {handed_to}"
+            if follow_up_on:
+                waiting += f", checking back {humanize_date(follow_up_on)}"
+            ttk.Checkbutton(
+                self.body,
+                text=f"{waiting} — take it back and do it yourself",
+                variable=self.unwait_var,
+            ).pack(anchor="w", pady=(0, 10))
+
         ttk.Label(self.body, text="Details").pack(anchor="w")
         self.content_text = tk.Text(self.body, height=8, wrap="word", undo=True)
         style_text(self.content_text)
@@ -274,6 +292,7 @@ class TaskEditorDialog(ModalDialog):
             "estimate_minutes": estimate,
             "repeat": REPEAT_KEY_BY_LABEL.get(self.repeat_var.get(), ""),
             "clear_snooze": bool(self.unsnooze_var and self.unsnooze_var.get()),
+            "take_back": bool(self.unwait_var and self.unwait_var.get()),
         }
         if self.tags_entry is not None:
             tags = [t.strip().lower() for t in self.tags_entry.get().split(",")]

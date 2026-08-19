@@ -763,13 +763,26 @@ class MatrixStore:
             self._unlink(Path(task.path))
 
     def add_from_task(self, category: str, task: Task) -> MatrixTask:
-        """Move a main-list task into a quadrant without dropping any fields."""
+        """Move a main-list task into a quadrant.
+
+        Carries each field the two models share. Four do not cross, each for
+        a stated reason kept in ``tests/test_conversions``: the id and
+        ``created_at`` (a move makes a new record) and ``done`` /
+        ``completed_at`` (a quadrant has no finished state).
+
+        The old version of this docstring claimed to drop nothing, and by the
+        time anyone checked it was dropping four. That claim is now a test,
+        keyed on the models' own fields, rather than a sentence.
+        """
         created = MatrixTask(
             title=task.text, content=task.description, category=category,
             first_step=task.first_step, kind=task.kind,
             scheduled_for=task.scheduled_for, tags=list(task.tags),
             priority=task.priority, pinned=task.pinned,
             estimate_minutes=task.estimate_minutes,
+            repeat=task.repeat, snoozed_until=task.snoozed_until,
+            handed_to=task.handed_to, handed_off_on=task.handed_off_on,
+            follow_up_on=task.follow_up_on,
         )
         created.path = self._new_path(category, created)
         self._write(created)

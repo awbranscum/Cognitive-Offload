@@ -275,6 +275,25 @@ def next_occurrence(repeat: str, scheduled_for: str = "", on: str | None = None)
     return date(year, month, day).isoformat()
 
 
+def _is_waiting(item) -> bool:
+    """Out with someone (or something) else, and not back yet.
+
+    A free function rather than a method on each model, because both tabs ask
+    it and two copies of a predicate is how the two tabs' answers drift apart
+    — which is the bug this whole area exists to stop.
+    """
+    return bool(getattr(item, "handed_to", "") or getattr(item, "handed_off_on", ""))
+
+
+def _is_due_back(item, on: str | None = None) -> bool:
+    """Inclusive of the past, exactly like ``is_due``: a follow-up you missed
+    still deserves a route back rather than silently expiring."""
+    follow_up = getattr(item, "follow_up_on", "")
+    if not _is_waiting(item) or not follow_up:
+        return False
+    return follow_up <= (on or today_iso())
+
+
 @dataclass
 class Task:
     """A single item on the active stack.
@@ -316,6 +335,13 @@ class Task:
     # holds the evidence that you did it — a task that quietly reset its own
     # date would erase the record, which is the one thing that screen is for.
     repeat: str = ""
+    # Who has it, since when, and when it comes back. These live on both
+    # models: a task handed to an agent and then moved to the main list used
+    # to arrive with no trace of the handoff at all, which is exactly the
+    # disappearance the feature exists to prevent.
+    handed_to: str = ""
+    handed_off_on: str = ""
+    follow_up_on: str = ""
 
     def __post_init__(self) -> None:
         self.text = _as_str(self.text).strip()
@@ -352,6 +378,12 @@ class Task:
     def set_done(self, done: bool) -> None:
         self.done = bool(done)
         self.completed_at = now_stamp() if self.done else None
+
+    def is_waiting(self) -> bool:
+        return _is_waiting(self)
+
+    def is_due_back(self, on: str | None = None) -> bool:
+        return _is_due_back(self, on)
 
     def next_instance(self, on: str | None = None) -> "Task | None":
         """The next round of a repeating task, or ``None`` if it does not.
@@ -420,6 +452,9 @@ class Task:
             "snoozed_until": self.snoozed_until,
             "estimate_minutes": self.estimate_minutes,
             "repeat": self.repeat,
+            "handed_to": self.handed_to,
+            "handed_off_on": self.handed_off_on,
+            "follow_up_on": self.follow_up_on,
         }
 
     @classmethod
@@ -444,6 +479,9 @@ class Task:
             snoozed_until=_as_str(data.get("snoozed_until")),
             estimate_minutes=_as_minutes(data.get("estimate_minutes")),
             repeat=_as_str(data.get("repeat")),
+            handed_to=_as_str(data.get("handed_to")),
+            handed_off_on=_as_str(data.get("handed_off_on")),
+            follow_up_on=_as_str(data.get("follow_up_on")),
         )
 
     def copy(self) -> "Task":
@@ -498,6 +536,11 @@ class MatrixTask:
     handed_to: str = ""
     handed_off_on: str = ""
     follow_up_on: str = ""
+    # Inert in a quadrant — the matrix has no "done" to trigger the next
+    # round, and nothing here reads a snooze — but both are carried so a trip
+    # through the matrix does not quietly strip them off a task.
+    repeat: str = ""
+    snoozed_until: str = ""
     # Absolute path of the backing file; assigned by the store, never stored.
     path: object = None
 
@@ -509,6 +552,7 @@ class MatrixTask:
         self.priority = 1 if self.priority else 0
         self.pinned = _as_bool(self.pinned)
         self.estimate_minutes = _as_minutes(self.estimate_minutes)
+        self.repeat = self.repeat if self.repeat in REPEATS else ""
 
     def to_dict(self) -> dict:
         return {
@@ -528,6 +572,8 @@ class MatrixTask:
             "handed_to": self.handed_to,
             "handed_off_on": self.handed_off_on,
             "follow_up_on": self.follow_up_on,
+            "repeat": self.repeat,
+            "snoozed_until": self.snoozed_until,
         }
 
     @classmethod
@@ -549,6 +595,8 @@ class MatrixTask:
             handed_to=_as_str(data.get("handed_to")),
             handed_off_on=_as_str(data.get("handed_off_on")),
             follow_up_on=_as_str(data.get("follow_up_on")),
+            repeat=_as_str(data.get("repeat")),
+            snoozed_until=_as_str(data.get("snoozed_until")),
         )
 
     def copy(self) -> "MatrixTask":
@@ -573,18 +621,24 @@ class MatrixTask:
         return self.scheduled_for <= (on or today_iso())
 
     def is_waiting(self) -> bool:
-        """Out with someone (or something) else, and not back yet."""
-        return bool(self.handed_to or self.handed_off_on)
+        return _is_waiting(self)
 
     def is_due_back(self, on: str | None = None) -> bool:
-        """Inclusive of the past, exactly like ``is_due``: a follow-up you
-        missed still deserves a route back rather than silently expiring."""
-        if not self.is_waiting() or not self.follow_up_on:
-            return False
-        return self.follow_up_on <= (on or today_iso())
+        return _is_due_back(self, on)
 
     def to_task(self) -> Task:
-        """Convert back into a main-list task, keeping every field."""
+        """Convert back into a main-list task.
+
+        Carries everything the two models share, including the handoff marks
+        — a task out with an agent used to arrive here with no trace of that
+        at all, which is the disappearance the handoff exists to prevent,
+        walked in through a different door.
+
+        Four things deliberately do not cross, and ``tests/test_conversions``
+        holds the list with a reason for each: the id and ``created_at``
+        (a move makes a new record), and ``done``/``completed_at`` (a
+        quadrant has no finished state to come back from).
+        """
         return Task(
             text=self.title,
             description=self.content,
@@ -596,4 +650,9 @@ class MatrixTask:
             priority=self.priority,
             pinned=self.pinned,
             estimate_minutes=self.estimate_minutes,
+            repeat=self.repeat,
+            snoozed_until=self.snoozed_until,
+            handed_to=self.handed_to,
+            handed_off_on=self.handed_off_on,
+            follow_up_on=self.follow_up_on,
         )

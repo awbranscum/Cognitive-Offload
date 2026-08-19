@@ -371,3 +371,67 @@ class SplitLineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WaitingIsNotYoursToStartTests(unittest.TestCase):
+    """A task handed to an agent must not be offered as the next thing to do.
+
+    Found by looking at the running app rather than by a failing assertion:
+    NEXT UP was showing "Start this" over a task that was out with Codex,
+    which is the app inviting you to duplicate work someone else is doing.
+    Same treatment as a snooze — it stays on the list wearing its badge and
+    only stops guarding the suggestion slot.
+    """
+
+    def waiting(self, follow_up="2099-01-01", **kw):
+        from cognitive_offload.models import Task
+
+        fields = dict(text="Chase the claim", first_step="ring them",
+                      handed_to="Codex", handed_off_on="2026-08-19",
+                      follow_up_on=follow_up)
+        fields.update(kw)
+        return Task(**fields)
+
+    def test_a_task_out_with_an_agent_is_not_suggested(self):
+        from cognitive_offload.models import Task
+        from cognitive_offload.queries import rank_for_starting
+
+        out = self.waiting()
+        mine = Task(text="Air the spare room", first_step="open the window")
+        ranked = rank_for_starting([out, mine], on="2026-08-20")
+        self.assertNotIn(out, ranked)
+        self.assertIn(mine, ranked)
+
+    def test_it_comes_back_into_the_running_on_the_check_back_day(self):
+        """Not excused for ever — from the check-back day on, picking it up
+        again is a real option."""
+        from cognitive_offload.queries import rank_for_starting
+
+        out = self.waiting(follow_up="2026-08-22")
+        self.assertNotIn(out, rank_for_starting([out], on="2026-08-21"))
+        self.assertIn(out, rank_for_starting([out], on="2026-08-22"))
+        self.assertIn(out, rank_for_starting([out], on="2026-09-30"))
+
+    def test_a_handoff_with_no_follow_up_date_is_still_excused(self):
+        """Belt and braces: the app always sets one, but a hand-edited file
+        must not turn a waiting task back into a suggestion."""
+        from cognitive_offload.queries import rank_for_starting
+
+        self.assertNotIn(self.waiting(follow_up=""),
+                         rank_for_starting([self.waiting(follow_up="")],
+                                           on="2026-08-20"))
+
+    def test_it_is_only_the_suggestion_slot_and_never_the_list(self):
+        """The task must still be there. Hiding it is the one thing this app
+        may not do."""
+        from cognitive_offload.queries import filter_tasks
+
+        out = self.waiting()
+        self.assertIn(out, filter_tasks([out], show_done=True))
+
+    def test_an_ordinary_task_is_unaffected(self):
+        from cognitive_offload.models import Task
+        from cognitive_offload.queries import rank_for_starting
+
+        plain = Task(text="Air the spare room", first_step="open the window")
+        self.assertIn(plain, rank_for_starting([plain], on="2026-08-20"))

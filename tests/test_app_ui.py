@@ -619,6 +619,90 @@ class AppSmokeTests(unittest.TestCase):
         # The half that stops a handoff becoming a disappearance.
         self.assertTrue(task.follow_up_on > task.handed_off_on)
 
+    def test_a_task_out_with_an_agent_stays_visibly_out_after_send_to_tasks(self):
+        """The bug this pass exists for. Hand a task to an agent, press
+        Send to tasks, and it used to arrive in the main list with no waiting
+        state, no badge and no subtitle — while the brief sat on disk and the
+        agent may have been working on it. That is the disappearance the
+        handoff exists to prevent, walked in through a different door."""
+        self.app.config_store.handoff_root = Path(self._tmp.name) / "handoff"
+        self.app.matrix.create("delegate", "Chase the insurance claim")
+        self.app.refresh_matrix()
+        self.app.matrix_lists["delegate"].selection_set(0)
+        self._hand_off()
+
+        self.app.matrix_lists["delegate"].selection_set(0)
+        self.app.matrix_to_tasks("delegate")
+
+        [task] = self.app.tasks
+        self.assertTrue(task.is_waiting(), "the handoff was forgotten")
+        self.assertEqual(task.handed_to, "Claude Desktop")
+        self.assertTrue(task.follow_up_on)
+        # ...and it must be visible, not merely stored.
+        from cognitive_offload.rows import task_row
+
+        row = task_row(task)
+        self.assertIn("Waiting on Claude Desktop", row.subtitle)
+        self.assertIn("waiting", [b.text for b in row.badges])
+
+    def test_taking_a_handoff_back_from_the_task_editor(self):
+        self.app.config_store.handoff_root = Path(self._tmp.name) / "handoff"
+        self.app.matrix.create("delegate", "Chase the claim")
+        self.app.refresh_matrix()
+        self.app.matrix_lists["delegate"].selection_set(0)
+        self._hand_off()
+        self.app.matrix_lists["delegate"].selection_set(0)
+        self.app.matrix_to_tasks("delegate")
+        self.assertTrue(self.app.tasks[0].is_waiting())
+
+        self.select(0)
+        with mock.patch("cognitive_offload.app.TaskEditorDialog") as editor:
+            editor.return_value.show.return_value = {
+                "title": "Chase the claim", "content": "", "tags": [],
+                "first_step": "", "kind": "", "scheduled_for": "",
+                "estimate_minutes": 0, "repeat": "", "clear_snooze": False,
+                "take_back": True,
+            }
+            self.app.edit_selected_details()
+        self.assertFalse(self.app.tasks[0].is_waiting())
+        # ...and it is a suggestion again, since it is yours now.
+        from cognitive_offload.queries import rank_for_starting
+
+        self.assertIn(self.app.tasks[0], rank_for_starting(self.app.tasks))
+
+    def test_a_repeat_survives_a_trip_through_the_matrix(self):
+        """The row said "every week"; a round trip through the matrix used to
+        take that away with nothing to connect the loss to the action."""
+        self.capture("Take the bins out")
+        self.app.tasks[0].repeat = "weekly"
+        self.app.refresh_tasks()
+        self.select(0)
+        with mock.patch("cognitive_offload.app.QuadrantDialog") as q:
+            q.return_value.show.return_value = "do_first"
+            self.app.send_selected_to_matrix()
+        self.assertEqual(self.app.matrix.list("do_first")[0].repeat, "weekly")
+        self.app.matrix_lists["do_first"].selection_set(0)
+        self.app.matrix_to_tasks("do_first")
+        self.assertEqual(self.app.tasks[0].repeat, "weekly")
+        # ...and it still books the next round when finished.
+        before = len(self.app.tasks)
+        self.select(0)
+        self.app.toggle_selected_done()
+        self.assertEqual(len(self.app.tasks), before + 1)
+
+    def test_a_snooze_survives_a_trip_through_the_matrix(self):
+        """"Not today" is about the task, not about where you filed it."""
+        self.capture("Ring the dentist")
+        self.app.tasks[0].snoozed_until = "2099-01-01"
+        self.app.refresh_tasks()
+        self.select(0)
+        with mock.patch("cognitive_offload.app.QuadrantDialog") as q:
+            q.return_value.show.return_value = "schedule"
+            self.app.send_selected_to_matrix()
+        self.app.matrix_lists["schedule"].selection_set(0)
+        self.app.matrix_to_tasks("schedule")
+        self.assertEqual(self.app.tasks[0].snoozed_until, "2099-01-01")
+
     def test_the_command_reaches_the_clipboard(self):
         root = Path(self._tmp.name) / "handoff"
         self.app.config_store.handoff_root = root
