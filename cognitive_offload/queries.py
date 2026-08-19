@@ -157,8 +157,10 @@ def rank_for_starting(tasks: list[Task], kind: str | None = None, on: str | None
     on = on or today_iso()
     candidates = [t for t in tasks if not t.done]
     # "Not today" means not today: the task stays on the list and in every
-    # search, it just stops guarding the suggestion slot until tomorrow.
-    candidates = [t for t in candidates if not t.snoozed_until or t.snoozed_until <= on]
+    # search, it just stops guarding the suggestion slot until tomorrow. The
+    # predicate itself lives on the model, because the focus card asks the
+    # same question and an inline copy here is how the two answers drift.
+    candidates = [t for t in candidates if not t.is_snoozed(on)]
     # A task that is out with an agent is not yours to start — suggesting it
     # is the app inviting you to duplicate work someone else is already
     # doing. Same treatment as a snooze, and for the same reason: it stays on

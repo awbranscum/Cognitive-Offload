@@ -523,6 +523,17 @@ def resume_line(session_log=None, steps_log: list | None = None,
 
     **It says nothing rather than something empty.** No sessions, or a task
     since deleted or finished, and the caller keeps whatever it had.
+
+    **It stops pointing at a task you have put down.** The two halves are not
+    the same kind of sentence. "Last time: 20 minutes on X" is a *fact*, and
+    snoozing a task does not change what you were doing yesterday. "Next: Y"
+    is an *instruction*, and this app's rules already say that a task marked
+    "not today" or out with someone else stops guarding the slot that names
+    what to start. That slot is *below* this one. Without this, pressing
+    "Not today" on the task you just spent twenty minutes on emptied the
+    suggestion slot and left the focus card naming the step anyway — the
+    repeated forced contact ``snooze_next`` exists to prevent, delivered from
+    a more prominent place than the thing it was protecting.
     """
     sessions = getattr(session_log, "sessions", None) or []
     last = next((s for s in reversed(sessions) if s.task_id), None)
@@ -542,7 +553,7 @@ def resume_line(session_log=None, steps_log: list | None = None,
     finished = (f" — you finished \u201c{short(step['step'])}\u201d"
                 if step else "")
     following = (f"\nNext: {short(task.first_step)}"
-                 if task.first_step else "")
+                 if task.first_step and not task.is_put_down() else "")
     return f"{opening}{finished}.{following}"
 
 

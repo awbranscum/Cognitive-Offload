@@ -1,7 +1,13 @@
 import unittest
 from datetime import date, timedelta
 
-from cognitive_offload.models import MatrixTask, Note, Task, parse_date_input
+from cognitive_offload.models import (
+    MatrixTask,
+    Note,
+    Task,
+    parse_date_input,
+    today_iso,
+)
 
 
 class TaskTests(unittest.TestCase):
@@ -430,3 +436,71 @@ class RepeatTests(unittest.TestCase):
         self.assertIn("every week", badges)
         plain = [b.text for b in task_row(Task(text="once")).badges]
         self.assertNotIn("every week", plain)
+
+
+class PutDownTests(unittest.TestCase):
+    """Snoozed, or out with someone and not back yet: set aside on purpose.
+
+    One predicate, on the model, because three readers now ask it — the
+    ranking that fills the suggestion slot, the focus card above it, and the
+    matrix. Two of those used to hold their own copy of the rule, which is
+    how the card ended up naming a task the list had already agreed to stop
+    naming.
+    """
+
+    #: the two models and the keyword each one calls its title, because the
+    #: whole point of this class is that neither may answer differently.
+    MODELS = ((Task, "text"), (MatrixTask, "title"))
+
+    def _days(self, n):
+        return (date.today() + timedelta(days=n)).isoformat()
+
+    def _each(self):
+        for cls, keyword in self.MODELS:
+            with self.subTest(cls.__name__):
+                yield cls(**{keyword: "Write the quarterly report"})
+
+    def test_a_plain_task_is_not_put_down(self):
+        for task in self._each():
+            self.assertFalse(task.is_snoozed())
+            self.assertFalse(task.is_put_down())
+
+    def test_a_snooze_in_the_future_counts(self):
+        for task in self._each():
+            task.snoozed_until = self._days(1)
+            self.assertTrue(task.is_snoozed())
+            self.assertTrue(task.is_put_down())
+
+    def test_a_snooze_today_has_already_run_out(self):
+        # "Not today" writes tomorrow, so a date of today is spent. Anything
+        # that treated it as live would keep a task set aside a day too long.
+        for task in self._each():
+            task.snoozed_until = today_iso()
+            self.assertFalse(task.is_snoozed())
+
+    def test_the_day_can_be_asked_about_rather_than_assumed(self):
+        for task in self._each():
+            task.snoozed_until = self._days(3)
+            self.assertTrue(task.is_snoozed(on=self._days(2)))
+            self.assertFalse(task.is_snoozed(on=self._days(3)))
+
+    def test_waiting_on_someone_is_being_put_down_too(self):
+        for task in self._each():
+            task.handed_to = "Mum"
+            task.follow_up_on = self._days(4)
+            self.assertFalse(task.is_snoozed())
+            self.assertTrue(task.is_put_down())
+
+    def test_but_only_until_the_check_back_day(self):
+        for task in self._each():
+            task.handed_to = "Mum"
+            task.follow_up_on = self._days(-1)
+            self.assertTrue(task.is_waiting())
+            self.assertFalse(task.is_put_down())
+
+    def test_waiting_with_no_check_back_day_stays_put_down(self):
+        # No date means no day on which it comes back by itself; the way out
+        # is "Take it back", not the calendar.
+        for task in self._each():
+            task.handed_to = "Mum"
+            self.assertTrue(task.is_put_down())

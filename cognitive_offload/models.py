@@ -409,6 +409,29 @@ def _is_waiting(item) -> bool:
     return bool(getattr(item, "handed_to", "") or getattr(item, "handed_off_on", ""))
 
 
+def _is_snoozed(item, on: str | None = None) -> bool:
+    """Put down until a later day — "not today", and still not today.
+
+    The rule lived inline in ``rank_for_starting`` while it had one reader.
+    It has two now, and the second one is the focus card, which sits ABOVE
+    the slot that rule protects: two copies of this predicate would let the
+    most prominent thing on the screen go on naming a task the list itself
+    had agreed to stop naming.
+    """
+    snoozed = getattr(item, "snoozed_until", "")
+    return bool(snoozed) and snoozed > (on or today_iso())
+
+
+def _is_put_down(item, on: str | None = None) -> bool:
+    """True when you have deliberately set this task aside for now.
+
+    Snoozed, or out with someone and not due back. Both mean the same thing
+    to anything that would otherwise tell you to get on with it: **not now**,
+    decided by you, and the app does not get to reopen the question.
+    """
+    return _is_snoozed(item, on) or (_is_waiting(item) and not _is_due_back(item, on))
+
+
 def _is_due_back(item, on: str | None = None) -> bool:
     """Inclusive of the past, exactly like ``is_due``: a follow-up you missed
     still deserves a route back rather than silently expiring."""
@@ -536,6 +559,12 @@ class Task:
 
     def is_waiting(self) -> bool:
         return _is_waiting(self)
+
+    def is_snoozed(self, on: str | None = None) -> bool:
+        return _is_snoozed(self, on)
+
+    def is_put_down(self, on: str | None = None) -> bool:
+        return _is_put_down(self, on)
 
     def is_due_back(self, on: str | None = None) -> bool:
         return _is_due_back(self, on)
@@ -826,6 +855,12 @@ class MatrixTask:
 
     def is_waiting(self) -> bool:
         return _is_waiting(self)
+
+    def is_snoozed(self, on: str | None = None) -> bool:
+        return _is_snoozed(self, on)
+
+    def is_put_down(self, on: str | None = None) -> bool:
+        return _is_put_down(self, on)
 
     def is_due_back(self, on: str | None = None) -> bool:
         return _is_due_back(self, on)

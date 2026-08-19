@@ -5,6 +5,39 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.57.0 — A task you put down stays put down
+The focus card learned to say what you were last doing (3.56.0) and then said
+it about tasks you had deliberately set aside.
+
+- **"Not today" now means not today on the card as well.** The rules already
+  existed and are written down in `rank_for_starting`: a snoozed task *"stays
+  on the list and in every search, it just stops guarding the suggestion
+  slot"*, and a task out with someone else *"is not yours to start —
+  suggesting it is the app inviting you to duplicate work someone else is
+  already doing."* The focus card sits **above** the slot those rules protect
+  and ignored both. Press "Not today" on the task you just spent twenty
+  minutes on and the suggestion slot went quiet while the card went on
+  reading *"Next: copy the headings across"* — for the rest of the day, at
+  every launch. `snooze_next` says why that matters in its own docstring:
+  repeated forced contact with a dreaded task does not build willpower, it
+  builds avoidance of the whole app.
+
+  The two halves of the line are not the same kind of sentence, so only one
+  of them goes. *"Last time: 20 minutes on X"* is a **fact** — snoozing a
+  task does not change what you were doing yesterday, and losing that half
+  would answer "what was I doing?" with silence about the very task you spent
+  the time on. *"Next: Y"* is an **instruction**, and it now waits until the
+  task is a real option again: the morning after a snooze, or the check-back
+  day of a handoff.
+
+- **The rule moved onto the model, where it can only be answered once.**
+  `is_snoozed` and `is_put_down` sit beside `is_waiting` and `is_due_back`
+  on both `Task` and `MatrixTask`, and the ranking now asks the model instead
+  of testing the date inline. Two copies of this predicate is exactly how the
+  card ended up naming a task the list had already agreed to stop naming, and
+  a test asserts directly that the two never disagree — across a plain task, a
+  live snooze, a spent snooze, a handoff and a handoff due back.
+
 ## 3.56.0 — "What was I doing?", answered from the record
 An interruption costs the context, not the intention: you know you were
 working, you have lost *what on*. Every piece of the answer was already being

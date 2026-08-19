@@ -20,6 +20,7 @@ something empty.
 
 import tempfile
 import unittest
+from datetime import date, timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -433,3 +434,148 @@ class AtTheSmallestWindowTests(unittest.TestCase):
         bounded = self._caption_height()
         with mock.patch.object(presenter, "short", lambda text, limit=None: text):
             self.assertGreaterEqual(self._caption_height(), 2 * bounded)
+
+
+class PutDownTests(unittest.TestCase):
+    """A task you set aside stops being pointed at.
+
+    The line has two halves and they are not the same kind of sentence. What
+    you were doing is a fact, and snoozing a task does not change yesterday.
+    What comes next is an instruction, and the app's own rules already say a
+    task marked "not today" or out with someone else stops guarding the slot
+    that names what to start — a slot that sits *below* this one.
+    """
+
+    def setUp(self):
+        self.task = Task(text="Write the quarterly report")
+        self.task.set_current_step("copy the headings across")
+        self.log = FakeLog([a_session(self.task.id)])
+
+    def _line(self):
+        return presenter.resume_line(self.log, [], [self.task])
+
+    def _days(self, n):
+        return (date.today() + timedelta(days=n)).isoformat()
+
+    def test_a_plain_task_still_says_what_comes_next(self):
+        self.assertIn("Next: copy the headings across", self._line())
+
+    def test_a_snoozed_task_is_not_pointed_at(self):
+        self.task.snoozed_until = self._days(1)
+        self.assertNotIn("Next:", self._line())
+
+    def test_but_it_still_says_what_you_did(self):
+        # The half that is a fact survives. Losing it would answer "what was
+        # I doing?" with silence on the very task you spent the time on.
+        self.task.snoozed_until = self._days(1)
+        self.assertEqual(self._line(),
+                         "Last time: 20 minutes on Write the quarterly report.")
+
+    def test_a_snooze_that_has_run_out_points_again(self):
+        self.task.snoozed_until = self._days(-1)
+        self.assertIn("Next: copy the headings across", self._line())
+
+    def test_a_snooze_set_for_today_has_already_run_out(self):
+        # The trap this whole area sets for a test author: "not today" writes
+        # *tomorrow*, so a hand-set date of today is an EXPIRED snooze. A test
+        # that used it would pass against an implementation that ignored the
+        # field entirely.
+        self.task.snoozed_until = presenter.today_iso()
+        self.assertIn("Next: copy the headings across", self._line())
+
+    def test_a_task_out_with_someone_is_not_pointed_at(self):
+        self.task.handed_to = "Mum"
+        self.task.follow_up_on = self._days(4)
+        self.assertNotIn("Next:", self._line())
+
+    def test_a_task_due_back_is_a_real_option_again(self):
+        self.task.handed_to = "Mum"
+        self.task.follow_up_on = self._days(-1)
+        self.assertIn("Next: copy the headings across", self._line())
+
+    def test_the_card_and_the_suggestion_slot_never_disagree(self):
+        """The drift guard, and the reason the predicate moved onto the model.
+
+        Whatever the ranking refuses to suggest, the card refuses to point
+        at. Checked across every way a task can be set aside rather than for
+        one of them, because it was exactly one of them being handled
+        elsewhere that made this a bug.
+        """
+        from cognitive_offload import queries
+
+        cases = {
+            "plain": {},
+            "snoozed": {"snoozed_until": self._days(2)},
+            "snooze run out": {"snoozed_until": self._days(-2)},
+            "waiting": {"handed_to": "Mum", "follow_up_on": self._days(3)},
+            "due back": {"handed_to": "Mum", "follow_up_on": self._days(-3)},
+        }
+        for label, fields in cases.items():
+            with self.subTest(label):
+                task = Task(text="Write the quarterly report")
+                task.set_current_step("copy the headings across")
+                for name, value in fields.items():
+                    setattr(task, name, value)
+                suggested = bool(queries.suggest_tasks([task], limit=1))
+                pointed_at = "Next:" in presenter.resume_line(
+                    FakeLog([a_session(task.id)]), [], [task])
+                self.assertEqual(suggested, pointed_at,
+                                 f"{label}: the slot says {suggested}, "
+                                 f"the card says {pointed_at}")
+
+
+@unittest.skipUnless(_display_available(), "tkinter display not available")
+class PutDownThroughTheRealButtonsTests(unittest.TestCase):
+    """Driven by the buttons rather than by setting the fields.
+
+    "Not today" writes *tomorrow*, and a test that set the date by hand would
+    have to know that. The buttons are also where a future change would break
+    this without touching the presenter at all.
+    """
+
+    def setUp(self):
+        from cognitive_offload.app import CognitiveOffloadApp
+        from cognitive_offload.storage import Config
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name)
+        config = Config(root / "config.json")
+        config.db_path = root / "db"
+        config.matrix_db_path = root / "matrix"
+        self.app = CognitiveOffloadApp(config=config)
+        self.app.withdraw()
+        self.addCleanup(self._destroy)
+        self.app.capture_entry.insert(0, "Write the quarterly report")
+        self.app.add_task_from_capture()
+        self.task = self.app.tasks[0]
+        self.task.set_current_step("copy the headings across")
+        self.app.session_log.sessions.append(
+            a_session(self.task.id, task=self.task.text))
+        self.app.refresh_all()
+
+    def _destroy(self):
+        try:
+            self.app.destroy()
+        except tk.TclError:
+            pass
+
+    def _caption(self):
+        self.app.set_idle_focus_caption()
+        return self.app.focus_task_var.get()
+
+    def test_before_anything_the_card_points_at_the_step(self):
+        self.assertIn("Next: copy the headings across", self._caption())
+
+    def test_not_today_takes_the_pointing_away(self):
+        self.app.snooze_next()
+        caption = self._caption()
+        self.assertNotIn("Next:", caption)
+        self.assertIn("Write the quarterly report", caption)
+
+    def test_undoing_not_today_gives_it_back(self):
+        # "Not today" pushes an undo entry, so the card has to come back with
+        # the task rather than stay quiet until the next restart.
+        self.app.snooze_next()
+        self.app.undo()
+        self.assertIn("Next: copy the headings across", self._caption())
