@@ -65,18 +65,9 @@ def _build_header(app, root: ttk.Frame) -> None:
     app.theme_button.pack(side="right")
     ttk.Checkbutton(right, text="Calm mode", variable=app.calm_var,
                     command=app.apply_calm_mode).pack(side="right", padx=(0, 12))
-    ttk.Button(right, text="Shortcuts", style="SmPageGhost.TButton",
+    ttk.Button(right, text="Shortcuts (F1)", style="SmPageGhost.TButton",
                command=app.show_shortcuts).pack(side="right", padx=(0, 6))
 
-    path_row = ttk.Frame(header)
-    path_row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
-    app.path_label = ttk.Label(path_row, textvariable=app.path_var, style="Link.TLabel",
-                               cursor="hand2")
-    app.path_label.pack(side="left")
-    app.path_label.bind("<Button-1>", lambda _e: app.copy_session_path())
-    ttk.Button(path_row, text="Change folder", style="SmPageGhost.TButton",
-               command=app.change_db_folder).pack(side="left", padx=(8, 0))
-    app.header_extras = path_row
 
 
 def _build_top_row(app, root: ttk.Frame) -> None:
@@ -87,6 +78,32 @@ def _build_top_row(app, root: ttk.Frame) -> None:
 
     _build_capture_card(app, top)
     _build_focus_card(app, top)
+    _build_path_row(app, top)
+
+
+def _build_path_row(app, top: ttk.Frame) -> None:
+    """Where the file lives — below the capture box, not above it.
+
+    This used to be the third thing on the page, between the title and Quick
+    capture: a JSON path and a folder button standing between a person and
+    the box they opened the app to type into. Where the file lives matters
+    once; the capture box matters every time.
+
+    It goes in the dead space under the capture card rather than into the
+    footer, which has 345px spare at the window's floor — until the status
+    line says something long, and then it does not. A row that fits except
+    when the app has something to tell you is the pack-order bug this project
+    has already shipped twice.
+    """
+    path_row = ttk.Frame(top)
+    path_row.grid(row=1, column=0, sticky="w", pady=(10, 0))
+    app.path_label = ttk.Label(path_row, textvariable=app.path_var, style="Link.TLabel",
+                               cursor="hand2")
+    app.path_label.pack(side="left")
+    app.path_label.bind("<Button-1>", lambda _e: app.copy_session_path())
+    ttk.Button(path_row, text="Change folder", style="SmPageGhost.TButton",
+               command=app.change_db_folder).pack(side="left", padx=(8, 0))
+    app.header_extras = path_row
 
 
 def _build_capture_card(app, top: ttk.Frame) -> None:
@@ -348,7 +365,7 @@ def _build_scratchpad_card(app, body: ttk.Frame) -> None:
                command=app.send_scratch_line_to_tasks).pack(side="left", padx=(0, 4))
     ttk.Button(buttons, text="All → tasks", style="SmGhost.TButton",
                command=app.brain_dump_into_tasks).pack(side="left", padx=(0, 4))
-    ttk.Button(buttons, text="Clear", style="SmDestructive.TButton",
+    ttk.Button(buttons, text="Clear pad", style="SmDestructive.TButton",
                command=app.clear_notes).pack(side="left")
 
     app.note_text = tk.Text(inner, wrap="word", height=16, undo=True, maxundo=200)

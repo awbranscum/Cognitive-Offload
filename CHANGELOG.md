@@ -5,6 +5,51 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.59.0 — Less on the first screen
+From a usability audit of the app as a stranger meets it. The core loop was
+already short — open, read one named task, one click, one prefilled dialog,
+working — but the screen around it was denser than the person it is for.
+Counted on a first run: **33 clickable controls, 24 of them live**.
+
+- **The filter row waits until there is something to filter.** A search box,
+  Clear, three dropdowns and "Show done" — six live controls narrowing an
+  empty list, on the screen a new person meets first. Nothing there can do
+  anything until a task exists, and a control that cannot act is still a
+  thing to read and decide about.
+
+  It obeys the rule calm mode already wrote down: **never hide a control that
+  is still filtering the list**. So an active filter keeps the row up even
+  when nothing is left to show — that is exactly when you need to see the
+  filter in order to clear it — and Ctrl+F pins it for the session, because a
+  shortcut whose whole job is to put the cursor in that box must not leave
+  the box hidden.
+
+- **Where the file lives moved below the capture box.** A JSON path and a
+  folder button used to be the third thing on the page, between the title and
+  Quick capture. Where the file lives matters once; the capture box matters
+  every time. It sits in the dead space under the capture card rather than in
+  the footer, which has 345px spare at the window's floor until the status
+  line says something long — and a row that fits except when the app has
+  something to tell you is a bug this project has already shipped twice.
+
+- **Two buttons said "Clear".** One narrowed a list; the other threw away
+  everything you had dumped in the scratchpad. The destructive one is
+  **"Clear pad"** now. The filter row keeps the short label because it cannot
+  afford the width at the window's floor, where "Show done" is already
+  clipped.
+
+- **The help says its key.** Twenty-two keyboard shortcuts, and the app named
+  one of them anywhere in context. The link now reads **"Shortcuts (F1)"** —
+  no new pixels, and the difference between a feature you have and one you
+  use.
+
+Together: **33 controls down to 27 on a first run, 24 live down to 18.**
+
+Not changed, because it is not mine to decide: whether **calm mode should be
+the default**. It takes the four-task screen from 39 controls to 25, which is
+the strongest single lever here — and it changes what every existing user
+sees on next launch.
+
 ## 3.58.0 — Said once, and not about what you set aside
 Two more places where a rule the app already had was not being asked, found
 by following v3.57.0's fix to its other readers.

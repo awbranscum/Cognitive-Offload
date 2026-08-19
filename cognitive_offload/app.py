@@ -134,6 +134,9 @@ class CognitiveOffloadApp(tk.Tk):
         self.counts_var = tk.StringVar(value="")
         self.focus_task_var = tk.StringVar(value=self.IDLE_CAPTION)
         self._next_up_shown = False
+        #: set the first time Ctrl+F is pressed, and never unset — see
+        #: `focus_search`.
+        self._filter_row_requested = False
         self.momentum_var = tk.StringVar(value="")
         self.due_var = tk.StringVar(value="")
         self.today_var = tk.StringVar(value="")
@@ -386,6 +389,7 @@ class CognitiveOffloadApp(tk.Tk):
         self.counts_var.set(view.summary)
         # The row set just changed, so what the actions can act on has too.
         self.sync_action_availability()
+        self.sync_filter_row()
         self.refresh_next_up()
         # An empty ``done_today_text`` is the presenter's decision that today
         # has nothing to say, not a missing value. Hide the whole pill rather
@@ -521,6 +525,44 @@ class CognitiveOffloadApp(tk.Tk):
         self.kind_filter_var.set(ALL_KINDS)
         self.refresh_tasks()
 
+    def any_filter_active(self) -> bool:
+        """Is anything currently narrowing the list?
+
+        Read by the rule below, and deliberately generous: "Show done" being
+        off hides finished tasks, which is narrowing even though nobody thinks
+        of it as a filter.
+        """
+        return bool(self.search_var.get().strip()
+                    or self._active_tag()
+                    or self._active_kind()
+                    or not self.show_done_var.get())
+
+    def sync_filter_row(self) -> None:
+        """The filter row appears when there is something to filter.
+
+        On a first run it was six live controls — a search box, Clear, three
+        dropdowns and "Show done" — narrowing an empty list, on the screen a
+        new person meets first. Nothing there can do anything until a task
+        exists, and a control that cannot act is still a thing to read and
+        decide about.
+
+        It obeys the rule calm mode already wrote down: **never hide a control
+        that is still filtering the list**, because a shorter list with no
+        visible reason why is worse than the clutter. So an active filter
+        keeps the row up even with nothing left to show — that is exactly when
+        you need to see the filter in order to clear it. And Ctrl+F pins it
+        for the session, because a shortcut whose whole job is to put the
+        cursor in that box must not leave the box hidden. Calm mode still
+        wins over all three.
+        """
+        row = getattr(self, "filter_row", None)
+        if row is None or self.calm_var.get():
+            return
+        if self.tasks or self.any_filter_active() or self._filter_row_requested:
+            row.grid()
+        else:
+            row.grid_remove()
+
     def clear_search(self) -> None:
         self.search_var.set("")
         self.refresh_tasks()
@@ -535,6 +577,12 @@ class CognitiveOffloadApp(tk.Tk):
             # Searching needs the search box back; asking for it is consent.
             self.calm_var.set(False)
             self.apply_calm_mode()
+        # And asking for it is also consent to keep it, even with nothing to
+        # search yet: a shortcut that puts the cursor somewhere invisible is
+        # a shortcut that appears not to work. Sticky for the session on
+        # purpose — the alternative is a box that comes and goes under you.
+        self._filter_row_requested = True
+        self.sync_filter_row()
         self.search_entry.focus_set()
         self.search_entry.select_range(0, tk.END)
 

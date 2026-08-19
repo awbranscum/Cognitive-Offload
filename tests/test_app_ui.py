@@ -1243,6 +1243,10 @@ class AppSmokeTests(unittest.TestCase):
         self.assertIn("still here", self.app.task_list.get(0))
 
     def test_calm_mode_hides_the_extras_without_losing_them(self):
+        # With a task on the list, so the filter row has something to filter:
+        # on an empty list it stays down when calm mode lifts, which is its
+        # own rule and not this test's subject.
+        self.capture("something to filter")
         self.app.calm_var.set(True)
         self.app.apply_calm_mode()
         for widget in (self.app.filter_row, self.app.task_toolbar, self.app.search_row):
@@ -3826,6 +3830,103 @@ class AppSmokeTests(unittest.TestCase):
         self.app.note_text.insert("1.0", "typing")
         self.app.update()  # let the <<Modified>> event reach the handler
         self.assertTrue(self.app._dirty)
+
+
+@unittest.skipUnless(_display_available(), "tkinter display not available")
+class FilterRowTests(unittest.TestCase):
+    """The filter row appears when there is something to filter.
+
+    On a first run it was six live controls — a search box, Clear, three
+    dropdowns and "Show done" — narrowing an empty list, on the screen a new
+    person meets first. It obeys the rule calm mode already wrote down:
+    never hide a control that is still filtering the list.
+    """
+
+    def setUp(self):
+        from cognitive_offload.app import CognitiveOffloadApp
+        from cognitive_offload.storage import Config
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name)
+        config = Config(root / "config.json")
+        config.db_path = root / "db"
+        config.matrix_db_path = root / "matrix"
+        self.app = CognitiveOffloadApp(config=config)
+        self.app.withdraw()
+        self.addCleanup(self._destroy)
+
+    def _destroy(self):
+        try:
+            self.app.destroy()
+        except tk.TclError:
+            pass
+
+    def _capture(self, text):
+        self.app.capture_entry.insert(0, text)
+        self.app.add_task_from_capture()
+
+    def _shown(self):
+        return self.app.filter_row.winfo_manager() == "grid"
+
+    def test_an_empty_list_has_nothing_to_filter(self):
+        self.assertFalse(self._shown())
+
+    def test_one_task_is_enough_to_bring_it_back(self):
+        self._capture("book the dentist")
+        self.assertTrue(self._shown())
+
+    def test_it_goes_again_when_the_last_task_goes(self):
+        self._capture("book the dentist")
+        self.app.task_list.selection_set(0)
+        self.app.delete_selected()
+        self.assertFalse(self._shown())
+
+    def test_a_search_that_matches_nothing_keeps_the_row(self):
+        """The trap. Hide the row here and the list is empty with no visible
+        reason why, and no way to undo the reason."""
+        self._capture("book the dentist")
+        self.app.search_var.set("nothing matches this")
+        self.app.refresh_tasks()
+        self.assertEqual(self.app.task_list.size(), 0)
+        self.assertTrue(self._shown())
+
+    def test_a_filter_on_an_emptied_list_keeps_the_row(self):
+        self._capture("book the dentist")
+        self.app.search_var.set("dentist")
+        self.app.refresh_tasks()
+        self.app.task_list.selection_set(0)
+        self.app.delete_selected()
+        self.assertFalse(self.app.tasks)
+        self.assertTrue(self._shown(),
+                        "the search term is still set and must stay visible")
+
+    def test_show_done_being_off_counts_as_filtering(self):
+        # Not thought of as a filter, but it hides finished tasks, which is
+        # narrowing — and it is the one filter you can leave on by accident.
+        self.app.show_done_var.set(False)
+        self.app.refresh_tasks()
+        self.assertTrue(self.app.any_filter_active())
+        self.assertTrue(self._shown())
+
+    def test_ctrl_f_pins_it_even_with_nothing_to_search(self):
+        """A shortcut whose whole job is to put the cursor in that box must
+        not leave the box hidden."""
+        self.assertFalse(self._shown())
+        self.app.focus_search()
+        self.assertTrue(self._shown())
+
+    def test_and_it_stays_pinned(self):
+        self.app.focus_search()
+        self.app.refresh_tasks()
+        self.assertTrue(self._shown())
+
+    def test_calm_mode_still_wins(self):
+        self._capture("book the dentist")
+        self.assertTrue(self._shown())
+        self.app.calm_var.set(True)
+        self.app.apply_calm_mode()
+        self.assertFalse(self._shown())
 
 
 @unittest.skipUnless(_display_available(), "tkinter display not available")
