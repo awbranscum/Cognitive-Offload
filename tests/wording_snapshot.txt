@@ -119,9 +119,7 @@ app.py | messagebox.showinfo | show_today | Today
 app.py | messagebox.showwarning | book_matrix_time | Date not understood
 app.py | messagebox.showwarning | book_matrix_time | Try 'today', 'tomorrow', a weekday, or a date like 2026-08-01.
 app.py | messagebox.showwarning | load_state | Some records were unreadable
-app.py | messagebox.showwarning | load_state | {} task record{} in {} couldn't be read and {were was} left out.\n\nAuto-save is off so the file stays untouched for now. Saving (Ctrl+S) accepts the loss; Export a copy first if you want to look at the original.
 app.py | messagebox.showwarning | load_state_dialog | Some records were unreadable
-app.py | messagebox.showwarning | load_state_dialog | {} task record{} in {} couldn't be read and {were was} left out.\n\nAuto-save is off so the file stays untouched for now. Saving (Ctrl+S) accepts the loss.
 app.py | name= | begin_focus |  on "{}"
 app.py | note= | _bank_session |  (couldn't write the session log — the day strip may forget this one)
 app.py | ok_text= | book_matrix_time | Book
@@ -425,9 +423,16 @@ models.py | returns | humanize_date | {} {%b} {}
 models.py | returns | render | [{}] {}
 presenter.py | BREAK_OVER_CAPTION= | <module> | Break over. One more small block?
 presenter.py | NOTHING_HERE= | <module> | Nothing here. Capture a thought above — or take the win and stop.
+presenter.py | arg | damage_report | Auto-save is off so the file stays untouched for now. Saving (Ctrl+S) accepts the loss; Export a copy first if you want to look at the original.
+presenter.py | arg | damage_report | The {} in {} is not in a shape this app can read, so it was skipped.
+presenter.py | arg | damage_report | task record
+presenter.py | arg | damage_report | {task record} in {} {were was} unreadable and {were was} left out.
 presenter.py | finished= | resume_line |  — you finished “{step}”
 presenter.py | following= | resume_line | \nNext: {}
 presenter.py | footer= | today_view | \n\nPlus {} focus session{s} — {} minutes.
+presenter.py | in-dict | <module> | record of finished steps
+presenter.py | in-dict | <module> | record of finished tasks
+presenter.py | in-dict | <module> | task list
 presenter.py | in-list | <module> | Session finished. The hard part was starting, and you did that.
 presenter.py | in-list | <module> | That's {minutes} minutes on it. Banked.
 presenter.py | in-list | <module> | {minutes} minutes done — that counts, however it went.

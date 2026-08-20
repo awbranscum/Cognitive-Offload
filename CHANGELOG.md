@@ -5,6 +5,48 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.64.0 — A damaged file must not stop the app opening
+Found by writing seven kinds of damage to a real `data.json` and opening a
+real app on each. Six of the seven were handled beautifully. The seventh was
+not handled at all.
+
+- **The app did not open.** If `tasks`, `completed_log` or `steps_log` was a
+  **number or a boolean**, the loader raised `TypeError: 'int' object is not
+  iterable` — past every `StorageError` the recovery path catches, out of the
+  constructor, before there was a window. No quarantine, no "auto-save is
+  off", no message: a traceback, and no way in, with the person's work
+  sitting on disk beside it. `SessionLog.load` had the same hole, and it also
+  runs before the window exists.
+
+  This is the worst shape a bug can take here, and what makes it worth saying
+  plainly is that the recovery machinery it bypassed is *good* — it just was
+  not reached.
+
+- **And the loss count was invented.** A **string** in those fields was
+  walked character by character, so `"tasks": "nope"` was reported as
+  *"4 task records in data.json couldn't be read"*. There were no records.
+  There was one field of the wrong type, four characters long. In an app
+  whose whole promise is telling you the truth about your stuff, a fabricated
+  loss count is its own kind of damage. A dict gave the number of its keys;
+  a string in `completed_log` or `steps_log` was dropped **silently**.
+
+  Both come from one line — `for record in data.get("tasks") or []` — and one
+  helper closes both. **The pattern already existed in this codebase**:
+  `models._as_steps` and `_as_tags` have always checked the shape before
+  iterating. `models.as_records` now says it once for everybody, and the two
+  store loaders use it.
+
+- **Two sentences, because they are two different facts.**
+  `presenter.damage_report` says *"3 task records in data.json were
+  unreadable and were left out"* when records were lost, and *"The task list
+  in data.json is not in a shape this app can read, so it was skipped"* when
+  a whole field was the wrong type — with no number, because there is no
+  honest number to give. Either way auto-save stays off until an explicit
+  Save, which was already the rule and still is.
+
+  Both messages moved out of the controller and into the presenter on the way,
+  which is where the app's sentences belong.
+
 ## 3.63.0 — A net over Ctrl+Z
 No behaviour change. `tests/test_undo_completeness.py` reads `app.py` and
 requires that every function opening an undo entry either restores the state

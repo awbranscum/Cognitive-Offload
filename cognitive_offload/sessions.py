@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from .models import DATE_FORMAT, now_stamp, today_iso
+from .models import DATE_FORMAT, as_records, now_stamp, today_iso
 from .presenter import momentum_view
 
 # Enough history for the momentum strip and a year of looking back, while
@@ -108,8 +108,12 @@ class SessionLog:
             self._quarantine()
             return self
         records = data.get("sessions") if isinstance(data, dict) else data
+        # `as_records`, not the raw field: `{"sessions": 42}` is not iterable,
+        # and this runs inside the app's constructor — the TypeError went past
+        # every handler and the app did not open at all.
         self.sessions = [
-            FocusSession.from_dict(r) for r in (records or []) if isinstance(r, dict)
+            FocusSession.from_dict(r) for r in as_records(records)
+            if isinstance(r, dict)
         ]
         return self
 

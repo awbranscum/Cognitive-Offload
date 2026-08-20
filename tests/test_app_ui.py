@@ -4286,6 +4286,103 @@ class InstanceGuardTests(unittest.TestCase):
 
 
 @unittest.skipUnless(_display_available(), "tkinter display not available")
+class TheAppOpensOnADamagedFileTests(unittest.TestCase):
+    """The recovery code is good; the question is whether it is reached.
+
+    A `data.json` whose `tasks` is a number raised a TypeError out of the
+    loader, past every StorageError the recovery path catches, and the app
+    did not open at all — a traceback, and no way in, with the person's work
+    sitting on disk beside it.
+    """
+
+    SHAPES = {"a number": 42, "a boolean": True, "a string": "nope",
+              "a dict": {"a": 1, "b": 2}}
+
+    def _open_on(self, payload):
+        import json
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        db = root / "db"
+        db.mkdir(parents=True)
+        (db / "data.json").write_text(json.dumps(payload))
+
+        from cognitive_offload.app import CognitiveOffloadApp
+        from cognitive_offload.storage import Config
+
+        config = Config(root / "config.json")
+        config.db_path = db
+        config.matrix_db_path = root / "matrix"
+        with mock.patch("cognitive_offload.app.messagebox.showwarning"), \
+             mock.patch("cognitive_offload.app.messagebox.showerror"), \
+             mock.patch("cognitive_offload.app.messagebox.showinfo"):
+            app = CognitiveOffloadApp(config=config)
+        app.withdraw()
+        self.addCleanup(lambda: self._destroy(app))
+        return app
+
+    def _destroy(self, app):
+        try:
+            app.destroy()
+        except tk.TclError:
+            pass
+
+    def test_it_opens_whatever_shape_the_task_list_is(self):
+        for label, value in self.SHAPES.items():
+            with self.subTest(label):
+                app = self._open_on({"tasks": value, "scratchpad": "kept"})
+                self.assertEqual(app.tasks, [])
+
+    def test_it_opens_whatever_shape_the_logs_are(self):
+        for field in ("completed_log", "steps_log"):
+            for label, value in self.SHAPES.items():
+                with self.subTest(field=field, shape=label):
+                    app = self._open_on({"tasks": [{"text": "kept"}],
+                                         field: value})
+                    self.assertEqual([t.text for t in app.tasks], ["kept"])
+
+    def test_it_opens_whatever_shape_the_session_log_is(self):
+        """Loaded in the constructor too, and it had the same hole."""
+        import json
+
+        for label, value in self.SHAPES.items():
+            with self.subTest(label):
+                tmp = tempfile.TemporaryDirectory()
+                self.addCleanup(tmp.cleanup)
+                root = Path(tmp.name)
+                db = root / "db"
+                db.mkdir(parents=True)
+                (db / "data.json").write_text(json.dumps({"tasks": []}))
+                config_path = root / "config.json"
+
+                from cognitive_offload.app import CognitiveOffloadApp
+                from cognitive_offload.storage import Config
+
+                config = Config(config_path)
+                config.db_path = db
+                config.matrix_db_path = root / "matrix"
+                config.sessions_file.parent.mkdir(parents=True, exist_ok=True)
+                config.sessions_file.write_text(json.dumps({"sessions": value}))
+                with mock.patch("cognitive_offload.app.messagebox.showwarning"):
+                    app = CognitiveOffloadApp(config=config)
+                app.withdraw()
+                self.addCleanup(lambda a=app: self._destroy(a))
+                self.assertEqual(app.session_log.sessions, [])
+
+    def test_the_rest_of_the_file_survives(self):
+        app = self._open_on({"tasks": "nope", "scratchpad": "a thought",
+                             "timer_minutes": 25})
+        self.assertEqual(app.scratchpad_text().strip(), "a thought")
+
+    def test_and_it_refuses_to_write_over_what_it_did_not_understand(self):
+        app = self._open_on({"tasks": "nope", "scratchpad": "a thought"})
+        self.assertTrue(app._autosave_blocked,
+                        "a file the app could not fully read must not be "
+                        "quietly overwritten by the next autosave")
+
+
+@unittest.skipUnless(_display_available(), "tkinter display not available")
 class CorruptRecoveryTests(unittest.TestCase):
     """Opening the app on an unreadable data.json must never cost data."""
 

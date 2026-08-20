@@ -16,7 +16,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from .models import MatrixTask, Note, Task, now_stamp
+from .models import MatrixTask, Note, Task, as_records, now_stamp
 from .ports import Locations, desktop_locations
 
 STATE_VERSION = 2
@@ -542,7 +542,15 @@ class StateStore:
     def deserialize(data: dict) -> dict:
         tasks: list[Task] = []
         dropped = 0
-        for record in data.get("tasks") or []:
+        # `as_records`, not the raw field: a string would be walked character
+        # by character and reported as that many lost records, and a number
+        # would raise straight past every StorageError the recovery code
+        # catches. `unreadable` names the fields that were the wrong shape
+        # entirely, which is a different sentence from "N records were lost".
+        unreadable = [name for name in ("tasks", "completed_log", "steps_log")
+                      if data.get(name) is not None
+                      and not isinstance(data.get(name), (list, tuple))]
+        for record in as_records(data.get("tasks")):
             try:
                 task = Task.from_dict(record)
             except (ValueError, TypeError):
@@ -556,11 +564,12 @@ class StateStore:
         scratchpad = data.get("scratchpad")
         if not isinstance(scratchpad, str):
             # Pre-2.0 files kept a list of timestamped notes instead.
-            notes = [Note.from_dict(n) for n in data.get("notes") or [] if isinstance(n, dict)]
+            notes = [Note.from_dict(n) for n in as_records(data.get("notes"))
+                     if isinstance(n, dict)]
             scratchpad = "\n".join(n.render() for n in notes)
 
         finished = []
-        for record in data.get("completed_log") or []:
+        for record in as_records(data.get("completed_log")):
             if isinstance(record, dict) and isinstance(record.get("text"), str):
                 finished.append({
                     "text": record["text"],
@@ -568,7 +577,7 @@ class StateStore:
                 })
 
         steps = []
-        for record in data.get("steps_log") or []:
+        for record in as_records(data.get("steps_log")):
             if isinstance(record, dict) and isinstance(record.get("step"), str):
                 steps.append({
                     "step": record["step"],
@@ -589,6 +598,7 @@ class StateStore:
             "completed_log": finished[-COMPLETED_LOG_LIMIT:],
             "steps_log": steps[-STEPS_LOG_LIMIT:],
             "dropped": dropped,
+            "unreadable": unreadable,
         }
 
     @staticmethod

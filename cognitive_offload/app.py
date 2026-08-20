@@ -2314,22 +2314,15 @@ class CognitiveOffloadApp(tk.Tk):
             if data is None:
                 return
         self._autosave_blocked = False
-        dropped = data.get("dropped", 0)
-        if dropped:
+        damage = presenter.damage_report(data.get("dropped", 0),
+                                         data.get("unreadable"),
+                                         self.state_store.path.name)
+        if damage:
             # The amputation must never become permanent silently: autosave
             # stays off until an explicit Save — the user's informed consent
             # to the loss — or a re-load that reads clean.
             self._autosave_blocked = True
-            plural = "s" if dropped != 1 else ""
-            messagebox.showwarning(
-                "Some records were unreadable",
-                f"{dropped} task record{plural} in "
-                f"{self.state_store.path.name} couldn't be read and "
-                f"{'were' if dropped != 1 else 'was'} left out.\n\n"
-                "Auto-save is off so the file stays untouched for now. "
-                "Saving (Ctrl+S) accepts the loss; Export a copy first if "
-                "you want to look at the original.",
-            )
+            messagebox.showwarning("Some records were unreadable", damage)
         self._apply_state(data)
         if not initial:
             self.set_status(f"Loaded {self.state_store.path}")
@@ -2462,19 +2455,14 @@ class CognitiveOffloadApp(tk.Tk):
         # writing it back over the previous session.
         self.state_store.set_path(Path(path))
         self._autosave_blocked = False
-        dropped = data.get("dropped", 0)
-        if dropped:
+        damage = presenter.damage_report(data.get("dropped", 0),
+                                         data.get("unreadable"),
+                                         Path(path).name)
+        if damage:
             # Same consent rule as startup: an opened file with unreadable
             # records must not be lossily rewritten by the next autosave.
             self._autosave_blocked = True
-            plural = "s" if dropped != 1 else ""
-            messagebox.showwarning(
-                "Some records were unreadable",
-                f"{dropped} task record{plural} in {Path(path).name} couldn't "
-                f"be read and {'were' if dropped != 1 else 'was'} left out.\n\n"
-                "Auto-save is off so the file stays untouched for now. "
-                "Saving (Ctrl+S) accepts the loss.",
-            )
+            messagebox.showwarning("Some records were unreadable", damage)
         self._apply_state(data)
         self.set_status(f"Working in {Path(path).name}")
 

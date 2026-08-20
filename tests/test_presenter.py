@@ -572,3 +572,45 @@ class WeekViewTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DamageReportTests(unittest.TestCase):
+    """Two different facts, and only one of them used to get said."""
+
+    def test_nothing_wrong_says_nothing(self):
+        self.assertEqual(presenter.damage_report(0, [], "data.json"), "")
+        self.assertEqual(presenter.damage_report(0, None, "data.json"), "")
+
+    def test_one_bad_record_reads_as_one(self):
+        said = presenter.damage_report(1, [], "data.json")
+        self.assertIn("1 task record in data.json was unreadable", said)
+        self.assertNotIn("records were", said)
+
+    def test_several_bad_records_read_as_several(self):
+        said = presenter.damage_report(3, [], "data.json")
+        self.assertIn("3 task records in data.json were unreadable", said)
+
+    def test_a_wrong_shaped_field_is_named_not_counted(self):
+        said = presenter.damage_report(0, ["tasks"], "data.json")
+        self.assertIn("The task list in data.json is not in a shape", said)
+        # The whole point: no number, because there is no honest number.
+        self.assertNotIn("record", said.split("Auto-save")[0])
+
+    def test_each_field_has_a_name_a_person_would_use(self):
+        for field, name in presenter.FIELD_NAMES.items():
+            with self.subTest(field):
+                said = presenter.damage_report(0, [field], "data.json")
+                self.assertIn(name, said)
+                self.assertNotIn(field, said.replace(name, ""))
+
+    def test_both_kinds_of_damage_are_reported_together(self):
+        said = presenter.damage_report(2, ["steps_log"], "data.json")
+        self.assertIn("record of finished steps", said)
+        self.assertIn("2 task records", said)
+
+    def test_anything_it_says_says_autosave_is_off(self):
+        for dropped, unreadable in ((1, []), (0, ["tasks"]), (2, ["steps_log"])):
+            with self.subTest(dropped=dropped, unreadable=unreadable):
+                said = presenter.damage_report(dropped, unreadable, "data.json")
+                self.assertIn("Auto-save is off", said)
+                self.assertIn("Export a copy first", said)

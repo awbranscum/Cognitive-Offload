@@ -294,6 +294,26 @@ PER_ROUND_FIELDS: dict = {
 }
 
 
+def as_records(value) -> list:
+    """The records in a field that is meant to hold a list of them.
+
+    Anything that is not a list or tuple is **not** a short list — it is an
+    unreadable field, and this returns nothing for it. Two bugs came from
+    iterating the raw value instead. A string was walked character by
+    character, so ``"tasks": "nope"`` was reported to the person as *"4 task
+    records couldn't be read"* — a loss count invented out of a string's
+    length, in an app whose whole promise is telling the truth about their
+    stuff. And a number is not iterable at all, so ``"tasks": 42`` raised a
+    TypeError out of the loader, past every StorageError the recovery code
+    catches, and the app did not open.
+
+    The two model coercions below have always done this. The store loaders
+    did not, which is the whole distance between "your file is damaged, here
+    is what I saved" and a traceback.
+    """
+    return list(value) if isinstance(value, (list, tuple)) else []
+
+
 def _as_steps(value) -> list[str]:
     """Coerce whatever was in the file into a list of non-empty steps."""
     if isinstance(value, str) or not isinstance(value, (list, tuple)):

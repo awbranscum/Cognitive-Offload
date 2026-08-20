@@ -205,3 +205,40 @@ class WhatTheStampMeansTests(unittest.TestCase):
         session = FocusSession.from_dict({"logged_at": "2026-08-20 00:05:00",
                                           "minutes": 15})
         self.assertEqual(session.day, "2026-08-20")
+
+
+class WrongShapedSessionsTests(unittest.TestCase):
+    """`{"sessions": 42}` used to raise out of the app's constructor.
+
+    The session log is loaded before the window exists, so a TypeError there
+    is not a damaged log — it is an app that does not open.
+    """
+
+    SHAPES = {"a number": 42, "a boolean": True, "a string": "nope",
+              "a dict": {"a": 1}, "a bare number at the top": 42}
+
+    def _load(self, payload):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sessions.json"
+            path.write_text(json.dumps(payload))
+            return SessionLog(path).load()
+
+    def test_no_shape_raises(self):
+        for label, value in self.SHAPES.items():
+            with self.subTest(label):
+                log = self._load(value if label.endswith("top")
+                                 else {"sessions": value})
+                self.assertEqual(log.sessions, [])
+
+    def test_a_good_log_still_loads(self):
+        log = self._load({"sessions": [
+            {"logged_at": "2026-08-19 21:30:00", "minutes": 25, "task": "x"}]})
+        self.assertEqual(len(log.sessions), 1)
+        self.assertEqual(log.sessions[0].day, "2026-08-19")
+
+    def test_one_bad_record_among_good_ones_is_skipped(self):
+        log = self._load({"sessions": [
+            {"logged_at": "2026-08-19 21:30:00", "minutes": 25},
+            42,
+            {"logged_at": "2026-08-19 22:00:00", "minutes": 15}]})
+        self.assertEqual([s.minutes for s in log.sessions], [25, 15])

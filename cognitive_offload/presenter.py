@@ -407,6 +407,42 @@ def next_up_view(
     )
 
 
+#: What each store field is called when the app has to name it to a person.
+FIELD_NAMES = {"tasks": "task list",
+               "completed_log": "record of finished tasks",
+               "steps_log": "record of finished steps"}
+
+
+def damage_report(dropped: int, unreadable: list | None, filename: str) -> str:
+    """What to say about a file that loaded, but not all of it.
+
+    Two different sentences, because they are two different facts and only
+    one of them used to get said. ``dropped`` counts records that were there
+    and could not be read. ``unreadable`` names fields that were not lists at
+    all — a whole section of the file in the wrong shape, where there is no
+    honest number to give. Reporting the second as the first is how
+    ``"tasks": "nope"`` became "4 task records couldn't be read": a loss
+    count taken from the length of a four-letter string.
+
+    Returns "" when there is nothing to report, which is the caller's cue to
+    say nothing at all.
+    """
+    lines = []
+    for name in unreadable or []:
+        lines.append(f"The {FIELD_NAMES.get(name, name)} in {filename} is not "
+                     f"in a shape this app can read, so it was skipped.")
+    if dropped:
+        lines.append(f"{plural(dropped, 'task record')} in {filename} "
+                     f"{'were' if dropped != 1 else 'was'} unreadable and "
+                     f"{'were' if dropped != 1 else 'was'} left out.")
+    if not lines:
+        return ""
+    lines.append("Auto-save is off so the file stays untouched for now. "
+                 "Saving (Ctrl+S) accepts the loss; Export a copy first if "
+                 "you want to look at the original.")
+    return "\n\n".join(lines)
+
+
 def due_view(tasks: list, scheduled: list | None = None,
              on: str | None = None) -> DueView:
     """Today's bookings, counted once.

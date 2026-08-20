@@ -833,3 +833,79 @@ class FirstRunTests(unittest.TestCase):
         loaded = self.config().load()
         self.assertFalse(loaded.first_run)
         self.assertFalse(loaded.calm_mode)
+
+
+class WrongShapedFieldTests(TempDirTest):
+    """A field that is not a list is an unreadable field, not a short one.
+
+    Two bugs lived in `for record in data.get("tasks") or []`. A string was
+    walked character by character, so `"tasks": "nope"` was reported to the
+    person as "4 task records couldn't be read" — a loss count invented from
+    a four-letter string, in an app whose whole promise is telling the truth
+    about their stuff. And a number is not iterable at all, so `"tasks": 42`
+    raised a TypeError past every StorageError the recovery code catches and
+    **the app did not open**.
+    """
+
+    GOOD = {"tasks": [{"text": "Ring the insurance company"}],
+            "scratchpad": "a thought I did not want to lose",
+            "timer_minutes": 15}
+
+    FIELDS = ("tasks", "completed_log", "steps_log")
+    SHAPES = {"a string": "nope", "a dict": {"a": 1, "b": 2, "c": 3},
+              "a number": 42, "a boolean": True}
+
+    def _load(self, field, value):
+        data = dict(self.GOOD)
+        data[field] = value
+        return StateStore.deserialize(data)
+
+    def test_no_shape_raises(self):
+        """The one that stopped the app opening."""
+        for field in self.FIELDS:
+            for label, value in self.SHAPES.items():
+                with self.subTest(field=field, shape=label):
+                    self._load(field, value)  # must not raise
+
+    def test_a_wrong_shaped_field_yields_no_records(self):
+        for field in self.FIELDS:
+            for label, value in self.SHAPES.items():
+                with self.subTest(field=field, shape=label):
+                    out = self._load(field, value)
+                    self.assertEqual(out[field] if field != "tasks"
+                                     else out["tasks"], [])
+
+    def test_no_loss_count_is_invented(self):
+        """`dropped` counts records that existed and could not be read. A
+        field of the wrong type contains no records at all."""
+        for field in self.FIELDS:
+            for label, value in self.SHAPES.items():
+                with self.subTest(field=field, shape=label):
+                    self.assertEqual(self._load(field, value)["dropped"], 0)
+
+    def test_the_wrong_shaped_field_is_named_instead(self):
+        for field in self.FIELDS:
+            for label, value in self.SHAPES.items():
+                with self.subTest(field=field, shape=label):
+                    self.assertEqual(self._load(field, value)["unreadable"],
+                                     [field])
+
+    def test_a_missing_field_is_not_damage(self):
+        data = {"scratchpad": "x"}
+        out = StateStore.deserialize(data)
+        self.assertEqual(out["unreadable"], [])
+        self.assertEqual(out["dropped"], 0)
+
+    def test_a_real_bad_record_is_still_counted(self):
+        """The other half must keep working: a list holding one unreadable
+        record is a genuine loss with a genuine number."""
+        out = StateStore.deserialize(
+            {**self.GOOD, "tasks": [{"text": "kept"}, 42, {"text": "also kept"}]})
+        self.assertEqual(out["dropped"], 1)
+        self.assertEqual(out["unreadable"], [])
+        self.assertEqual([t.text for t in out["tasks"]], ["kept", "also kept"])
+
+    def test_the_rest_of_the_file_still_survives(self):
+        out = self._load("tasks", "nope")
+        self.assertEqual(out["scratchpad"], "a thought I did not want to lose")
+        self.assertEqual(out["timer_minutes"], 15)
