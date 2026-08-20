@@ -5,6 +5,56 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.60.0 — The other tab
+The Eisenhower tab had been the less-audited half of the app for a long time.
+Looked at the way a stranger meets it, two things were wrong, and one of them
+breaks the rule the whole app is built on.
+
+- **Shortcuts changed the tab you could not see.** `bind_all` means every
+  shortcut fires whichever tab is in front. With the matrix up and a
+  selection left behind on the task list, **Ctrl+P changed a hidden task's
+  priority, Ctrl+Up pinned one, Ctrl+D and Ctrl+T and Ctrl+M opened dialogs
+  about one, and Ctrl+B emptied a scratchpad you could not see into tasks you
+  could not see.** This app's one inviolable rule is that it never changes
+  something you are not looking at, and muscle memory built on the main tab
+  is exactly what carries a keystroke to the other one.
+
+  The fix was already in the file: `focus_capture` and `focus_search` select
+  the tasks tab before doing anything. That is now a column in the bindings
+  table rather than two functions' private habit — every shortcut states
+  whether it shows the tab it acts on, and a test reads the table with `ast`
+  so a shortcut added next year has to answer the question.
+
+  **Ctrl+Z deliberately does not.** Undo also reverses matrix changes, and
+  yanking someone to the other tab to undo what they did on this one is the
+  same crime facing the other way. It names what it undid instead.
+
+- **The quadrant greyed nothing.** The main tab has disabled its
+  selection-dependent controls since the first-run audit, and the reason is
+  written down there: an inert control is still a small decision, and the
+  only way to learn a button was not for you was to press it and be told
+  "Select a task to…". This tab answered exactly that way for four of its
+  buttons, out of eleven live controls.
+
+  Three questions rather than one. Most need a selection. **Copy all to
+  tasks** needs the quadrant to have anything in it. And **Take it back**
+  needs the selected task to actually be *out* with someone — offering it on
+  a task nobody has is offering to undo something that never happened.
+
+  What each button needs is stated beside the button, not in a list of label
+  strings somewhere else: a list of names keyed on other names is the disease
+  this codebase keeps curing, and renaming a button would have quietly
+  dropped it out of the greying.
+
+- **The matrix folder path moved under the quadrants**, the same demotion the
+  tasks tab got in 3.59.0.
+
+Also fixed: a test that failed on exactly one day of the year. A fixture
+pinned `snoozed_until` to a date near the day it was written, and when the
+clock reached it, the handoff brief's own "handed over on <today>" line
+contained the same string — so a test asserting the snooze never leaks into a
+brief failed, correctly, about the wrong thing. The date is far-future now.
+
 ## 3.59.0 — Less on the first screen
 From a usability audit of the app as a stranger meets it. The core loop was
 already short — open, read one named task, one click, one prefilled dialog,

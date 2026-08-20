@@ -3930,6 +3930,253 @@ class FilterRowTests(unittest.TestCase):
 
 
 @unittest.skipUnless(_display_available(), "tkinter display not available")
+class MatrixActionAvailabilityTests(unittest.TestCase):
+    """The quadrant's buttons grey when they cannot act, like the other tab's.
+
+    The main tab has done this since the first-run audit, and
+    `sync_action_availability` writes down why: an inert control is still a
+    small decision, and the only way to learn a button was not for you was to
+    press it and be told "Select a task to…". This tab answered exactly that
+    way for four of its buttons.
+    """
+
+    def setUp(self):
+        from cognitive_offload.app import CognitiveOffloadApp
+        from cognitive_offload.storage import Config
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name)
+        config = Config(root / "config.json")
+        config.db_path = root / "db"
+        config.matrix_db_path = root / "matrix"
+        self.app = CognitiveOffloadApp(config=config)
+        self.app.withdraw()
+        self.addCleanup(self._destroy)
+
+    def _destroy(self):
+        try:
+            self.app.destroy()
+        except tk.TclError:
+            pass
+
+    def _live(self, group, key="do_first"):
+        return {b.cget("text") for b in getattr(self.app, group).get(key, ())
+                if "disabled" not in b.state()}
+
+    def _all(self, group, key="do_first"):
+        return {b.cget("text") for b in getattr(self.app, group).get(key, ())}
+
+    def _select(self, key="do_first", index=0):
+        self.app.matrix_lists[key].selection_set(index)
+        self.app.sync_matrix_action_availability(key)
+
+    def test_an_empty_quadrant_offers_nothing_that_cannot_act(self):
+        self.assertEqual(self._live("matrix_needs_selection"), set())
+        self.assertEqual(self._live("matrix_needs_rows"), set())
+
+    def test_the_buttons_this_is_about_actually_exist(self):
+        # Without this the test above passes just as well when the buttons
+        # have been renamed and the lists are empty.
+        self.assertEqual(
+            self._all("matrix_needs_selection"),
+            {"Book a time", "Focus on this", "Edit", "Move to…",
+             "Send to tasks", "Delete"})
+        self.assertEqual(self._all("matrix_needs_rows"), {"Copy all to tasks"})
+
+    def test_copy_all_needs_the_quadrant_to_have_something_in_it(self):
+        self.app.matrix.create("do_first", "Ring the insurance company")
+        self.app.refresh_matrix()
+        self.assertEqual(self._live("matrix_needs_rows"), {"Copy all to tasks"})
+        self.assertEqual(self._live("matrix_needs_selection"), set(),
+                         "a task existing is not a task being selected")
+
+    def test_selecting_one_turns_the_rest_on(self):
+        self.app.matrix.create("do_first", "Ring the insurance company")
+        self.app.refresh_matrix()
+        self._select()
+        self.assertEqual(self._live("matrix_needs_selection"),
+                         self._all("matrix_needs_selection"))
+
+    def test_and_letting_go_turns_them_off_again(self):
+        self.app.matrix.create("do_first", "Ring the insurance company")
+        self.app.refresh_matrix()
+        self._select()
+        self.app.matrix_lists["do_first"].selection_clear(0, tk.END)
+        self.app.sync_matrix_action_availability("do_first")
+        self.assertEqual(self._live("matrix_needs_selection"), set())
+
+    def test_a_refresh_keeps_a_selection_that_is_still_there(self):
+        """Measured rather than assumed: `set_rows` restores the selection by
+        row id, so a refresh does not silently drop what you had chosen — and
+        the buttons must not go dark under a task that is still selected."""
+        self.app.matrix.create("do_first", "Ring the insurance company")
+        self.app.refresh_matrix()
+        self._select()
+        self.app.refresh_matrix()
+        self.assertTrue(self.app.matrix_lists["do_first"].curselection())
+        self.assertEqual(self._live("matrix_needs_selection"),
+                         self._all("matrix_needs_selection"))
+
+    def test_but_deleting_the_selected_task_turns_them_off(self):
+        """The case the refresh hook is actually for: the selection cannot
+        survive a task that no longer exists, and `set_rows` does not fire
+        on_select, so nothing else would re-ask."""
+        self.app.matrix.create("do_first", "Ring the insurance company")
+        self.app.refresh_matrix()
+        self._select()
+        with mock.patch("cognitive_offload.app.messagebox.askyesno",
+                        return_value=True):
+            self.app.delete_matrix_tasks("do_first")
+        self.assertEqual(self._live("matrix_needs_selection"), set())
+        self.assertEqual(self._live("matrix_needs_rows"), set(),
+                         "an emptied quadrant has nothing to copy either")
+
+    def test_take_it_back_waits_for_something_to_take_back(self):
+        self.app.matrix.create("delegate", "Chase the plumber")
+        self.app.refresh_matrix()
+        self._select("delegate")
+        self.assertEqual(self._all("matrix_needs_waiting", "delegate"),
+                         {"Take it back"})
+        self.assertEqual(self._live("matrix_needs_waiting", "delegate"), set(),
+                         "nothing has been handed to anyone yet")
+
+        task = self.app._matrix_cache["delegate"][0]
+        self.app.matrix.set_handoff(task, "Mum", "2026-08-19", "2026-08-23")
+        self.app.refresh_matrix()
+        self._select("delegate")
+        self.assertEqual(self._live("matrix_needs_waiting", "delegate"),
+                         {"Take it back"})
+
+    def test_every_quadrant_is_wired_the_same(self):
+        from cognitive_offload.storage import CATEGORY_KEYS
+
+        for key in CATEGORY_KEYS:
+            with self.subTest(key):
+                self.assertTrue(self.app.matrix_needs_selection.get(key),
+                                "a quadrant with no greyable buttons is a "
+                                "quadrant this rule forgot")
+
+
+@unittest.skipUnless(_display_available(), "tkinter display not available")
+class ShortcutsShowWhatTheyChangeTests(unittest.TestCase):
+    """A shortcut fired from the Eisenhower tab used to change the other one.
+
+    `bind_all` means every shortcut fires whichever tab is in front. With the
+    matrix up, Ctrl+P changed the priority of a task on the hidden list,
+    Ctrl+Up pinned one, Ctrl+D opened the editor on one, and Ctrl+B emptied a
+    scratchpad you could not see into tasks you could not see. This app's one
+    rule is that it never changes something you are not looking at.
+
+    Deiconified rather than withdrawn: `event_generate` on a hidden window
+    does not deliver, and a test that fires a key nothing receives passes for
+    the wrong reason.
+    """
+
+    def setUp(self):
+        from cognitive_offload.app import CognitiveOffloadApp
+        from cognitive_offload.storage import Config
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name)
+        config = Config(root / "config.json")
+        config.db_path = root / "db"
+        config.matrix_db_path = root / "matrix"
+        self.app = CognitiveOffloadApp(config=config)
+        self.addCleanup(self._destroy)
+        self.app.deiconify()
+        self.app.update()
+        self.app.capture_entry.insert(0, "book the dentist")
+        self.app.add_task_from_capture()
+        self.task = self.app.tasks[0]
+        self.app.task_list.selection_set(0)
+        self.app.update()
+
+    def _destroy(self):
+        try:
+            self.app.destroy()
+        except tk.TclError:
+            pass
+
+    def _on_the_matrix(self):
+        self.app.notebook.select(1)
+        self.app.update()
+        # X focus follows the pointer when there is no window manager.
+        self.app.event_generate("<Motion>", warp=True, x=40, y=40)
+        self.app.focus_force()
+        self.app.update()
+        self.assertEqual(self.app.notebook.index("current"), 1)
+
+    def _fire(self, sequence):
+        self.app.event_generate(sequence)
+        self.app.update()
+
+    def test_priority_brings_the_list_into_view(self):
+        self._on_the_matrix()
+        before = self.task.priority
+        self._fire("<Control-p>")
+        # The change proves the key arrived; the tab proves it was watched.
+        self.assertNotEqual(self.task.priority, before)
+        self.assertEqual(self.app.notebook.index("current"), 0)
+
+    def test_pinning_brings_the_list_into_view(self):
+        self._on_the_matrix()
+        self._fire("<Control-Up>")
+        self.assertTrue(self.task.pinned)
+        self.assertEqual(self.app.notebook.index("current"), 0)
+
+    def test_the_brain_dump_brings_its_scratchpad_into_view(self):
+        self.app.set_scratchpad("a stray thought\n")
+        self._on_the_matrix()
+        self._fire("<Control-b>")
+        self.assertEqual(len(self.app.tasks), 2)
+        self.assertEqual(self.app.notebook.index("current"), 0)
+
+    def test_the_editor_opens_on_a_task_you_can_see(self):
+        self._on_the_matrix()
+        with mock.patch("cognitive_offload.app.TaskEditorDialog") as editor:
+            editor.return_value.show.return_value = None
+            self._fire("<Control-d>")
+            self.assertEqual(editor.call_count, 1)
+        self.assertEqual(self.app.notebook.index("current"), 0)
+
+    def test_undo_deliberately_leaves_you_where_you_are(self):
+        """The one exception, and it is not an oversight.
+
+        Undo also reverses matrix changes, so yanking someone to the tasks tab
+        to undo what they just did on this one is the same crime facing the
+        other way. It says what it undid instead.
+        """
+        self._on_the_matrix()
+        self._fire("<Control-z>")
+        self.assertEqual(self.app.notebook.index("current"), 1)
+        self.assertTrue(self.app.status_var.get().startswith("Undid:"))
+
+    def test_every_binding_is_classified(self):
+        """The net: a shortcut added later has to answer the question.
+
+        Read off the source rather than the list above, so a new entry with
+        the wrong number of columns fails here rather than at runtime.
+        """
+        import ast
+        import inspect
+        import textwrap
+
+        from cognitive_offload import app as app_module
+
+        source = textwrap.dedent(
+            inspect.getsource(app_module.CognitiveOffloadApp._bind_shortcuts))
+        rows = [n for n in ast.walk(ast.parse(source)) if isinstance(n, ast.List)]
+        self.assertTrue(rows, "the bindings table moved")
+        entries = [e for e in rows[0].elts if isinstance(e, ast.Tuple)]
+        self.assertGreaterEqual(len(entries), 17)
+        for entry in entries:
+            self.assertEqual(len(entry.elts), 4,
+                             "every binding must say whether it shows the tasks tab")
+
+
+@unittest.skipUnless(_display_available(), "tkinter display not available")
 class InstanceGuardTests(unittest.TestCase):
     """Two copies on one session folder is silent last-writer-wins loss."""
 

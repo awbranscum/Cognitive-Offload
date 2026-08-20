@@ -278,35 +278,57 @@ class CognitiveOffloadApp(tk.Tk):
         build_matrix_tab(self, self.matrix_frame)
 
     def _bind_shortcuts(self) -> None:
-        # (sequence, handler, works_while_typing). Ctrl+P/T/D/N/O/B/Z all have
-        # default meanings inside Text and Entry widgets, so those shortcuts
-        # step aside whenever a text widget has focus.
+        # (sequence, handler, works_while_typing, shows_the_tasks_tab).
+        #
+        # Ctrl+P/T/D/N/O/B/Z all have default meanings inside Text and Entry
+        # widgets, so those shortcuts step aside whenever a text widget has
+        # focus.
+        #
+        # The fourth column is the one that matters on the other tab. These
+        # are installed with `bind_all`, so every one of them fires whichever
+        # tab is in front — and with the Eisenhower tab up, Ctrl+P changed the
+        # priority of a task on the hidden list, Ctrl+Up pinned one, Ctrl+D
+        # opened the editor on one, and Ctrl+B emptied the scratchpad you
+        # could not see into tasks you could not see. This app's one rule is
+        # that it never changes something you are not looking at.
+        #
+        # `focus_capture` and `focus_search` already did the right thing by
+        # selecting the tasks tab themselves; the column makes that the rule
+        # rather than two functions' private habit. Ctrl+Z is deliberately
+        # NOT marked: undo also reverses matrix changes, and yanking someone
+        # to the other tab to undo what they did on this one is the same
+        # crime facing the other way.
         bindings = [
-            ("<Control-s>", lambda: self.save_state(), True),
-            ("<Control-f>", lambda: self.focus_search(), True),
-            ("<Control-Key-1>", lambda: self.notebook.select(0), True),
-            ("<Control-Key-2>", lambda: self.notebook.select(1), True),
-            ("<F1>", lambda: self.show_shortcuts(), True),
-            ("<Escape>", lambda: self.stop_timer(), True),
-            ("<Control-o>", lambda: self.load_state_dialog(), False),
-            ("<Control-n>", lambda: self.focus_capture(), False),
-            ("<Control-b>", lambda: self.brain_dump_into_tasks(), False),
-            ("<Control-p>", lambda: self.toggle_selected_priority(), False),
-            ("<Control-t>", lambda: self.tag_selected(), False),
-            ("<Control-d>", lambda: self.edit_selected_details(), False),
-            ("<Control-m>", lambda: self.send_selected_to_matrix(), False),
-            ("<Control-z>", lambda: self.undo(), False),
-            ("<Control-Up>", lambda: self.promote_selected(), False),
-            ("<Control-g>", lambda: self.start_here(), False),
-            ("<Control-r>", lambda: self.focus_on_selected(), False),
+            ("<Control-s>", lambda: self.save_state(), True, False),
+            ("<Control-f>", lambda: self.focus_search(), True, True),
+            ("<Control-Key-1>", lambda: self.notebook.select(0), True, False),
+            ("<Control-Key-2>", lambda: self.notebook.select(1), True, False),
+            ("<F1>", lambda: self.show_shortcuts(), True, False),
+            ("<Escape>", lambda: self.stop_timer(), True, False),
+            ("<Control-o>", lambda: self.load_state_dialog(), False, False),
+            ("<Control-n>", lambda: self.focus_capture(), False, True),
+            ("<Control-b>", lambda: self.brain_dump_into_tasks(), False, True),
+            ("<Control-p>", lambda: self.toggle_selected_priority(), False, True),
+            ("<Control-t>", lambda: self.tag_selected(), False, True),
+            ("<Control-d>", lambda: self.edit_selected_details(), False, True),
+            ("<Control-m>", lambda: self.send_selected_to_matrix(), False, True),
+            ("<Control-z>", lambda: self.undo(), False, False),
+            ("<Control-Up>", lambda: self.promote_selected(), False, True),
+            ("<Control-g>", lambda: self.start_here(), False, True),
+            ("<Control-r>", lambda: self.focus_on_selected(), False, True),
         ]
-        for sequence, handler, while_typing in bindings:
-            self.bind_all(sequence, self._shortcut(handler, while_typing))
+        for sequence, handler, while_typing, shows_tasks in bindings:
+            self.bind_all(sequence,
+                          self._shortcut(handler, while_typing, shows_tasks))
 
-    def _shortcut(self, handler, while_typing: bool):
+    def _shortcut(self, handler, while_typing: bool, shows_tasks: bool = False):
         def wrapper(_event=None):
             if not while_typing and self._typing():
                 return None  # let the widget's own binding win
+            if shows_tasks:
+                # Before, not after: the point is to be looking at the thing
+                # when it changes, not to be shown the aftermath.
+                self.notebook.select(0)
             handler()
             return "break"
 
@@ -1055,6 +1077,9 @@ class CognitiveOffloadApp(tk.Tk):
             loaded[key] = tasks
             self._matrix_cache[key] = tasks
             self.matrix_lists[key].set_rows([matrix_row(t) for t in tasks])
+            # The row set just changed, so what the buttons can act on has too
+            # — a rebuilt list drops the selection without firing on_select.
+            self.sync_matrix_action_availability(key)
         # A quadrant that could not be read shows as empty, which is why the
         # status line above names the folder: an empty tab must never be the
         # only evidence that something is wrong.
@@ -1066,6 +1091,33 @@ class CognitiveOffloadApp(tk.Tk):
         if unreadable:
             # An empty quadrant and an unreadable one look identical; say which.
             self.set_status("Could not read " + "; ".join(unreadable))
+
+    def sync_matrix_action_availability(self, category: str) -> None:
+        """Grey the quadrant's controls that cannot act yet.
+
+        The same argument as ``sync_action_availability`` on the other tab,
+        which this had gone without: an inert control is still a small
+        decision — "is this for me?" — and the only way to learn the answer
+        was to press it and be told "Select a task to…".
+
+        Three questions, not one. Most buttons need a selection. "Copy all to
+        tasks" needs the quadrant to have anything in it. And "Take it back"
+        needs the selected task to actually be **out** with someone, which is
+        the state that button exists to end — offering it on a task that is
+        not waiting is offering to undo something that never happened.
+        """
+        selected = self._selected_matrix_tasks(category)
+
+        def apply(buttons, enabled):
+            for button in buttons:
+                button.state(["!disabled"] if enabled else ["disabled"])
+
+        apply(getattr(self, "matrix_needs_selection", {}).get(category, ()),
+              bool(selected))
+        apply(getattr(self, "matrix_needs_rows", {}).get(category, ()),
+              bool(self._matrix_cache.get(category)))
+        apply(getattr(self, "matrix_needs_waiting", {}).get(category, ()),
+              any(t.is_waiting() for t in selected))
 
     def _selected_matrix_tasks(self, category: str) -> list:
         cached = self._matrix_cache.get(category, [])

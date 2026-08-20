@@ -402,7 +402,13 @@ class BriefCompletenessTests(unittest.TestCase):
             pinned=True,
             estimate_minutes=25,
             repeat="weekly",
-            snoozed_until="2026-08-20",
+            # Far future on purpose. This was a date near the day the test
+            # was written, and the day the clock reached it the brief's own
+            # "handed over on <today>" line contained the same string — so
+            # `test_nothing_exempt_leaks_in_anyway` failed on exactly one day
+            # and passed on every other. A fixture date that can become today
+            # is a test that fails on a schedule.
+            snoozed_until="2099-03-04",
             handed_to="Claude Desktop",
             handed_off_on="2026-08-19",
             follow_up_on="2026-08-22",
