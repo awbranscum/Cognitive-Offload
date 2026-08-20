@@ -4286,6 +4286,89 @@ class InstanceGuardTests(unittest.TestCase):
 
 
 @unittest.skipUnless(_display_available(), "tkinter display not available")
+class APastedParagraphHasACeilingTests(unittest.TestCase):
+    """Measured on screen, as a relationship rather than as pixel counts.
+
+    Row height grew about 0.43px per character with nothing stopping it, and
+    8000 characters took the X server down with the app. What matters is not
+    that a row is 133px — that depends on the display this runs on — but that
+    it stops growing.
+    """
+
+    LINE = "Ring the insurance company about the rejected claim. "
+
+    def setUp(self):
+        from cognitive_offload.app import CognitiveOffloadApp
+        from cognitive_offload.storage import Config
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name)
+        config = Config(root / "config.json")
+        config.db_path = root / "db"
+        config.matrix_db_path = root / "matrix"
+        self.app = CognitiveOffloadApp(config=config)
+        self.addCleanup(self._destroy)
+        self.app.deiconify()
+
+    def _destroy(self):
+        try:
+            self.app.destroy()
+        except tk.TclError:
+            pass
+
+    def _row_height(self, chars):
+        for task in list(self.app.tasks):
+            self.app.tasks.remove(task)
+        self.app.capture_entry.delete(0, tk.END)
+        self.app.capture_entry.insert(0, (self.LINE * 400)[:chars])
+        self.app.add_task_from_capture()
+        self.app.update()
+        self.app.update_idletasks()
+        tallest = 0
+
+        def walk(widget):
+            nonlocal tallest
+            for child in widget.winfo_children():
+                # `Label`, not `TLabel`: RowList builds its rows from plain
+                # tk widgets. Filtering on the ttk class found nothing here
+                # and matched the NEXT UP title instead — the same surface
+                # twice, wearing the other one's name.
+                text = child.cget("text") if "text" in child.keys() else ""
+                if (child.winfo_ismapped() and child.winfo_class() == "Label"
+                        and isinstance(text, str) and text.startswith("Ring the")):
+                    tallest = max(tallest, child.winfo_height())
+                walk(child)
+
+        walk(self.app.task_list)
+        return tallest
+
+    def test_a_row_stops_growing_with_the_paste(self):
+        at_1000 = self._row_height(1000)
+        at_8000 = self._row_height(8000)
+        self.assertTrue(at_1000, "no row was drawn — the probe found nothing")
+        self.assertEqual(at_1000, at_8000)
+
+    def test_and_it_is_smaller_than_it_used_to_be(self):
+        """The relationship the fix is for: one row must not be able to fill
+        the list on its own. Compared to the window rather than to a number."""
+        height = self._row_height(4000)
+        self.assertLess(height, self.app.winfo_height() // 2)
+
+    def test_the_next_up_strip_stops_growing_too(self):
+        def strip_height(chars):
+            self._row_height(chars)
+            return self.app.next_frame.winfo_height()
+
+        self.assertEqual(strip_height(1000), strip_height(8000))
+        self.assertLess(strip_height(8000), self.app.winfo_height() // 2)
+
+    def test_the_task_still_holds_the_whole_paragraph(self):
+        self._row_height(4000)
+        self.assertEqual(len(self.app.tasks[0].text), 4000)
+
+
+@unittest.skipUnless(_display_available(), "tkinter display not available")
 class TheAppOpensOnADamagedFileTests(unittest.TestCase):
     """The recovery code is good; the question is whether it is reached.
 

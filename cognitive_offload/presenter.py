@@ -28,7 +28,7 @@ from .queries import (
     suggest_tasks,
     visible_tasks,
 )
-from .rows import task_row
+from .rows import TITLE_LIMIT, short as _short, task_row
 from .storage import category_label
 from .viewmodels import Row
 
@@ -401,7 +401,11 @@ def next_up_view(
     task = suggestions[0]
     return NextUpView(
         task_id=task.id,
-        title=task.text,
+        # The same ceiling as a list row, for the same reason and more
+        # urgently: at 1500 characters this strip alone was 694px tall in a
+        # 696px window, so the thing it is *for* — the button beside it, and
+        # everything under it — was off the bottom of the screen.
+        title=_short(task.text, TITLE_LIMIT),
         step=f"→ {task.first_step}" if task.first_step
         else "no first step yet — you'll be asked",
     )
@@ -539,16 +543,13 @@ RESUME_PIECE_LIMIT = 40
 
 
 def short(text: str, limit: int = RESUME_PIECE_LIMIT) -> str:
-    """``text`` cut to ``limit`` characters, on a word boundary where one is
-    near enough to the end that using it does not throw away half the line."""
-    text = (text or "").strip()
-    if len(text) <= limit:
-        return text
-    cut = text[:limit].rstrip()
-    space = cut.rfind(" ")
-    if space >= limit - 12:
-        cut = cut[:space].rstrip()
-    return cut + "\u2026"
+    """``text`` cut to ``limit`` characters — the resume line's own default.
+
+    The cutting itself lives in `rows`, because the list rows want the same
+    thing at a very different length and two copies of a rule is how the two
+    answers drift.
+    """
+    return _short(text, limit)
 
 
 def resume_line(session_log=None, steps_log: list | None = None,

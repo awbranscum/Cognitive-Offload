@@ -5,6 +5,43 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.66.0 — A pasted paragraph now has a ceiling
+The capture box says *"Anything in your head — it does not have to be tidy"*,
+and a pasted paragraph is exactly what that invites. Nothing stopped one
+growing.
+
+Measured on one clean app per length, with the ceiling removed:
+
+| pasted title | list row | NEXT UP strip |
+|---|---|---|
+| 200 chars | 55px | 95px |
+| 1000 chars | 242px | 418px |
+| 4000 chars | **939px** | **1653px** |
+
+At 4000 characters the NEXT UP strip alone was more than twice the height of
+the whole window at its floor, so the button beside it — and the filters, and
+the list — were off the bottom of the screen. That is the same failure
+v3.56.0 fixed for the resume caption, arriving through the front door
+instead. Past about 8000 characters the X server ran out of pixmap space and
+the app went down with it.
+
+**Three hundred characters, and only on what is drawn.** The longest title in
+this project's own fixtures is 138 characters, so the ceiling never touches
+anything a person typed; it catches the paragraph pasted out of an email. The
+task keeps every character: a 40,000-character title saves, reloads
+byte-identical, is still found by search, and still opens whole in the editor.
+
+Both rows and the strip are 133px or less now, whatever you paste.
+
+**What this is not.** Whether ordinary titles should wrap or ellipsize is a
+separate question and still an open one — the existing test that a long task
+*wraps* in the list rather than being cut off still passes, and caught a
+mutant that dropped the ceiling to 30 characters. This is a guard rail, not a
+policy.
+
+Also here: one cutter, in `rows`, used by the list at 300 characters and by
+the resume line at 40. Two copies of a rule is how the two answers drift.
+
 ## 3.65.0 — The warm-up ladder can always be refilled
 Clearing all three lines is the first thing someone replacing them does. The
 **"Edit steps…"** button lives inside the ladder frame, and the frame was

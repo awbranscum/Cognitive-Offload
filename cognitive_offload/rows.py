@@ -113,6 +113,44 @@ def _subtitle(item, body: str) -> str:
     return waiting_line(item) or _step_or_summary(item, body)
 
 
+#: A ceiling on what a row *draws*, not on what a task *keeps*.
+#:
+#: Row height grows about 0.43px per character with nothing stopping it: a
+#: 1000-character paste made a row 437px tall — taller than the whole visible
+#: list at the window's floor — a 4000-character one 1729px, and 8000
+#: characters took the X server's pixmap allocation down with the app. The
+#: same growth on the NEXT UP strip put 694px of title where a 696px window
+#: was, pushing "Where do I start?", the filters and the list off the bottom.
+#:
+#: Three hundred is a guard rail rather than a policy. The longest title
+#: anyone has typed in this project's own fixtures is 138 characters, so this
+#: never touches something a person wrote; it catches the paragraph pasted out
+#: of an email, which is a thing this app openly invites ("Anything in your
+#: head — it does not have to be tidy"). Nothing is lost: the full text is
+#: stored, reloaded byte-identical, searched, and shown in the editor.
+#:
+#: Whether ordinary titles should wrap or ellipsize is a different question
+#: and still an open one. This is not it.
+TITLE_LIMIT = 300
+
+
+def short(text: str, limit: int) -> str:
+    """``text`` cut to ``limit`` characters, on a word boundary where one is
+    near enough to the end that using it does not throw away half the line.
+
+    Lives here rather than in the presenter because two callers now want it
+    and the presenter imports this module, not the other way round.
+    """
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit].rstrip()
+    space = cut.rfind(" ")
+    if space >= limit - 12:
+        cut = cut[:space].rstrip()
+    return cut + "\u2026"
+
+
 def task_row(task: Task) -> Row:
     """A task as a list row: title, first step underneath, badges alongside."""
     badges = []
@@ -129,7 +167,8 @@ def task_row(task: Task) -> Row:
     else:
         subtitle = _subtitle(task, task.description)
 
-    return Row(id=task.id, title=task.text, subtitle=subtitle, badges=badges,
+    return Row(id=task.id, title=short(task.text, TITLE_LIMIT),
+               subtitle=subtitle, badges=badges,
                done=task.done, flagged=bool(task.priority))
 
 
@@ -155,7 +194,7 @@ def waiting_line(task, on: str | None = None) -> str:
 
 
 def matrix_row(task) -> Row:
-    return Row(id=task.id, title=task.title,
+    return Row(id=task.id, title=short(task.title, TITLE_LIMIT),
                subtitle=_subtitle(task, task.content),
                badges=_shared_badges(task), marker="·")
 
