@@ -12,9 +12,9 @@ what it does not.
 
 Select a task in **Delegate** and press **Hand off to an agent**. The app:
 
-1. Writes a **brief** — the task's title, your details, the first step, the
-   booked date, the estimate and the tags, plus anything you type in the
-   dialog — to a file.
+1. Writes a **brief** — the task's title, your details, the first step, **the
+   whole plan if the task has one**, the booked date, the estimate and the
+   tags, plus anything you type in the dialog — to a file.
 2. Puts a **command** on your clipboard.
 3. Marks the task **waiting**, with the name of the agent, the day you handed
    it over, and a day to check back.
@@ -35,6 +35,15 @@ the list and in every search — hiding it is the one thing this app will not do
 way "Not today" does, because starting it would mean duplicating work someone
 else is already doing. On the check-back day it comes back into the running,
 since from then on picking it up again is a real option.
+
+**The same treatment works for a person.** Everything on this page about the
+waiting mark — the badge, the line under the title, the task stepping out of
+the suggestion slot until the check-back day — is written against `handed_to`,
+which is free text and has never cared whether it holds "Codex" or "Mum". The
+task editor on either tab has a **Waiting on** field and a **check back** date
+for exactly that, and no brief is written and no command is copied, because
+there is nothing to run. An agent is one thing you can be waiting on; most of
+them are people.
 
 **Two ways back.** In Delegate, **Take it back**. Anywhere else, the task
 editor offers *"Out with Claude Desktop, checking back Friday — take it back
@@ -59,6 +68,20 @@ Every brief also ends with a line asking the agent to check with you before
 spending money, messaging another person, or doing anything that cannot be
 undone. It is in both the Markdown and the JSON, from one constant, so the
 two cannot drift apart.
+
+**A task with steps sends all of them,** as a checklist, with the steps you
+have already done ticked and the one to pick up at marked. That difference
+matters: it is what separates "do this job" from "carry on from here", and an
+agent that redoes step one is doing damage rather than work. The JSON carries
+`steps` and `steps_done` as data so a runner does not have to read the ticks.
+
+**What is deliberately not sent:** which quadrant you filed it in, how it
+feels to start, your flag, your pin, a "not today", and how often it repeats.
+Those are decisions about *your* day rather than about the work, and an agent
+has no use for them. `tests/test_handoff.py` holds that list keyed on the
+model's own fields, so a field added later has to be decided about rather
+than quietly omitted — which is exactly how the plan came to be left out for
+a release.
 
 ## Where the files go
 

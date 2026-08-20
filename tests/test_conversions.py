@@ -67,6 +67,9 @@ def fully_populated_task() -> Task:
         handed_to="Claude Desktop",
         handed_off_on="2026-08-19",
         follow_up_on="2026-08-22",
+        steps=["find the claim number", "reread the rejection letter",
+               "ring them and ask for a supervisor"],
+        steps_done=1,
     )
 
 
@@ -89,6 +92,9 @@ def fully_populated_matrix_task() -> MatrixTask:
         handed_off_on="2026-08-19",
         follow_up_on="2026-08-22",
         snoozed_until="2026-08-20",
+        steps=["find the claim number", "reread the rejection letter",
+               "ring them and ask for a supervisor"],
+        steps_done=1,
     )
 
 

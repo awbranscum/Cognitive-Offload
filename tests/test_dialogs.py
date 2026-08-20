@@ -45,6 +45,372 @@ def _labels(widget):
     return found
 
 
+def _controls(widget):
+    """Every widget that a person could need to see or reach."""
+    from tkinter import ttk
+
+    kinds = (ttk.Label, ttk.Entry, ttk.Button, ttk.Checkbutton, ttk.Combobox,
+             ttk.Radiobutton, tk.Text)
+    found = []
+    for child in widget.winfo_children():
+        if isinstance(child, kinds):
+            found.append(child)
+        found.extend(_controls(child))
+    return found
+
+
+def _buttons(widget):
+    """Every ttk.Button anywhere inside, at any depth."""
+    from tkinter import ttk
+
+    found = []
+    for child in widget.winfo_children():
+        if isinstance(child, ttk.Button):
+            found.append(child)
+        found.extend(_buttons(child))
+    return found
+
+
+@unittest.skipUnless(_display_available(), "tkinter display not available")
+class ReachableSaveTests(unittest.TestCase):
+    """The way to keep an edit has to be on the screen.
+
+    The task editor opened at a fixed 520px against content that wanted 578
+    with a tag row — so Tk laid out everything above and **did not draw Save
+    or Cancel at all**. Not scrolled off; not clipped; absent, on a window
+    whose only other exit is Escape, which throws the edit away. Measured at
+    every height from 520 up, the row first appeared at 668.
+
+    Every optional row added since made it worse, which is why this is pinned
+    rather than fixed and forgotten: the next one is somebody typing a field
+    into a dialog that already does not fit.
+    """
+
+    def setUp(self):
+        from cognitive_offload.theme import apply_theme
+
+        self.root = tk.Tk()
+        self.root.withdraw()
+        apply_theme(self.root, "light")
+        self.addCleanup(self.root.destroy)
+
+    def _opened(self, **kw):
+        """A dialog sized the way show() sizes it, without the modal grab."""
+        from cognitive_offload.dialogs import TaskEditorDialog
+
+        dialog = TaskEditorDialog(self.root, title="Send the passport form", **kw)
+        self.addCleanup(dialog.destroy)
+        dialog.update_idletasks()
+        dialog._fit_to_content()
+        dialog.deiconify()
+        dialog.update()
+        return dialog
+
+    def _fullest(self):
+        """Every optional row at once — the case that overflowed first."""
+        return self._opened(
+            with_tags=True, snoozed_until="2099-01-01",
+            content="They said four to six weeks.",
+            rest_of_plan=["reread the rejection letter", "ring them"],
+            first_step="find the reference number in the confirmation email")
+
+    def test_save_is_drawn_at_all(self):
+        dialog = self._fullest()
+        labels = [b.cget("text") for b in _buttons(dialog)]
+        self.assertIn("Save", labels)
+        [save] = [b for b in _buttons(dialog) if b.cget("text") == "Save"]
+        self.assertTrue(save.winfo_ismapped(),
+                        "Save exists but Tk never placed it — the row ran off "
+                        "the bottom of a window that could not fit it")
+
+    def test_save_is_inside_the_window_it_belongs_to(self):
+        dialog = self._fullest()
+        [save] = [b for b in _buttons(dialog) if b.cget("text") == "Save"]
+        bottom = (save.winfo_rooty() - dialog.winfo_rooty()) + save.winfo_height()
+        self.assertLessEqual(bottom, dialog.winfo_height(),
+                             "Save is placed past the bottom edge")
+
+    def test_the_editor_is_as_tall_as_what_it_holds(self):
+        """The fix, rather than its symptom: a fixed height was always going
+        to be wrong for a dialog whose rows come and go."""
+        dialog = self._fullest()
+        self.assertGreaterEqual(dialog.winfo_height(),
+                                min(dialog.winfo_reqheight(),
+                                    dialog._max_height))
+
+    def test_a_window_too_short_for_the_form_scrolls_instead_of_dropping_it(self):
+        """The general form of the bug, not just its first symptom.
+
+        Capping the height fixed Save and left everything else exposed: Tk's
+        answer to a window shorter than its content is to stop placing
+        widgets, so on the 1366x768 laptop this app supports on purpose the
+        editor's ceiling is 614 against content wanting 828 — measured, the
+        details box and the tag row were not drawn at 614, and nine controls
+        were missing at 520. A ceiling without a scrollbar is a quieter
+        version of the bug the ceiling was added to fix.
+        """
+        for height in (700, 614, 520):
+            dialog = self._fullest()
+            dialog.geometry(f"520x{height}")
+            dialog.update()
+            with self.subTest(window=height):
+                missing = [type(w).__name__ for w in _controls(dialog)
+                           if not w.winfo_ismapped()]
+                self.assertEqual(missing, [], "widgets were never placed")
+                self.assertTrue(dialog._vbar.winfo_ismapped(),
+                                "no scrollbar, so the overflow is unreachable")
+
+    def test_save_does_not_scroll_away_with_the_form(self):
+        """The button row has to sit OUTSIDE the scrolling area. Inside it,
+        Save is merely somewhere in a long page — which is the same failure
+        as not drawing it, dressed up as a feature. Checked at the top of
+        the scroll, where a row packed inside the form is furthest away.
+        """
+        dialog = self._fullest()
+        dialog.geometry("520x520")
+        dialog.update()
+        dialog._canvas.yview_moveto(0)
+        dialog.update()
+        [save] = [b for b in _buttons(dialog) if b.cget("text") == "Save"]
+        self.assertTrue(save.winfo_ismapped())
+        top = save.winfo_rooty() - dialog.winfo_rooty()
+        self.assertLessEqual(top + save.winfo_height(), dialog.winfo_height())
+        self.assertGreater(top, dialog._canvas.winfo_height() - 4,
+                           "Save is inside the scrolling form")
+
+    def _wheel_over(self, dialog, widget, up: bool = False):
+        """One wheel notch delivered where the widget actually is.
+
+        Root coordinates matter: `_on_wheel` asks `winfo_containing` what is
+        under the pointer, and an event generated without them reports a
+        position where the widget is not — which is a probe measuring itself
+        rather than the app.
+        """
+        dialog.update()
+        widget.event_generate("<Button-4>" if up else "<Button-5>", x=8, y=8,
+                              rootx=widget.winfo_rootx() + 8,
+                              rooty=widget.winfo_rooty() + 8)
+        dialog.update()
+
+    def test_the_wheel_over_the_notes_box_scrolls_the_notes_and_nothing_else(self):
+        """A `Text`'s own class binding scrolls it and does NOT return
+        "break", so the event carried on to the window binding as well —
+        measured, one notch over the notes box moved the text AND slid the
+        whole form by the same amount. Scrolling your own notes should not
+        move the dialog out from under you."""
+        dialog = self._fullest()
+        dialog.geometry("520x520")
+        dialog.update()
+        dialog.content_text.delete("1.0", "end")
+        dialog.content_text.insert("1.0", "\n".join(f"line {i}" for i in range(40)))
+        # Both at the BOTTOM, then scroll UP: the form could move and the
+        # notes box could move, so only the guard decides which does. Parked
+        # at the end of the form and scrolling down, the form cannot move
+        # anyway and this passed with the guard deleted.
+        dialog._canvas.yview_moveto(1.0)
+        dialog.content_text.yview_moveto(1.0)
+        dialog.update()
+        before_form = dialog._canvas.yview()[0]
+        before_text = dialog.content_text.yview()[0]
+        self.assertGreater(before_form, 0.0, "the form has nowhere to scroll up to")
+        self.assertGreater(before_text, 0.0, "the notes box has nowhere to scroll up to")
+        self._wheel_over(dialog, dialog.content_text, up=True)
+        self.assertEqual(dialog._canvas.yview()[0], before_form,
+                         "the form moved as well as the notes box")
+        self.assertLess(dialog.content_text.yview()[0], before_text,
+                        "the notes box did not scroll")
+
+    def test_the_wheel_anywhere_else_scrolls_the_form(self):
+        """The guard must not eat the wheel everywhere. Over anything that
+        does not scroll itself, the form is what moves."""
+        dialog = self._fullest()
+        dialog.geometry("520x520")
+        dialog._canvas.yview_moveto(0)
+        dialog.update()
+        self._wheel_over(dialog, dialog.title_entry)
+        self.assertGreater(dialog._canvas.yview()[0], 0.0)
+
+    def test_a_box_with_nothing_to_scroll_does_not_swallow_the_wheel(self):
+        """Over a half-empty notes box the wheel should still move the form,
+        or it dies in the middle of the dialog for no reason anyone can see."""
+        dialog = self._fullest()
+        dialog.content_text.delete("1.0", "end")
+        dialog.content_text.insert("1.0", "one line")
+        dialog.update()
+        self.assertFalse(dialog._scrolls_itself(dialog.content_text))
+        self.assertFalse(dialog._scrolls_itself(dialog.title_entry))
+        self.assertFalse(dialog._scrolls_itself(None))
+        dialog.content_text.insert("1.0", "\n".join(f"line {i}" for i in range(40)))
+        dialog.update()
+        self.assertTrue(dialog._scrolls_itself(dialog.content_text))
+
+    def _with_focus(self, height):
+        """A mapped dialog that really receives focus events, or a skip.
+
+        setUp withdraws the root, and a withdrawn window is never given the
+        X focus — so `focus_set()` records a preference and no `FocusIn` is
+        ever delivered. Every assertion below would then pass by measuring
+        nothing. Proven rather than assumed, the same way test_app_ui proves
+        a key arrives before concluding anything from one.
+        """
+        self.root.deiconify()
+        self.addCleanup(self.root.withdraw)
+        dialog = self._fullest()
+        dialog.geometry(f"520x{height}")
+        dialog.update()
+        # With no window manager X focus follows the POINTER, so whether
+        # these tests run at all came down to where the pointer happened to
+        # be sitting: inside the dialog on a 1024x768 display, outside it on
+        # a 1600x1200 one, where they silently skipped. Put it somewhere
+        # deliberate instead.
+        dialog.event_generate("<Motion>", warp=True, x=10, y=10)
+        dialog.update()
+        seen = []
+        dialog.bind("<FocusIn>", lambda e: seen.append(e.widget), add="+")
+        dialog.title_entry.focus_set()
+        dialog.update()
+        dialog.step_entry.focus_set()
+        dialog.update()
+        if not seen:
+            self.skipTest("this display will not deliver focus events")
+        return dialog
+
+    def test_tabbing_never_puts_the_cursor_somewhere_you_cannot_see(self):
+        """Tab moves focus by widget order, not by what is on screen. On a
+        window short enough to scroll it walked straight into the details box
+        at y=583 and the tag row at y=732, both below a 614px window — you
+        type and nothing appears.
+
+        Measured against the WINDOW rather than the canvas: the button row is
+        deliberately outside the scrolling area, and a canvas-relative check
+        calls that a failure.
+        """
+        for height in (614, 520):
+            dialog = self._with_focus(height)
+            current = dialog.title_entry
+            current.focus_set()
+            dialog.update()
+            with self.subTest(window=height):
+                for _ in range(16):
+                    nxt = current.tk_focusNext()
+                    if nxt is None or nxt is dialog.title_entry:
+                        break
+                    nxt.focus_set()
+                    dialog.update()
+                    current = nxt
+                    top = nxt.winfo_rooty() - dialog.winfo_rooty()
+                    self.assertGreaterEqual(top, 0, f"{nxt} is above the window")
+                    self.assertLessEqual(
+                        top + nxt.winfo_height(), dialog.winfo_height(),
+                        f"{nxt} took focus below the bottom edge")
+
+    def test_focus_scrolls_back_up_as_well_as_down(self):
+        """Shift-Tab is a real key. A handler that only ever scrolls forward
+        leaves the cursor above the top edge instead of below the bottom.
+
+        Focus has to be moved away and back: re-focusing the widget that
+        already holds it generates no event at all, so the obvious version of
+        this test asserts against a handler that never ran.
+        """
+        dialog = self._with_focus(520)
+        dialog.tags_entry.focus_set()          # somewhere near the bottom
+        dialog.update()
+        self.assertGreater(dialog._canvas.canvasy(0), 0,
+                           "the form did not scroll down to the tag row")
+        dialog.title_entry.focus_set()         # ...and back to the top
+        dialog.update()
+        top = dialog.title_entry.winfo_rooty() - dialog.winfo_rooty()
+        self.assertGreaterEqual(top, 0)
+        self.assertLessEqual(top + dialog.title_entry.winfo_height(),
+                             dialog.winfo_height())
+
+    def test_the_buttons_are_left_where_they_are(self):
+        """They sit outside the form on purpose, so nothing about focus or
+        the wheel may drag them into the scrolling area."""
+        dialog = self._fullest()
+        [save] = [b for b in _buttons(dialog) if b.cget("text") == "Save"]
+        self.assertFalse(str(save).startswith(f"{dialog.body}."))
+
+    def test_tabbing_to_save_does_not_jerk_the_form(self):
+        """Save is not in the form, so nothing about it needs bringing into
+        view — and scrolling anyway means the page lurches under you at the
+        exact moment you are reaching for the button."""
+        dialog = self._with_focus(520)
+        dialog.step_entry.focus_set()
+        dialog.update()
+        parked = dialog._canvas.yview()[0]
+        [save] = [b for b in _buttons(dialog) if b.cget("text") == "Save"]
+        save.focus_set()
+        dialog.update()
+        self.assertEqual(dialog._canvas.yview()[0], parked,
+                         "focusing Save scrolled the form for no reason")
+
+    def test_the_scrollbar_appears_exactly_when_it_is_needed(self):
+        """The other half: a permanent scrollbar on a dialog that fits is a
+        control that does nothing, which is what this app spends its effort
+        removing.
+
+        Asserted as a *relationship* rather than against a fixed expectation
+        per fixture, because whether any given form fits depends on the
+        screen the test is running on — the ceiling is 80% of screen height.
+        The first version of this test asserted "the fullest dialog shows no
+        scrollbar", passed on a 1200px test display and failed on CI's 768px
+        one, which was the test being wrong rather than the app.
+        """
+        for label, build in (("smallest", lambda: self._opened()),
+                             ("fullest", self._fullest)):
+            dialog = build()
+            with self.subTest(dialog=label):
+                needed = (dialog.body.winfo_reqheight()
+                          > dialog._canvas.winfo_height())
+                self.assertEqual(
+                    bool(dialog._vbar.winfo_ismapped()), needed,
+                    "the scrollbar is showing when there is nothing to scroll "
+                    "to, or hiding when there is")
+
+    def test_the_plain_editor_stays_inside_its_height_budget(self):
+        """A ratchet, so the dialog cannot balloon unnoticed.
+
+        Measured honestly rather than aspirationally: the plain editor wants
+        ~639px, so on the 1366x768 laptop this app supports it is ~25px over
+        an 80% ceiling and shows a scrollbar. That is a real limitation and
+        it is recorded rather than asserted away — before the form scrolled
+        it was much worse, because the same shortfall meant widgets were
+        simply not drawn.
+
+        The budget below is the ceiling on a 900px-tall screen, which the
+        plain dialog clears comfortably. It exists to fail when someone adds
+        another hundred pixels of rows, not to describe today to the pixel.
+        """
+        dialog = self._opened()
+        self.assertLessEqual(
+            dialog.body.winfo_reqheight(), int(900 * 0.8),
+            "the plain task editor has grown past its height budget — every "
+            "screen smaller than a desktop monitor now opens it scrolling")
+
+    def test_every_dialog_with_a_button_row_still_draws_it(self):
+        """The row moved out of the body for every dialog, not just this one."""
+        from cognitive_offload.dialogs import (HandoffDialog, PromptDialog,
+                                               QuadrantDialog, TaskEditorDialog)
+
+        builders = (
+            lambda: TaskEditorDialog(self.root, title="t", with_tags=True),
+            lambda: PromptDialog(self.root, "Add tag", "Tag name"),
+            lambda: QuadrantDialog(self.root, "Send to the matrix"),
+            lambda: HandoffDialog(self.root, "Chase the claim"),
+        )
+        for build in builders:
+            dialog = build()
+            self.addCleanup(dialog.destroy)
+            dialog.update_idletasks()
+            dialog._fit_to_content()
+            dialog.deiconify()
+            dialog.update()
+            with self.subTest(dialog=type(dialog).__name__):
+                mapped = [b for b in _buttons(dialog) if b.winfo_ismapped()]
+                self.assertTrue(mapped, "no button was placed")
+
+
 @unittest.skipUnless(_display_available(), "tkinter display not available")
 class DialogCollectTests(unittest.TestCase):
     def setUp(self):
@@ -199,6 +565,27 @@ class DialogCollectTests(unittest.TestCase):
         self.assertFalse(dialog.collect()["clear_snooze"])
         dialog.destroy()
 
+    def test_a_snooze_that_has_run_out_shows_no_chrome_either(self):
+        """The checkbox offers to end something that has already ended.
+
+        It reads "Excused from suggestions until <date>", so on a spent date
+        it is both an untrue sentence and a control that does nothing. The
+        rule was written out inline here for a while and nothing tested it:
+        replacing it with `if snoozed_until:` passed the whole suite.
+        """
+        from datetime import date, timedelta
+
+        from cognitive_offload.dialogs import TaskEditorDialog
+
+        for label, days in (("yesterday", -1), ("today", 0)):
+            with self.subTest(label):
+                spent = (date.today() + timedelta(days=days)).isoformat()
+                dialog = TaskEditorDialog(self.root, title="t",
+                                          snoozed_until=spent)
+                self.assertIsNone(dialog.unsnooze_var)
+                self.assertFalse(dialog.collect()["clear_snooze"])
+                dialog.destroy()
+
     def test_the_editor_offers_a_way_out_of_a_handoff_only_while_one_is_on(self):
         """Built like the snooze exit above it: carrying the waiting mark onto
         the main list without this would leave a task marked as out with
@@ -335,6 +722,87 @@ class DialogCollectTests(unittest.TestCase):
         self.assertIn(f"x{dialog.winfo_reqheight()}", dialog.geometry())
         dialog.destroy()
 
+    # -- the ladder can always be refilled -----------------------------
+    def _start_dialog(self, steps, show=True):
+        from cognitive_offload.dialogs import StartFocusDialog
+
+        dialog = StartFocusDialog(self.root, task_text="Write the report",
+                                  first_step="open last year's report",
+                                  minutes=15, warmup_steps=steps,
+                                  show_warmup=show)
+        self.addCleanup(dialog.destroy)
+        dialog.update_idletasks()
+        if hasattr(dialog, "_fit_to_content"):
+            dialog._fit_to_content()
+        dialog.deiconify()
+        dialog.update()
+        return dialog
+
+    @staticmethod
+    def _labels(widget, kind):
+        found = []
+
+        def walk(parent):
+            for child in parent.winfo_children():
+                if child.winfo_ismapped() and child.winfo_class() == kind:
+                    found.append(child.cget("text"))
+                walk(child)
+
+        walk(widget)
+        return found
+
+    def test_an_emptied_ladder_still_offers_the_way_back(self):
+        """Clearing all three lines is the first thing someone replacing them
+        does. The "Edit steps…" button lives inside the ladder frame, so
+        building the frame only when there were already steps took away the
+        only route back for the rest of the session."""
+        dialog = self._start_dialog([])
+        self.assertIn("Edit steps…", self._labels(dialog, "TButton"))
+
+    def test_a_ladder_with_rungs_offers_it_too(self):
+        dialog = self._start_dialog(["stand up", "close the tabs"])
+        self.assertIn("Edit steps…", self._labels(dialog, "TButton"))
+
+    def test_switching_the_ladder_off_does_hide_all_of_it(self):
+        """The supported off-switch, and it must keep working: the point of
+        the fix is a dead end, not making the ladder impossible to silence."""
+        dialog = self._start_dialog(["stand up"], show=False)
+        self.assertNotIn("Edit steps…", self._labels(dialog, "TButton"))
+
+    def test_and_the_switch_that_brings_it_back_is_still_on_screen(self):
+        dialog = self._start_dialog(["stand up"], show=False)
+        self.assertIn("Show the warm-up ladder before sessions",
+                      self._labels(dialog, "TCheckbutton"))
+
+    def test_a_ladder_with_rungs_says_the_other_thing(self):
+        """The half the empty-state test cannot see. Without it, a ladder
+        that always claimed to be empty passed the whole suite."""
+        dialog = self._start_dialog(["stand up", "close the tabs"])
+        said = " ".join(self._labels(dialog, "TLabel"))
+        self.assertIn("Step down towards the task", said)
+        self.assertNotIn("No rungs on it", said)
+
+    def test_an_empty_ladder_says_so_without_scolding(self):
+        dialog = self._start_dialog([])
+        said = " ".join(self._labels(dialog, "TLabel"))
+        self.assertIn("No rungs on it at the moment", said)
+        self.assertIn("nothing here is required", said)
+        self.assertNotIn("Step down towards the task", said)
+        for scold in ("should", "you have not", "missing", "!"):
+            self.assertNotIn(scold, said.lower())
+
+    def test_an_empty_ladder_can_be_refilled_end_to_end(self):
+        dialog = self._start_dialog([])
+        dialog._edit_steps()
+        dialog.update()
+        self.assertTrue(dialog._step_entries)
+        dialog._step_entries[0].insert(0, "put the kettle on")
+        dialog._step_entries[1].insert(0, "   ")
+        dialog._step_entries[2].insert(0, "read one line of it")
+        collected = dialog.collect()
+        self.assertEqual(collected["warmup_steps"],
+                         ["put the kettle on", "read one line of it"])
+
     # -- the start dialog's rituals ------------------------------------
     def test_untouched_ladder_collects_as_none(self):
         from cognitive_offload.dialogs import StartFocusDialog
@@ -412,7 +880,9 @@ class DialogCollectTests(unittest.TestCase):
                                       first_step="the old step")
             dialog.next_entry.insert(0, "the new step")
             dialog._choose(choice)
-            self.assertEqual(dialog.result, {"choice": choice, "next_step": "the new step"})
+            self.assertEqual(dialog.result, {"choice": choice,
+                                             "next_step": "the new step",
+                                             "step_done": False})
 
     def _focus(self, dialog, widget):
         """Push X focus onto ``widget`` and wait for it to actually arrive."""
@@ -439,7 +909,9 @@ class DialogCollectTests(unittest.TestCase):
         dialog.next_entry.event_generate("<Return>")
         self.root.update()
         self.assertEqual(dialog.result,
-                         {"choice": "carry_on", "next_step": "reread the last paragraph"})
+                         {"choice": "carry_on",
+                          "next_step": "reread the last paragraph",
+                          "step_done": False})
 
     def test_enter_is_bound_to_the_entry_not_the_whole_dialog(self):
         # The old dialog-wide <Return> → "done" binding is the bug: it fired
@@ -453,7 +925,9 @@ class DialogCollectTests(unittest.TestCase):
         dialog.next_entry.insert(0, "reread the last paragraph")
         dialog._keep_step()
         self.assertEqual(dialog.result,
-                         {"choice": "carry_on", "next_step": "reread the last paragraph"})
+                         {"choice": "carry_on",
+                          "next_step": "reread the last paragraph",
+                          "step_done": False})
 
     def test_enter_elsewhere_in_the_dialog_chooses_nothing(self):
         from cognitive_offload.dialogs import SessionEndDialog

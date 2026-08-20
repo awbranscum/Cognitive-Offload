@@ -5,6 +5,844 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.67.0 — Sweeping up after an interrupted save
+`atomic_write_text` writes a temp file beside the target, fsyncs it and
+renames it, and cleans up after any exception. It cannot clean up after a
+SIGKILL, a power cut, or a lid closed at the wrong moment — and nothing else
+ever removed what those leave behind, so `.data.json.<random>.tmp` files
+accumulated for ever in a folder this app puts on screen and invites people
+into.
+
+They were harmless: verified that the app opens, reads the real file, keeps
+the scratchpad and saves again with four of them present. Litter rather than
+damage — but litter that nobody but this app could explain.
+
+Both loaders now sweep their own siblings once, on load. Deliberately narrow:
+only files matching that file's own temp pattern, only ones **older than a
+day**, and every error swallowed. A real temp file lives for the milliseconds
+between `fsync` and `rename`, so the margin is enormous on purpose — deleting
+a save that is actually in progress would be a far worse bug than the litter
+it was tidying.
+
+Verified to take the two abandoned files and leave the fresh one, the
+backup, the other file's leftovers, and everything else in the folder.
+
+## 3.66.0 — A pasted paragraph now has a ceiling
+The capture box says *"Anything in your head — it does not have to be tidy"*,
+and a pasted paragraph is exactly what that invites. Nothing stopped one
+growing.
+
+Measured on one clean app per length, with the ceiling removed:
+
+| pasted title | list row | NEXT UP strip |
+|---|---|---|
+| 200 chars | 55px | 95px |
+| 1000 chars | 242px | 418px |
+| 4000 chars | **939px** | **1653px** |
+
+At 4000 characters the NEXT UP strip alone was more than twice the height of
+the whole window at its floor, so the button beside it — and the filters, and
+the list — were off the bottom of the screen. That is the same failure
+v3.56.0 fixed for the resume caption, arriving through the front door
+instead. Past about 8000 characters the X server ran out of pixmap space and
+the app went down with it.
+
+**Three hundred characters, and only on what is drawn.** The longest title in
+this project's own fixtures is 138 characters, so the ceiling never touches
+anything a person typed; it catches the paragraph pasted out of an email. The
+task keeps every character: a 40,000-character title saves, reloads
+byte-identical, is still found by search, and still opens whole in the editor.
+
+Both rows and the strip are 133px or less now, whatever you paste.
+
+**What this is not.** Whether ordinary titles should wrap or ellipsize is a
+separate question and still an open one — the existing test that a long task
+*wraps* in the list rather than being cut off still passes, and caught a
+mutant that dropped the ceiling to 30 characters. This is a guard rail, not a
+policy.
+
+Also here: one cutter, in `rows`, used by the list at 300 characters and by
+the resume line at 40. Two copies of a rule is how the two answers drift.
+
+## 3.65.0 — The warm-up ladder can always be refilled
+Clearing all three lines is the first thing someone replacing them does. The
+**"Edit steps…"** button lives inside the ladder frame, and the frame was
+only built when there were already steps — so emptying the ladder took away
+the only route back to it for the rest of the session. A control that removes
+itself is a dead end, and this app does not have those.
+
+The ladder now appears whenever it is switched on, empty or not, and an empty
+one says: *"No rungs on it at the moment. Edit steps to write your own, or
+leave it — nothing here is required."*
+
+The supported off-switch is unchanged and still the only one: the **"Show the
+warm-up ladder before sessions"** checkbox, which lives outside the frame,
+persists, and can be ticked again. Emptying the lines never was an off-switch
+— `Config.load` replaces an empty list with the defaults on the next launch,
+which is also why the dead end was only ever a session long.
+
+One thing worth recording about how it was written: handing both sentences
+straight to `text=` as a conditional made **both of them vanish from the
+wording snapshot** — the same disappearing act the matrix row's copy did when
+it moved inside a conditional, which `rows.py` still carries a comment about.
+Naming each sentence before choosing between them puts them back under the
+net. The snapshot caught it, which is what it is for.
+
+## 3.64.0 — A damaged file must not stop the app opening
+Found by writing seven kinds of damage to a real `data.json` and opening a
+real app on each. Six of the seven were handled beautifully. The seventh was
+not handled at all.
+
+- **The app did not open.** If `tasks`, `completed_log` or `steps_log` was a
+  **number or a boolean**, the loader raised `TypeError: 'int' object is not
+  iterable` — past every `StorageError` the recovery path catches, out of the
+  constructor, before there was a window. No quarantine, no "auto-save is
+  off", no message: a traceback, and no way in, with the person's work
+  sitting on disk beside it. `SessionLog.load` had the same hole, and it also
+  runs before the window exists.
+
+  This is the worst shape a bug can take here, and what makes it worth saying
+  plainly is that the recovery machinery it bypassed is *good* — it just was
+  not reached.
+
+- **And the loss count was invented.** A **string** in those fields was
+  walked character by character, so `"tasks": "nope"` was reported as
+  *"4 task records in data.json couldn't be read"*. There were no records.
+  There was one field of the wrong type, four characters long. In an app
+  whose whole promise is telling you the truth about your stuff, a fabricated
+  loss count is its own kind of damage. A dict gave the number of its keys;
+  a string in `completed_log` or `steps_log` was dropped **silently**.
+
+  Both come from one line — `for record in data.get("tasks") or []` — and one
+  helper closes both. **The pattern already existed in this codebase**:
+  `models._as_steps` and `_as_tags` have always checked the shape before
+  iterating. `models.as_records` now says it once for everybody, and the two
+  store loaders use it.
+
+- **Two sentences, because they are two different facts.**
+  `presenter.damage_report` says *"3 task records in data.json were
+  unreadable and were left out"* when records were lost, and *"The task list
+  in data.json is not in a shape this app can read, so it was skipped"* when
+  a whole field was the wrong type — with no number, because there is no
+  honest number to give. Either way auto-save stays off until an explicit
+  Save, which was already the rule and still is.
+
+  Both messages moved out of the controller and into the presenter on the way,
+  which is where the app's sentences belong.
+
+## 3.63.0 — A net over Ctrl+Z
+No behaviour change. `tests/test_undo_completeness.py` reads `app.py` and
+requires that every function opening an undo entry either restores the state
+the snapshot does not hold, or is named with the reason it does not have to.
+
+`push_undo` snapshots two things: the task list and the step log. Anything
+else an action touches — the quadrant files, the completed-tasks log, the
+scratchpad — has to be put back by a callable handed to `attach_undo`, or
+Ctrl+Z restores half the change and leaves the other half standing. That is
+the same shape as the four stale field lists a few releases back: a
+hand-written correspondence with nothing checking it.
+
+**It catches nothing today.** Sixteen functions push an undo entry, seven
+reach outside the snapshot, four of those attach a restore and three are
+exempt with reasons — copying *from* a quadrant leaves the files alone,
+`begin_focus` only reads preferences, and un-banking fifteen minutes you
+actually spent is not what Ctrl+Z is for. The point of writing it now is that
+the next one is caught the day it appears.
+
+Writing it found a blind spot in itself, which is the part worth recording:
+watching for the attribute `note_text` would have missed `clear_notes`, which
+writes the scratchpad through `set_scratchpad`. A net that only watches
+attribute names lets every method call through. It watches both now, and a
+mutation removing that restore is caught — which it would not have been an
+hour ago.
+
+## 3.62.0 — The record only corrects a distortion by being true
+Two things found by looking at what happens at the *end* of a plan, and at
+what a timestamp actually holds.
+
+- **The last step of a plan could be finished for ever.** Ticking *"Done —
+  move on to X"* on the last step wrote a finished-step entry and changed
+  nothing — every single time it was pressed. Three ticks put the same step
+  in the week review three times, and inflated the "N done today" count with
+  it.
+
+  `advance_step` is right to refuse at the end: the model's invariant is
+  `first_step == steps[steps_done]`, so the cursor may never pass the last
+  step. The bug was that the log was written *before* asking, and
+  unconditionally. It now records only what the cursor actually passes — and
+  it carries the finished step across by hand, because after the move
+  `first_step` names the *next* one.
+
+  **Padding the record is not a smaller sin than losing it.** The week review
+  exists because *"I did nothing this week"* is a distortion, and it can only
+  correct one by being true.
+
+- **A timestamp said "started_at" and held the finish.** `SessionLog.record`
+  is called when a block *ends*, and nothing has ever passed a start time, so
+  the field stamped itself at the moment of recording. It is `logged_at` now.
+
+  Which day a block counts for is deliberately unchanged: a block finished at
+  00:05 belongs to the new day, because someone who stops at five past
+  midnight seeing *"1 session today"* is kinder than seeing *"none"* the
+  moment after they stopped. Files written before the rename still carry
+  `started_at`, mean exactly the same instant, and are read — throwing away a
+  year of momentum over a key name would be its own bug.
+
+Left open on purpose: **what finishing the last step should mean.** With the
+log honest, the final step of a plan is now recorded nowhere — the task sits
+on `step 3 of 3` with no way to say "that's the lot", and the evidence only
+returns when the task itself is marked done. The obvious answer is the
+already-listed idea of the last step offering to finish the task, and it is
+no longer only a nicety; but it is a change to what the app asks you at a
+tender moment, so it waits to be asked for.
+
+## 3.61.0 — "step 1 of 3", on the surface you actually look at
+A small fix and the net that would have caught it.
+
+- **The pop-out timer now says where you are in the plan.** It is the one
+  surface up *while you work*, and it was the only one showing a step without
+  saying it was step 2 of 3 — the list row, the focus card, the start dialog
+  and the session-end dialog all say it. "of 3" is the difference between a
+  step and a step in something finite; being part-way through is cheaper to
+  resume than starting, and the number is the evidence.
+
+  This was a promise the code was not keeping rather than an idea:
+  `focus_caption`'s docstring opens *"What the focus card **and the pop-out**
+  say you are on"*, and calls the place *"the one thing about the plan worth
+  showing"* during a session. The pop-out passed its step through raw.
+
+- **One composer, three surfaces.** The sentence was being assembled inline in
+  two places, which is how the third came to be missing.
+  `rows.step_with_place` now builds it once, and the wording snapshot recorded
+  the consolidation exactly: two `{} · {}` entries became one.
+
+- **`tests/test_plan_place.py` is the net.** Every surface that names a step
+  is checked for the place, and a surface that leaves it out has to be listed
+  with a reason — which the NEXT UP strip now is, marked as an open question
+  rather than a decision. Two of the surfaces are dialogs, so their call sites
+  are read out of the source with `ast`: a third dialog added later is caught
+  the day it appears rather than the day someone opens it.
+
+  It also asserts that each surface really is showing the step, because a net
+  that checks strings for a substring passes beautifully when every string is
+  empty.
+
+Left for the owner: whether the **NEXT UP strip** should say it too. The
+argument for is that "step 2 of 3" there says *you have already started this*,
+which is one of the strongest anti-freeze signals there is. The argument
+against is that the strip is the one card this app keeps deliberately
+lightest. One line of code either way, which is why it should be decided
+rather than drifted into.
+
+## 3.60.0 — The other tab
+The Eisenhower tab had been the less-audited half of the app for a long time.
+Looked at the way a stranger meets it, two things were wrong, and one of them
+breaks the rule the whole app is built on.
+
+- **Shortcuts changed the tab you could not see.** `bind_all` means every
+  shortcut fires whichever tab is in front. With the matrix up and a
+  selection left behind on the task list, **Ctrl+P changed a hidden task's
+  priority, Ctrl+Up pinned one, Ctrl+D and Ctrl+T and Ctrl+M opened dialogs
+  about one, and Ctrl+B emptied a scratchpad you could not see into tasks you
+  could not see.** This app's one inviolable rule is that it never changes
+  something you are not looking at, and muscle memory built on the main tab
+  is exactly what carries a keystroke to the other one.
+
+  The fix was already in the file: `focus_capture` and `focus_search` select
+  the tasks tab before doing anything. That is now a column in the bindings
+  table rather than two functions' private habit — every shortcut states
+  whether it shows the tab it acts on, and a test reads the table with `ast`
+  so a shortcut added next year has to answer the question.
+
+  **Ctrl+Z deliberately does not.** Undo also reverses matrix changes, and
+  yanking someone to the other tab to undo what they did on this one is the
+  same crime facing the other way. It names what it undid instead.
+
+- **The quadrant greyed nothing.** The main tab has disabled its
+  selection-dependent controls since the first-run audit, and the reason is
+  written down there: an inert control is still a small decision, and the
+  only way to learn a button was not for you was to press it and be told
+  "Select a task to…". This tab answered exactly that way for four of its
+  buttons, out of eleven live controls.
+
+  Three questions rather than one. Most need a selection. **Copy all to
+  tasks** needs the quadrant to have anything in it. And **Take it back**
+  needs the selected task to actually be *out* with someone — offering it on
+  a task nobody has is offering to undo something that never happened.
+
+  What each button needs is stated beside the button, not in a list of label
+  strings somewhere else: a list of names keyed on other names is the disease
+  this codebase keeps curing, and renaming a button would have quietly
+  dropped it out of the greying.
+
+- **The matrix folder path moved under the quadrants**, the same demotion the
+  tasks tab got in 3.59.0.
+
+Also fixed: a test that failed on exactly one day of the year. A fixture
+pinned `snoozed_until` to a date near the day it was written, and when the
+clock reached it, the handoff brief's own "handed over on <today>" line
+contained the same string — so a test asserting the snooze never leaks into a
+brief failed, correctly, about the wrong thing. The date is far-future now.
+
+## 3.59.0 — Less on the first screen
+From a usability audit of the app as a stranger meets it. The core loop was
+already short — open, read one named task, one click, one prefilled dialog,
+working — but the screen around it was denser than the person it is for.
+Counted on a first run: **33 clickable controls, 24 of them live**.
+
+- **The filter row waits until there is something to filter.** A search box,
+  Clear, three dropdowns and "Show done" — six live controls narrowing an
+  empty list, on the screen a new person meets first. Nothing there can do
+  anything until a task exists, and a control that cannot act is still a
+  thing to read and decide about.
+
+  It obeys the rule calm mode already wrote down: **never hide a control that
+  is still filtering the list**. So an active filter keeps the row up even
+  when nothing is left to show — that is exactly when you need to see the
+  filter in order to clear it — and Ctrl+F pins it for the session, because a
+  shortcut whose whole job is to put the cursor in that box must not leave
+  the box hidden.
+
+- **Where the file lives moved below the capture box.** A JSON path and a
+  folder button used to be the third thing on the page, between the title and
+  Quick capture. Where the file lives matters once; the capture box matters
+  every time. It sits in the dead space under the capture card rather than in
+  the footer, which has 345px spare at the window's floor until the status
+  line says something long — and a row that fits except when the app has
+  something to tell you is a bug this project has already shipped twice.
+
+- **Two buttons said "Clear".** One narrowed a list; the other threw away
+  everything you had dumped in the scratchpad. The destructive one is
+  **"Clear pad"** now. The filter row keeps the short label because it cannot
+  afford the width at the window's floor, where "Show done" is already
+  clipped.
+
+- **The help says its key.** Twenty-two keyboard shortcuts, and the app named
+  one of them anywhere in context. The link now reads **"Shortcuts (F1)"** —
+  no new pixels, and the difference between a feature you have and one you
+  use.
+
+Together: **33 controls down to 27 on a first run, 24 live down to 18.**
+
+Not changed, because it is not mine to decide: whether **calm mode should be
+the default**. It takes the four-task screen from 39 controls to 25, which is
+the strongest single lever here — and it changes what every existing user
+sees on next launch.
+
+## 3.58.0 — Said once, and not about what you set aside
+Two more places where a rule the app already had was not being asked, found
+by following v3.57.0's fix to its other readers.
+
+- **"Booked for today" no longer counts a task you have put down.** Press
+  "Not today" on something booked for today and the banner went on saying
+  *"1 booked for today →"* — the app contradicting, in the second-most
+  prominent slot on the screen, the statement you had just made. The more
+  recent of your two statements is the one that means something. A task out
+  with someone else was the same error the suggestion slot already avoids:
+  the banner's click selects it and says *"Booked for today: X"*, pointing
+  you at work that is not yours to do.
+
+  Not a hiding, either way — the task keeps its place in the list and its
+  `booked` badge. Only the count changes, exactly as with the suggestion
+  slot. Both halves of the banner learned it, the main list and the matrix
+  Schedule quadrant.
+
+- **The focus card stopped saying what NEXT UP was already saying.** The
+  ranking warms recently-worked tasks on purpose and scores "already names
+  its first step" highest — which a task you are mid-plan on always is — so
+  the card and NEXT UP naming the same task is the *ordinary* case, not an
+  edge one. Measured across three arrangements, the card's second line was
+  the same step NEXT UP was showing two hundred pixels below, in larger type,
+  with a **Start this** button beside it. In calm mode, whose whole job is
+  having less on the screen, that duplicate was the longest text block up.
+
+  Only the repeated half goes: *"Last time: 20 minutes on X — you finished
+  Y"* is a record NEXT UP does not carry. It is keyed on what the strip is
+  **showing**, not on what the ranking would pick, because the strip steps
+  out of sight during a running block while the ranking goes on agreeing —
+  and a line dropped for a box that is not there is information lost for
+  nothing.
+
+- **One snooze rule, one put-down filter.** `snooze_is_live` takes the date
+  rather than the task, so the task editor asks it instead of writing the
+  comparison out again, and `rank_for_starting` collapses its two filters
+  into `is_put_down`. Four copies of this rule existed a release ago; there
+  is one now.
+
+  The editor's copy turned out to be untested as well as duplicated:
+  replacing it with `if snoozed_until:` passed the entire suite, so nothing
+  checked that a **spent** snooze shows no "Excused from suggestions until…"
+  checkbox — an untrue sentence attached to a control that does nothing.
+
+## 3.57.0 — A task you put down stays put down
+The focus card learned to say what you were last doing (3.56.0) and then said
+it about tasks you had deliberately set aside.
+
+- **"Not today" now means not today on the card as well.** The rules already
+  existed and are written down in `rank_for_starting`: a snoozed task *"stays
+  on the list and in every search, it just stops guarding the suggestion
+  slot"*, and a task out with someone else *"is not yours to start —
+  suggesting it is the app inviting you to duplicate work someone else is
+  already doing."* The focus card sits **above** the slot those rules protect
+  and ignored both. Press "Not today" on the task you just spent twenty
+  minutes on and the suggestion slot went quiet while the card went on
+  reading *"Next: copy the headings across"* — for the rest of the day, at
+  every launch. `snooze_next` says why that matters in its own docstring:
+  repeated forced contact with a dreaded task does not build willpower, it
+  builds avoidance of the whole app.
+
+  The two halves of the line are not the same kind of sentence, so only one
+  of them goes. *"Last time: 20 minutes on X"* is a **fact** — snoozing a
+  task does not change what you were doing yesterday, and losing that half
+  would answer "what was I doing?" with silence about the very task you spent
+  the time on. *"Next: Y"* is an **instruction**, and it now waits until the
+  task is a real option again: the morning after a snooze, or the check-back
+  day of a handoff.
+
+- **The rule moved onto the model, where it can only be answered once.**
+  `is_snoozed` and `is_put_down` sit beside `is_waiting` and `is_due_back`
+  on both `Task` and `MatrixTask`, and the ranking now asks the model instead
+  of testing the date inline. Two copies of this predicate is exactly how the
+  card ended up naming a task the list had already agreed to stop naming, and
+  a test asserts directly that the two never disagree — across a plain task, a
+  live snooze, a spent snooze, a handoff and a handoff due back.
+
+## 3.56.0 — "What was I doing?", answered from the record
+An interruption costs the context, not the intention: you know you were
+working, you have lost *what on*. Every piece of the answer was already being
+written down and none of it was ever said out loud.
+
+- **The focus card now remembers.** Where it used to read "Nothing picked
+  yet" — three words of dead text in the most prominent place on the screen,
+  at the exact moment someone is trying to remember — it now says what you
+  were last on, how long you spent, the step you actually finished, and the
+  step that comes next. Nothing was collected to make this work: the session
+  log knew the task, the step log knew the step, the task knew its plan.
+
+  Three rules shape the sentence, and each is tested rather than trusted.
+  **It never counts the days** — "Last time", never "six days ago", because
+  an elapsed-time figure on a task you have been avoiding is a reproach.
+  **It never asks anything** — the point of reading it is to be spared a
+  decision, and a prompt at that moment would put one back. **It says nothing
+  rather than something empty** — no sessions, or a task since deleted or
+  finished, and the card keeps its quiet caption.
+
+  It costs no pixels when there is nothing to say, which is the only kind of
+  addition this screen can afford after v3.48.0 spent a release taking things
+  off it.
+
+- **Steps now record which task they belonged to.** The step log stored the
+  task's *title*, so two tasks with the same words were the same task and a
+  renamed task lost its history. Entries written before this release have no
+  id and are read as belonging to nothing rather than guessed at.
+
+- **The line is bounded, because the text in it is yours.** The three pieces
+  it quotes back are text you typed, and the capture box exists precisely so
+  you can type a paragraph into it. Rendered at the window's smallest size, a
+  nine-line caption pushed the filter row, the task list and "Where do I
+  start?" off the bottom of the panel — where nothing scrolls to reach them.
+  Forty characters is enough to recognise a task you were on an hour ago,
+  which is all this line is for.
+
+- **A new net over the plan.** `tests/test_first_step_writes.py` reads the
+  source and finds every assignment to `first_step` anywhere in the app,
+  requiring each one to either go through `set_current_step` or be named with
+  a reason. A direct write is silently reverted by the next load — the test
+  demonstrates that rather than describing it — and a site added next year
+  fails the suite the day it appears.
+
+## 3.55.0 — The other half of the wheel fix, and a door that hid itself
+Three things, all of them consequences of the last release rather than new
+ground — which is the argument for auditing a release from outside it.
+
+- **The same stray-scroll bug on the timer.** v3.54.0 stopped a wheel notch
+  changing a combobox and stopped there. The right question was *which ttk
+  classes bind the wheel at all*, and the answer includes `ttk.Spinbox`:
+  one notch over the "Min" box took a session from 15 minutes to 14 and
+  carried it into the running clock, so the block you agreed to was quietly
+  not the block you got. Both spinboxes — the timer and the start dialog's
+  session length — are covered now.
+
+  The guard is the part that matters. `tests/test_wheel.py` no longer looks
+  for comboboxes: it **walks the app and every dialog**, reads the value of
+  anything that has one, and requires every wheel-bound class it meets to be
+  either checked or named as one whose wheel legitimately scrolls. A widget
+  added next year is covered the moment it exists, and a *class* nobody has
+  decided about fails the suite. That version would have caught the spinbox
+  on the day the combobox was fixed.
+
+- **"N done today" hid the panel it opens.** v3.54.0 made that panel list
+  finished steps as well as finished tasks; the pill went on counting tasks.
+  So the number disagreed with what it opened — and on a day spent moving
+  through one long task and finishing nothing the count was zero, which
+  hides the pill, and the pill is that panel's **only** route. The evidence
+  existed and could not be reached. The count is a promise about the panel,
+  so it now counts what the panel shows.
+
+- **A fourth place that wrote `first_step` directly.** The editor and the
+  session-end dialog were both fixed to go through `set_current_step`; the
+  start dialog was not. On a task with a plan, renaming the first move as you
+  started a session left `first_step` disagreeing with the plan — and the
+  invariant repairs that on the next load, so the rename survived exactly
+  until the app was closed.
+
+- **Where you are in the plan, during a session.** The focus card, the
+  pop-out and the start dialog now say "step 2 of 4" beside the step. Only
+  the place, deliberately — not what is coming, because that is a decision,
+  and the start dialog is the screen someone is looking at *because* deciding
+  is the part they are stuck on.
+
+## 3.54.0 — A stray scroll cannot hide your tasks, and a finished step counts
+Two things, both found by auditing a release from outside it.
+
+### One wheel notch over a combobox changed its value
+ttk binds the mouse wheel to `ttk::combobox::Scroll`, and it always has. So
+**one notch with the pointer merely over a combobox changed it** — no click,
+no focus. Measured in the running app with three tasks on screen:
+
+```
+visible before: 3 | kind filter: (any feel)
+after ONE wheel notch over the filter combobox:
+   filter now: Urgent sprint | visible: 0
+```
+
+This app's own rule is that hiding a task is the one thing it will not do,
+and that gesture hid all of them, silently, in response to the most ordinary
+thing anyone does to a list. Three of the six comboboxes change **saved
+data** rather than the view, and the worst of them is "Repeats": a stray
+notch there makes a task recur for ever.
+
+The fix is one binding, installed on the **class** rather than on each
+widget, because the fault is a dangerous default that anything added later
+would inherit too — and this project has already watched four hand-written
+per-site lists go stale. It deliberately does not swallow the event: in a
+dialog whose form scrolls, the wheel now scrolls the form, which is what the
+person was reaching for. The dropdown list is a different class and still
+scrolls. `tests/test_wheel.py` finds every combobox in the app rather than
+listing them, so a seventh is covered the moment it exists.
+
+### A finished step is evidence, and nothing was writing it down
+The week review counts sessions, minutes and *finished tasks*. A step ticked
+off is none of those, so a week spent moving through a four-step report
+showed effort and no outcome — on the one screen whose stated job is that
+*"I did nothing this week is a distortion, and the correction is not
+motivation; it is the record."*
+
+The obstacle was that `steps_done` is a **cursor, not a history**: nothing on
+the task says when a step was ticked, so unless it is written down at the
+moment it happens the evidence does not exist. There is now a step log, the
+same shape as the completed-tasks log that already exists so that tidying up
+cannot erase the answer to "what did I get done today". A day whose only
+outcome was two steps of something long now appears in the week, where
+before it read as blank.
+
+The cheaper idea — recording the step on the focus session — was rejected on
+purpose: it would credit steps ticked at session end and silently miss those
+ticked in the editor, and a record that covers *some* of the thing is worse
+than one that admits its scope.
+
+Undo takes the record back with the cursor, which needed the undo stack to
+snapshot the log alongside the tasks: restoring the cursor and leaving the
+entry behind would leave the week review claiming a step was finished that,
+as far as the task is concerned, never was.
+
+## 3.53.0 — The plan reaches the rest of the app
+v3.52.0 gave a task a plan. This is the pass that asks where a plan needs to
+be visible and finds four places it was not — two of them defects in v3.52.0
+itself, which is the whole argument for auditing a release from outside it.
+
+- **Search reads every step.** It read the title, the details, the step you
+  are *on* and the tags — so a task whose third step said "ring the insurance
+  company about the excess" did not match "insurance". This app says out loud
+  that a task stays "in every search" and that hiding one is the thing it will
+  not do; a step you typed and cannot find is the search box teaching you to
+  distrust it.
+
+- **A handoff brief sends the whole plan**, as a checklist, with the steps
+  already done ticked and the one to pick up at marked. It used to send only
+  the step you were on, which is the difference between "do this job" and
+  "carry on from here" — an agent that redoes step one is doing damage rather
+  than work. The JSON carries `steps` and `steps_done` as data.
+
+  **The guard matters more than the fix.** `build_brief` was a *fourth*
+  hand-written list of fields read off a model, after the two conversions, the
+  per-round resets and the editor's three call sites — and it had gone stale
+  on schedule. `tests/test_handoff.py` is now keyed on
+  `dataclasses.fields(MatrixTask)`: every field either reaches the agent or is
+  named as deliberately not sent, with a reason. Which quadrant you filed it
+  in, how it feels to start, your flag, your pin, a "not today" and how often
+  it repeats are all decisions about *your* day rather than about the work,
+  and the list now says so instead of leaving it unwritten.
+
+- **The end of a session asks a task with a plan a different question.** Two
+  things can have happened in the last fifteen minutes — you finished this
+  step, or you did not — and one blank field labelled *"Where does it pick up
+  next time?"* conflated them: on a task with a plan it invited a description
+  of the **next** step while the cursor was still on this one, so typing the
+  honest answer overwrote the wrong line. A planned task now sees the step it
+  is on, already filled in, with its place underneath and the same *"Done —
+  move on to X"* checkbox the editor has. Accepting it unchanged does nothing,
+  editing rewords, ticking moves on. A task without a plan is untouched.
+
+  The hint changed with it, because "Leave it blank if you would rather not
+  decide now" is an invitation on an empty box and a lie on a filled one.
+
+### Two things v3.52.0's scrolling editor got wrong
+- **The wheel scrolled the notes box *and* the whole dialog.** A `Text`'s own
+  class binding scrolls it and does not return "break", so the event carried
+  on to the window binding as well — measured, one notch moved the text and
+  slid the form by the same amount. Scrolling your own notes now moves your
+  notes. Over a half-empty box the wheel still moves the form, because a
+  wheel that dies in the middle of a dialog is its own small bug.
+- **Tab could put the cursor somewhere you cannot see.** Focus moves by widget
+  order, not by what is on screen: on a 614px window — the ceiling a 1366x768
+  laptop gives this dialog — it walked into the details box at y=583 and the
+  tag row at y=732, both below the bottom edge. You typed and nothing
+  appeared. The form now follows the keyboard, in both directions, and leaves
+  itself alone when focus lands on Save, which is not in the scrolling area.
+
+## 3.52.0 — A task can be a plan instead of a wall
+A task held exactly **one** step. The moment it was done the task was a blank
+wall again, so every transition charged a fresh decision — the one thing this
+app's own rules say not to charge for. "Write the report" is a wall; "open
+last year's, copy the headings, fill in the numbers" is three things you can
+start.
+
+- **The rest of the plan**, one step per line, in the task editor on both
+  tabs. Optional; a task with no plan behaves in every way exactly as it did.
+  What you paste in is run through the same coercion the scratchpad uses, so
+  bullets, checkboxes and the `[timestamp]` prefix quick capture writes are
+  all stripped for you.
+- **Ticking a step off** moves you down the plan, and the status line says
+  what is *next* rather than how many are left: a count of what remains is a
+  debt, and the next step is a way in.
+- **The row says where you are** — `→ copy the headings across · step 2 of 4`
+  — in the slot the first step already occupied, so it costs no new pixels.
+  It counts what exists and never what is missing.
+- **A repeating task with steps is a routine.** The plan carries into the next
+  round; your place in it does not, so next week's bins start at step one.
+  That is not a separate feature, it is what these two fields already mean
+  together.
+
+**The design constraint was `first_step`, not the plan.** It has forty-seven
+references across seven modules and it is what `is_ready` reads, which is what
+the whole "where do I start?" ranking scores highest. A derived `next_step`
+would have been a forty-seven-site refactor; a second field holding "what
+next" would have been a second source of truth, which is the exact shape of
+bug the last four releases have been fixing.
+
+So there is no second answer. A task with a plan **defines** `first_step` as
+`steps[steps_done]`, one function says so, and **not one of the forty-seven
+readers changed**. `steps_done` is a cursor rather than a tick-list precisely
+because a repeat has to hand the whole plan to its next round — steps consumed
+destructively could not come back. Editing the step box on a task with a plan
+writes through to the plan; a file whose `first_step` has drifted from its
+plan is repaired on load rather than believed; and a plan that shrinks to one
+step collapses back into a plain first step, because "step 1 of 1" is a
+control that tells you nothing.
+
+Both `dataclasses.fields()` completeness nets refused the change until every
+new field was classified, which is what they are for. One of them refused
+`first_step` as plain setup — correctly, since a plan makes it derived — and
+that argument is now a third category in `tests/test_repeat_rounds.py` with
+its reason written down.
+
+### Two things found while building it
+- **A window shorter than its content stops drawing widgets.** v3.51.0 fixed
+  that for Save by capping the height and pinning the button row. Capping
+  alone left everything else exposed: on the 1366x768 laptop this app
+  supports on purpose, the editor's ceiling is 614px against content wanting
+  828, and measured at that size the details box and the tag row were **not
+  drawn** — nine controls missing at 520. A ceiling without a scrollbar is a
+  quieter version of the bug the ceiling was added to fix. The editor's form
+  now scrolls, with Save and Cancel outside it; a form that fits shows no
+  scrollbar at all and looks exactly as it did.
+- **Handing an already-waiting task to an agent said nothing about who had
+  it.** Newest-holder-wins is right; the silence was not. It now says *"Was
+  out with Mum; now out with Codex."*
+
+## 3.51.0 — Waiting on a person, and a Save button you can reach
+The Delegate quadrant got a way to hand a task to an AI agent in v3.44.0, and
+with it the whole *waiting* treatment: a badge, a line under the title saying
+who has it and when to check back, and the task quietly stepping out of the
+"what should I start?" slot until that day. None of that machinery ever cared
+who was holding the task — `handed_to` is free text — but the only way to set
+it was to hand something to an agent, from one quadrant of the other tab.
+
+- **You can now say you are waiting on a person.** The task editor gained a
+  *Waiting on* field and a *check back* date, on both tabs, alongside the
+  take-back checkbox that was already there — one direction visible at a
+  time, never both. Blank date means three days, the same default the agent
+  handoff uses, because handing something over and then forgetting it is not
+  delegating, it is losing it somewhere more respectable.
+
+  Nothing downstream needed changing: the badge, the subtitle, the search,
+  the exclusion from the suggestion slot and the return on the check-back day
+  were all built already and all agnostic. What was missing was the sentence.
+  This matters because "waiting on a reply" is the single most reliable way
+  for a task to rot quietly, and this app already had the right treatment for
+  it — a fact ("check back Sat"), never a verdict ("overdue").
+
+- **The matrix editor was showing a task that was not the task.** It never
+  passed `repeat`, so a quadrant task wearing a `weekly` badge opened saying
+  *"Does not repeat"* — and since the result was not applied either, setting
+  the combobox to "Does not repeat" changed nothing. It also never passed
+  `handed_to`, so the take-back checkbox never appeared there; "Take it back"
+  is a **Delegate-only button**, which left a waiting task moved to any other
+  quadrant with no way out of the mark at all.
+
+- **Adding a matrix task dropped the estimate and the repeat.** Filled in as
+  "about 25 minutes, every week" and saved as neither, without a word. The
+  worst shape a data loss can take, because the person watched themselves
+  type it.
+
+- **Save and Cancel were not being drawn.** Found by rendering the dialog
+  rather than by any test. The task editor opened at a fixed 520px against
+  content that wanted **578** with a tag row; Tk lays out in pack order and
+  simply stops, so the button row was absent — not clipped, not scrolled off
+  — on a window whose only other exit is Escape, which throws the edit away.
+  This predates every feature above; each optional row added since had made
+  it worse. Two fixes: the dialog now sizes to its content (the mechanism
+  `ModalDialog` already had, and whose own comment says *"a fixed height is
+  always wrong for someone when the content varies"*), and the button row is
+  packed against the bottom of the window **before** the body, so on a screen
+  too short for the content the notes box gives up the room rather than the
+  way to save.
+
+- **The title measurement no longer crashes a refresh.** `_title_width` built
+  its font without `root=`, so it bound to the global default root — a
+  *different* app in a process holding two, and `None` once the first is
+  destroyed, where it raised rather than laying out approximately. The badge
+  measurement thirty lines above has carried both guards from the start.
+
+- The dead `handoff.with_handoff` is gone.
+
+**The guard:** `tests/test_editor_fields.py` reads the dialog's own signature
+and the dict `collect()` actually returns, and requires every caller to both
+pass and apply every field — or to name the exception with a reason. Three of
+the five bugs above were the same disease, a hand-written argument list at
+each of three call sites, and it caught two more the moment it was written.
+
+## 3.50.0 — The badges give way before the title does
+v3.49.0 stopped badges clipping a long title by letting them narrow it
+instead — and left nothing bounding how narrow. This is the other half of
+that fix.
+
+- **One task could be taller than the whole visible list.** Measured, one
+  138-character task with a full badge load, varying only the window width:
+  3 lines at 1600, 4 at 1400, 6 at 1240 (the default), and **11 lines — a
+  224px row — at 1120**, which is the app's own minimum width. The task list
+  viewport at the minimum window height is 55–103px, so that single row
+  filled it and pushed every other task out of view. At the default width it
+  was still 139px, more than half a 254px viewport.
+
+  This was the mirror of the bug it fixed rather than a return of it: v3.49.0
+  hid *words*, this hid *other tasks*.
+
+- **The strip is the compressible thing, and it already knew.** `MAX_BADGES`
+  has always carried the comment *"the rest collapse into one quiet '+k' pill
+  instead of squeezing the title to nothing (a 15-tag task used to render as
+  tags and no title at all)"*. That intent was right and measured against the
+  wrong quantity: a **count** does not bound a **width**. Six wide badges
+  cost more room than fifteen narrow ones. The strip now has a width budget
+  as well, and the `+k` pill it already owned does the rest. Room is reserved
+  for `+k` *before* the last badge is accepted, so the overflow marker can
+  never be the thing that busts the budget.
+
+- **The budget is what the title does not want, floored at 42% of the row.**
+  A share alone was wrong in the other direction: it collapsed **"Bins"** — a
+  four-letter task — down to four badges on a wide screen, for no reason at
+  all. A short title now keeps every badge it has room for; a long one gets
+  the floor. Measured after: 3 lines at every width from 1600 down to 1240,
+  and 4 at the 1120 floor.
+
+- **The cheap test runs first, and that matters.** Measuring a title is a Tcl
+  round trip, and almost every row carries one or two badges that fit inside
+  the share whatever the title is doing — so the title's width cannot change
+  the answer and is not worth asking for. Paying it on every row cost about a
+  fifth of the 300-task paint (0.82s → 0.98s). Skipping it when the badges
+  already fit puts the documented benchmark back at **0.82s**, unchanged. The
+  measurements that are still needed are memoised, which also took a filter
+  round trip from 0.132s to 0.108s — better than before, because rows with no
+  badges now skip the work entirely. A heavily-badged 300-task list is 1.01s
+  against 0.89s: the case where the budget genuinely does work, and the only
+  one that pays.
+
+- 683 → 689 tests, Xvfb (`skipped=2`) and headless (`skipped=285`). **Six
+  promises broken on purpose; five caught, and the sixth found a gap in the
+  tests rather than in the code.** Removing the re-budget on resize passed
+  everything, because every test refreshed the list after resizing the
+  window. Dragging a window narrower fires a Configure event and *nothing
+  else* — no refresh, so the per-row code never runs, and the strip kept the
+  room it was given at the old width. There is now a test that resizes and
+  does not refresh.
+
+## 3.49.0 — Two regressions this branch caused itself
+Both were introduced by earlier work in the arc that has just merged, and
+both were found by the research habit rather than by a failing test.
+
+- **A long title was being clipped again, on any row carrying badges.**
+  v3.41.0 fixed *"a 137-character task showed about 78 characters: not
+  scrolled off, not shortened with an ellipsis — absent, ending mid-word"*.
+  It came back through the badge strip. `RowList._rewrap` applied **one**
+  `wraplength` to the whole row pool, computed from the row width and a
+  constant `TEXT_INSET` whose own comment budgeted *"a little slack for a
+  badge strip sitting to its right"* — 40px of slack against a strip that
+  reaches 430px. The title wrapped at the full width, was then given only
+  what the badges left, and Tk clipped the difference: a Label wraps at
+  `wraplength` and does **not** re-wrap to fit its allocation.
+
+  Measured on the same 129-character title, only the badge load changing:
+  100% visible with no badges, 91% with a feel set, 81% once booked, 68% with
+  an estimate, 52% repeating, **41% fully badged**. The loss began at the
+  *second* badge, and it punished using the app properly — every badge is
+  something you added by filling the task in, so the tasks you had invested
+  most in were the ones that lost their words. Two tasks differing only in
+  badges rendered differently.
+
+  The wrap width is now worked out **per row**, from that row's own badges,
+  in `_fit_title`. Every badge load is back to 100%: the badged row takes
+  more lines, never fewer words.
+
+- **The handoff marks leaked into every future round of a repeating task.**
+  `Task.next_instance` clears the state that belonged to the round just
+  finished, with the comment *"A snooze belongs to the round it was taken in;
+  carrying it forward would silently excuse the next one too."* v3.46.0 added
+  the three handoff fields to `Task` and **did not extend that rule**. So
+  finishing a repeating task that had been handed to an agent booked the next
+  round already claiming to be out with that agent — and every round after
+  inherited the claim, because each copies the last.
+
+  The harm was checked rather than assumed, and the first hypothesis was
+  wrong. *Always*: every future round displayed a handoff that never
+  happened. *Additionally*, only when the stale check-back date was still
+  ahead of the new round's own date, the round was also excluded from the
+  suggestion slot — measured, a **daily** repeat handed over with a 30-day
+  check-back was silently not offered for 30 consecutive rounds, while a
+  weekly repeat with a 3-day check-back was unaffected.
+
+- **Both fixes leave a guard behind, because both diseases were the same.**
+  A hand-written list with nothing checking it against the model.
+  `tests/test_repeat_rounds.py` is keyed on `dataclasses.fields(Task)` and
+  requires every field to be classified as *setup, carried forward*,
+  *per-round, reset*, or *fresh each round* — with a reason — so the next
+  field added has to be decided rather than silently inherited. It also
+  asserts the code's own `PER_ROUND_FIELDS` matches the classification, since
+  two hand-maintained lists of the same thing is exactly how this happened.
+
+- 667 → 683 tests, Xvfb (`skipped=2`) and headless (`skipped=279`). **Seven
+  promises broken on purpose; two initially survived and both were weak
+  tests of mine.** A no-badge row was asserted to be *wider than before*
+  rather than *the full width*, which a sticky flag satisfied while still
+  being wrong. And the choice of `winfo_reqwidth` over `winfo_width` survived
+  because every test called `update()` first — which fires a `<Configure>`
+  that quietly re-fits the row and hides the bug. Measured at the moment the
+  row is applied, the strip's allocated width is **1** while its requested
+  width is **188**, so reading the wrong one leaves the title ~187px too wide
+  and clips 6–18% of it. Nothing guarantees that corrective `<Configure>`
+  arrives — it only fires when the geometry actually changes — so the test
+  now reads the decision with no layout pass in between.
+
 ## 3.48.0 — Fewer things to decide about, at the moment you have least to spend
 Counted rather than guessed: the first screen of a brand-new install offered
 **32 clickable controls** before a single task existed — and about half of

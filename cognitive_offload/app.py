@@ -52,7 +52,13 @@ from .storage import (
     category_label,
     display_path,
 )
-from .rows import focus_caption, matrix_row, sort_label
+from .rows import (
+    focus_caption,
+    matrix_row,
+    plan_place,
+    sort_label,
+    step_with_place,
+)
 from .theme import apply_theme, px, style_text, tokens
 from .timer import FocusTimer
 from .undo import UndoStack
@@ -113,6 +119,11 @@ class CognitiveOffloadApp(tk.Tk):
         # Tasks finished and then cleared away; keeps "N done today" honest
         # after a tidy-up instead of resetting the day to zero.
         self.completed_log: list[dict] = []
+        # Steps ticked off, with the day they were ticked. `Task.steps_done`
+        # is a cursor and keeps no history, so this is the ONLY record that a
+        # step was ever finished — and the week review's whole job is being
+        # the record.
+        self.steps_log: list[dict] = []
         self._day = None
         # Which suggestion the "Next up" strip is showing; "Not that one"
         # walks it forward.
@@ -127,7 +138,11 @@ class CognitiveOffloadApp(tk.Tk):
         self.show_done_var = tk.BooleanVar(value=self.config_store.show_done)
         self.status_var = tk.StringVar(value="Ready.")
         self.counts_var = tk.StringVar(value="")
-        self.focus_task_var = tk.StringVar(value="Nothing picked yet")
+        self.focus_task_var = tk.StringVar(value=self.IDLE_CAPTION)
+        self._next_up_shown = False
+        #: set the first time Ctrl+F is pressed, and never unset — see
+        #: `focus_search`.
+        self._filter_row_requested = False
         self.momentum_var = tk.StringVar(value="")
         self.due_var = tk.StringVar(value="")
         self.today_var = tk.StringVar(value="")
@@ -269,35 +284,57 @@ class CognitiveOffloadApp(tk.Tk):
         build_matrix_tab(self, self.matrix_frame)
 
     def _bind_shortcuts(self) -> None:
-        # (sequence, handler, works_while_typing). Ctrl+P/T/D/N/O/B/Z all have
-        # default meanings inside Text and Entry widgets, so those shortcuts
-        # step aside whenever a text widget has focus.
+        # (sequence, handler, works_while_typing, shows_the_tasks_tab).
+        #
+        # Ctrl+P/T/D/N/O/B/Z all have default meanings inside Text and Entry
+        # widgets, so those shortcuts step aside whenever a text widget has
+        # focus.
+        #
+        # The fourth column is the one that matters on the other tab. These
+        # are installed with `bind_all`, so every one of them fires whichever
+        # tab is in front — and with the Eisenhower tab up, Ctrl+P changed the
+        # priority of a task on the hidden list, Ctrl+Up pinned one, Ctrl+D
+        # opened the editor on one, and Ctrl+B emptied the scratchpad you
+        # could not see into tasks you could not see. This app's one rule is
+        # that it never changes something you are not looking at.
+        #
+        # `focus_capture` and `focus_search` already did the right thing by
+        # selecting the tasks tab themselves; the column makes that the rule
+        # rather than two functions' private habit. Ctrl+Z is deliberately
+        # NOT marked: undo also reverses matrix changes, and yanking someone
+        # to the other tab to undo what they did on this one is the same
+        # crime facing the other way.
         bindings = [
-            ("<Control-s>", lambda: self.save_state(), True),
-            ("<Control-f>", lambda: self.focus_search(), True),
-            ("<Control-Key-1>", lambda: self.notebook.select(0), True),
-            ("<Control-Key-2>", lambda: self.notebook.select(1), True),
-            ("<F1>", lambda: self.show_shortcuts(), True),
-            ("<Escape>", lambda: self.stop_timer(), True),
-            ("<Control-o>", lambda: self.load_state_dialog(), False),
-            ("<Control-n>", lambda: self.focus_capture(), False),
-            ("<Control-b>", lambda: self.brain_dump_into_tasks(), False),
-            ("<Control-p>", lambda: self.toggle_selected_priority(), False),
-            ("<Control-t>", lambda: self.tag_selected(), False),
-            ("<Control-d>", lambda: self.edit_selected_details(), False),
-            ("<Control-m>", lambda: self.send_selected_to_matrix(), False),
-            ("<Control-z>", lambda: self.undo(), False),
-            ("<Control-Up>", lambda: self.promote_selected(), False),
-            ("<Control-g>", lambda: self.start_here(), False),
-            ("<Control-r>", lambda: self.focus_on_selected(), False),
+            ("<Control-s>", lambda: self.save_state(), True, False),
+            ("<Control-f>", lambda: self.focus_search(), True, True),
+            ("<Control-Key-1>", lambda: self.notebook.select(0), True, False),
+            ("<Control-Key-2>", lambda: self.notebook.select(1), True, False),
+            ("<F1>", lambda: self.show_shortcuts(), True, False),
+            ("<Escape>", lambda: self.stop_timer(), True, False),
+            ("<Control-o>", lambda: self.load_state_dialog(), False, False),
+            ("<Control-n>", lambda: self.focus_capture(), False, True),
+            ("<Control-b>", lambda: self.brain_dump_into_tasks(), False, True),
+            ("<Control-p>", lambda: self.toggle_selected_priority(), False, True),
+            ("<Control-t>", lambda: self.tag_selected(), False, True),
+            ("<Control-d>", lambda: self.edit_selected_details(), False, True),
+            ("<Control-m>", lambda: self.send_selected_to_matrix(), False, True),
+            ("<Control-z>", lambda: self.undo(), False, False),
+            ("<Control-Up>", lambda: self.promote_selected(), False, True),
+            ("<Control-g>", lambda: self.start_here(), False, True),
+            ("<Control-r>", lambda: self.focus_on_selected(), False, True),
         ]
-        for sequence, handler, while_typing in bindings:
-            self.bind_all(sequence, self._shortcut(handler, while_typing))
+        for sequence, handler, while_typing, shows_tasks in bindings:
+            self.bind_all(sequence,
+                          self._shortcut(handler, while_typing, shows_tasks))
 
-    def _shortcut(self, handler, while_typing: bool):
+    def _shortcut(self, handler, while_typing: bool, shows_tasks: bool = False):
         def wrapper(_event=None):
             if not while_typing and self._typing():
                 return None  # let the widget's own binding win
+            if shows_tasks:
+                # Before, not after: the point is to be looking at the thing
+                # when it changes, not to be shown the aftermath.
+                self.notebook.select(0)
             handler()
             return "break"
 
@@ -366,6 +403,7 @@ class CognitiveOffloadApp(tk.Tk):
             show_done=self.show_done_var.get(),
             kind=self._active_kind(),
             completed_log=self.completed_log,
+            steps_log=self.steps_log,
         )
         self._visible = view.visible
 
@@ -379,6 +417,7 @@ class CognitiveOffloadApp(tk.Tk):
         self.counts_var.set(view.summary)
         # The row set just changed, so what the actions can act on has too.
         self.sync_action_availability()
+        self.sync_filter_row()
         self.refresh_next_up()
         # An empty ``done_today_text`` is the presenter's decision that today
         # has nothing to say, not a missing value. Hide the whole pill rather
@@ -412,6 +451,7 @@ class CognitiveOffloadApp(tk.Tk):
                                       exclude=exclude)
         if view is None:
             self._next_task_id = None
+            self._next_up_shown = False
             self.next_title_var.set("")
             self.next_step_var.set("")
             if getattr(self, "next_frame", None) is not None:
@@ -419,6 +459,10 @@ class CognitiveOffloadApp(tk.Tk):
             return
 
         self._next_task_id = view.task_id
+        # Tracked rather than read back off the widget: a withdrawn window
+        # reports every widget unmapped, so asking `winfo_ismapped` would make
+        # anything keyed on this quietly never fire.
+        self._next_up_shown = getattr(self, "next_frame", None) is None
         self.next_title_var.set(view.title)
         self.next_step_var.set(view.step)
         if getattr(self, "next_frame", None) is not None:
@@ -436,8 +480,10 @@ class CognitiveOffloadApp(tk.Tk):
             # goes away, the deliberate keystroke does not.
             if self._timer_running and self._timer_mode == "focus":
                 self.next_frame.grid_remove()
+                self._next_up_shown = False
             else:
                 self.next_frame.grid()
+                self._next_up_shown = True
 
     def next_task(self) -> Task | None:
         return next((t for t in self.tasks if t.id == self._next_task_id), None)
@@ -507,6 +553,44 @@ class CognitiveOffloadApp(tk.Tk):
         self.kind_filter_var.set(ALL_KINDS)
         self.refresh_tasks()
 
+    def any_filter_active(self) -> bool:
+        """Is anything currently narrowing the list?
+
+        Read by the rule below, and deliberately generous: "Show done" being
+        off hides finished tasks, which is narrowing even though nobody thinks
+        of it as a filter.
+        """
+        return bool(self.search_var.get().strip()
+                    or self._active_tag()
+                    or self._active_kind()
+                    or not self.show_done_var.get())
+
+    def sync_filter_row(self) -> None:
+        """The filter row appears when there is something to filter.
+
+        On a first run it was six live controls — a search box, Clear, three
+        dropdowns and "Show done" — narrowing an empty list, on the screen a
+        new person meets first. Nothing there can do anything until a task
+        exists, and a control that cannot act is still a thing to read and
+        decide about.
+
+        It obeys the rule calm mode already wrote down: **never hide a control
+        that is still filtering the list**, because a shorter list with no
+        visible reason why is worse than the clutter. So an active filter
+        keeps the row up even with nothing left to show — that is exactly when
+        you need to see the filter in order to clear it. And Ctrl+F pins it
+        for the session, because a shortcut whose whole job is to put the
+        cursor in that box must not leave the box hidden. Calm mode still
+        wins over all three.
+        """
+        row = getattr(self, "filter_row", None)
+        if row is None or self.calm_var.get():
+            return
+        if self.tasks or self.any_filter_active() or self._filter_row_requested:
+            row.grid()
+        else:
+            row.grid_remove()
+
     def clear_search(self) -> None:
         self.search_var.set("")
         self.refresh_tasks()
@@ -521,6 +605,12 @@ class CognitiveOffloadApp(tk.Tk):
             # Searching needs the search box back; asking for it is consent.
             self.calm_var.set(False)
             self.apply_calm_mode()
+        # And asking for it is also consent to keep it, even with nothing to
+        # search yet: a shortcut that puts the cursor somewhere invisible is
+        # a shortcut that appears not to work. Sticky for the session on
+        # purpose — the alternative is a box that comes and goes under you.
+        self._filter_row_requested = True
+        self.sync_filter_row()
         self.search_entry.focus_set()
         self.search_entry.select_range(0, tk.END)
 
@@ -586,7 +676,79 @@ class CognitiveOffloadApp(tk.Tk):
     # undo
     # ------------------------------------------------------------------
     def push_undo(self, label: str) -> None:
-        self._undo_stack.push(label, [t.copy() for t in self.tasks])
+        self._undo_stack.push(label, [t.copy() for t in self.tasks],
+                              self.steps_log)
+
+    def _advance(self, item) -> bool:
+        """Tick the current step off, recording it on the way past.
+
+        Recorded only when the cursor actually moves. It used to be written
+        first and unconditionally, and `advance_step` refuses at the end of a
+        plan — the model's invariant is `first_step == steps[steps_done]`, so
+        the cursor may never pass the last step. Ticking "Done" on the last
+        step therefore logged a finished step and changed nothing, every
+        time it was pressed: three ticks put the same step in the week review
+        three times, and inflated the "N done today" count with it.
+
+        Padding the record is not a smaller sin than losing it. That screen
+        exists because "I did nothing this week" is a distortion, and it can
+        only correct one by being true.
+        """
+        finished = (getattr(item, "first_step", "") or "").strip()
+        if not item.advance_step():
+            return False
+        # After the move, so `first_step` is now the NEXT step — the one just
+        # completed has to be carried across by hand.
+        self.record_step_done(item, step=finished)
+        return True
+
+    #: what the focus card says when nothing is running and there is nothing
+    #: to remember either. Three places used to spell it out; one of them is
+    #: now the fallback for the other two.
+    IDLE_CAPTION = "Nothing picked yet"
+
+    def set_idle_focus_caption(self) -> None:
+        """Fill the idle focus card with what you were last doing.
+
+        The slot said "Nothing picked yet" — three words of dead text in the
+        most prominent place on the screen, at the exact moment someone is
+        trying to remember what they were on. Replacing dead text costs no
+        pixels, which is the only kind of addition this screen can afford
+        after v3.48.0 spent a release taking things off it.
+        """
+        self.focus_task_var.set(
+            presenter.resume_line(
+                self.session_log, self.steps_log, self.tasks,
+                shown_as_next=self._next_task_id if self._next_up_shown else "")
+            or self.IDLE_CAPTION)
+
+    def record_step_done(self, item, step: str = "") -> None:
+        """Write down a step that has been ticked off.
+
+        Called from all three places that advance a plan, because three
+        hand-written copies of this is precisely the shape of bug the last
+        four releases have been fixing. Undo is handled by the stack, which
+        snapshots the log alongside the tasks — Ctrl+Z must not put the
+        cursor back and leave the evidence behind.
+
+        ``step`` is passed explicitly by `_advance`, which reads it before
+        moving the cursor: afterwards `first_step` names the *next* step, and
+        a log that recorded that would name the wrong one every time.
+        """
+        step = (step or getattr(item, "first_step", "") or "").strip()
+        if not step:
+            return
+        self.steps_log.append({
+            "step": step,
+            "task": getattr(item, "text", None) or getattr(item, "title", "") or "",
+            # The id as well as the title: the title is what the week review
+            # shows, and the id is what "what was I doing?" joins on. Matching
+            # on a title that the person has since reworded would quietly
+            # drop the one line that answers the question.
+            "task_id": getattr(item, "id", "") or "",
+            "done_at": now_stamp(),
+        })
+        self.mark_dirty()
 
     def attach_undo(self, restore) -> None:
         """Give the pending undo entry a side effect to run as well.
@@ -603,6 +765,10 @@ class CognitiveOffloadApp(tk.Tk):
             self.set_status("Nothing to undo.")
             return
         self.tasks = entry.snapshot
+        # Before `restore`, so a flow that captured the log itself — the
+        # matrix editor pushes AFTER its writes, so its snapshot already has
+        # the new entry in it — gets the last word.
+        self.steps_log = list(entry.steps_log)
         if entry.restore is not None:
             try:
                 entry.restore()
@@ -729,6 +895,7 @@ class CognitiveOffloadApp(tk.Tk):
             snoozed_until=task.snoozed_until,
             handed_to=task.handed_to,
             follow_up_on=task.follow_up_on,
+            rest_of_plan=task.rest_of_plan,
             window_title="Edit task",
             with_tags=True,
         ).show()
@@ -738,7 +905,13 @@ class CognitiveOffloadApp(tk.Tk):
         task.text = result["title"]
         task.description = result["content"]
         task.tags = result["tags"]
-        task.first_step = result["first_step"]
+        # set_current_step rather than a plain assignment: on a task with a
+        # plan the step box IS the current line of it, and writing only to
+        # first_step would leave the two disagreeing until the next load
+        # silently reverted the edit.
+        task.set_current_step(result["first_step"])
+        task.set_rest(result.get("rest_of_plan", task.rest_of_plan))
+        advanced = bool(result.get("step_done")) and self._advance(task)
         task.kind = result["kind"]
         task.scheduled_for = result["scheduled_for"]
         task.estimate_minutes = result.get("estimate_minutes", task.estimate_minutes)
@@ -747,9 +920,21 @@ class CognitiveOffloadApp(tk.Tk):
             task.snoozed_until = ""
         if result.get("take_back"):
             task.handed_to = task.handed_off_on = task.follow_up_on = ""
+        waiting_on = result.get("waiting_on", "")
+        if waiting_on:
+            task.handed_to = waiting_on
+            task.handed_off_on = today_iso()
+            task.follow_up_on = result.get("check_back", "")
         self.refresh_tasks()
         self.mark_dirty()
-        self.set_status("Task updated.")
+        if waiting_on:
+            self.set_status(f"Waiting on {waiting_on}. Ctrl+Z undoes it.")
+        elif advanced:
+            # Says what is next, not how many are left: a count of what
+            # remains is a debt, and the next step is a way in.
+            self.set_status(f"Next: {task.first_step}")
+        else:
+            self.set_status("Task updated.")
 
     def promote_selected(self) -> None:
         """Pin the selection above everything open (or unpin it again).
@@ -920,6 +1105,9 @@ class CognitiveOffloadApp(tk.Tk):
             loaded[key] = tasks
             self._matrix_cache[key] = tasks
             self.matrix_lists[key].set_rows([matrix_row(t) for t in tasks])
+            # The row set just changed, so what the buttons can act on has too
+            # — a rebuilt list drops the selection without firing on_select.
+            self.sync_matrix_action_availability(key)
         # A quadrant that could not be read shows as empty, which is why the
         # status line above names the folder: an empty tab must never be the
         # only evidence that something is wrong.
@@ -931,6 +1119,33 @@ class CognitiveOffloadApp(tk.Tk):
         if unreadable:
             # An empty quadrant and an unreadable one look identical; say which.
             self.set_status("Could not read " + "; ".join(unreadable))
+
+    def sync_matrix_action_availability(self, category: str) -> None:
+        """Grey the quadrant's controls that cannot act yet.
+
+        The same argument as ``sync_action_availability`` on the other tab,
+        which this had gone without: an inert control is still a small
+        decision — "is this for me?" — and the only way to learn the answer
+        was to press it and be told "Select a task to…".
+
+        Three questions, not one. Most buttons need a selection. "Copy all to
+        tasks" needs the quadrant to have anything in it. And "Take it back"
+        needs the selected task to actually be **out** with someone, which is
+        the state that button exists to end — offering it on a task that is
+        not waiting is offering to undo something that never happened.
+        """
+        selected = self._selected_matrix_tasks(category)
+
+        def apply(buttons, enabled):
+            for button in buttons:
+                button.state(["!disabled"] if enabled else ["disabled"])
+
+        apply(getattr(self, "matrix_needs_selection", {}).get(category, ()),
+              bool(selected))
+        apply(getattr(self, "matrix_needs_rows", {}).get(category, ()),
+              bool(self._matrix_cache.get(category)))
+        apply(getattr(self, "matrix_needs_waiting", {}).get(category, ()),
+              any(t.is_waiting() for t in selected))
 
     def _selected_matrix_tasks(self, category: str) -> list:
         cached = self._matrix_cache.get(category, [])
@@ -945,7 +1160,22 @@ class CognitiveOffloadApp(tk.Tk):
         try:
             created = self.matrix.create(category, result["title"], result["content"])
             created.first_step = result["first_step"]
+            created.set_rest(result.get("rest_of_plan", []))
+            # step_done cannot be set on a task that did not exist a moment
+            # ago: the dialog draws no checkbox with nothing to move on from.
             created.kind = result["kind"]
+            # The dialog offers a guess and a repeat, so it has to keep them.
+            # It did not: a new quadrant task filled in as "about 25 minutes,
+            # every week" arrived with neither, and nothing said so — the
+            # worst shape a data loss can take, because the person watched
+            # themselves type it.
+            created.estimate_minutes = result.get("estimate_minutes", 0)
+            created.repeat = result.get("repeat", "")
+            if result.get("waiting_on"):
+                created.handed_to = result["waiting_on"]
+                created.handed_off_on = today_iso()
+                created.follow_up_on = result.get("check_back", "")
+            # set_scheduled writes the record, so everything above rides with it.
             self.matrix.set_scheduled(created, result["scheduled_for"])
         except StorageError as exc:
             messagebox.showerror("Save failed", str(exc))
@@ -968,6 +1198,17 @@ class CognitiveOffloadApp(tk.Tk):
             kind=task.kind,
             scheduled_for=task.scheduled_for,
             estimate_minutes=task.estimate_minutes,
+            # A quadrant task carries these too — it can arrive from the main
+            # list already repeating, already excused, already out with
+            # someone. Leaving them out did not hide them, it MISREPORTED
+            # them: the dialog said "Does not repeat" about a task wearing a
+            # weekly badge two inches away, and offered no way out of a wait
+            # anywhere but Delegate, where the button lives.
+            repeat=task.repeat,
+            snoozed_until=task.snoozed_until,
+            handed_to=task.handed_to,
+            follow_up_on=task.follow_up_on,
+            rest_of_plan=task.rest_of_plan,
             window_title="Edit matrix task",
         ).show()
         if not result:
@@ -975,18 +1216,41 @@ class CognitiveOffloadApp(tk.Tk):
         # Taken before the writes below, which change the task in place and
         # can rename its file.
         before = [task.copy()]
+        # Captured here because this flow registers its undo entry AFTER the
+        # writes, so by then the log already holds whatever the edit added.
+        steps_before = list(self.steps_log)
+        waiting_on = result.get("waiting_on", "")
         try:
-            task.first_step = result["first_step"]
+            task.set_current_step(result["first_step"])
+            task.set_rest(result.get("rest_of_plan", task.rest_of_plan))
+            advanced = bool(result.get("step_done")) and self._advance(task)
             task.kind = result["kind"]
             task.scheduled_for = result["scheduled_for"]
             task.estimate_minutes = result.get("estimate_minutes", task.estimate_minutes)
+            task.repeat = result.get("repeat", task.repeat)
+            if result.get("clear_snooze"):
+                task.snoozed_until = ""
+            if result.get("take_back"):
+                task.handed_to = task.handed_off_on = task.follow_up_on = ""
+            if waiting_on:
+                task.handed_to = waiting_on
+                task.handed_off_on = today_iso()
+                task.follow_up_on = result.get("check_back", "")
+            # One write, not five: `update` persists the whole record, so
+            # every field above rides along with the title and the content.
             self.matrix.update(task, result["title"], result["content"])
         except StorageError as exc:
             messagebox.showerror("Save failed", str(exc))
             return
-        self._undo_matrix_change("edit matrix task", before, [task.id])
+        self._undo_matrix_change("edit matrix task", before, [task.id],
+                                 steps_before=steps_before)
         self.refresh_matrix()
-        self.set_status("Matrix task updated.")
+        if waiting_on:
+            self.set_status(f"Waiting on {waiting_on}. Ctrl+Z undoes it.")
+        elif advanced:
+            self.set_status(f"Next: {task.first_step}")
+        else:
+            self.set_status("Matrix task updated.")
 
     def hand_off_matrix_task(self, category: str) -> None:
         """Write a brief for an agent, and mark the task as waiting.
@@ -1024,6 +1288,12 @@ class CognitiveOffloadApp(tk.Tk):
 
         before = [task.copy()]
         handed_on = today_iso()
+        # Who had it a moment ago. Newest-holder-wins is the right behaviour;
+        # doing it in silence is not — before the editor could mark a wait,
+        # the only way to reach this was to hand an agent's task to another
+        # agent, and now anyone you were waiting on can be replaced by a
+        # click that never mentions them.
+        previous = task.handed_to
         try:
             self.matrix.set_handoff(
                 task, target.label, handed_on,
@@ -1042,7 +1312,11 @@ class CognitiveOffloadApp(tk.Tk):
         self._undo_matrix_change("hand a task over", before, [task.id])
         self.refresh_matrix()
         HandoffDoneDialog(self, target, path, command).show()
-        self.set_status(f"Handed to {target.label}. Ctrl+Z undoes it.")
+        if previous and previous != target.label:
+            self.set_status(f"Was out with {previous}; now out with "
+                            f"{target.label}. Ctrl+Z undoes it.")
+        else:
+            self.set_status(f"Handed to {target.label}. Ctrl+Z undoes it.")
 
     def take_back_matrix_task(self, category: str) -> None:
         """Clear the waiting mark. Not a failure, and never described as one."""
@@ -1365,6 +1639,7 @@ class CognitiveOffloadApp(tk.Tk):
                 self,
                 task_text=task.text if task else "",
                 first_step=task.first_step if task else "",
+                place=plan_place(task) if task else "",
                 minutes=self.config_store.focus_minutes,
                 warmup_steps=self.config_store.warmup_steps,
                 show_warmup=self.config_store.show_warmup,
@@ -1396,7 +1671,13 @@ class CognitiveOffloadApp(tk.Tk):
         if task is not None and result["first_step"] and result["first_step"] != task.first_step:
             # Naming the first move is worth keeping even if the session dies.
             self.push_undo("set first step")
-            task.first_step = result["first_step"]
+            # set_current_step, not a plain assignment: on a task with a plan
+            # the first step IS the current line of it, and writing only to
+            # `first_step` left the two disagreeing — which `_fix_steps`
+            # silently reverted on the next load, so the rename survived
+            # until the app was closed. The editor and the session-end dialog
+            # were fixed for this; this fourth site was missed.
+            task.set_current_step(result["first_step"])
             self.refresh_tasks()
             self.mark_dirty()
 
@@ -1404,7 +1685,8 @@ class CognitiveOffloadApp(tk.Tk):
             steps = result["warmup_done"]
             self.set_status(f"{steps} warm-up step{'s' if steps != 1 else ''} done. Starting.")
         self._focus_task_id = task.id if task else None
-        self.focus_task_var.set(focus_caption(task, result["first_step"]))
+        self.focus_task_var.set(
+            focus_caption(task, result["first_step"], plan_place(task)))
         self.config_store.focus_minutes = result["minutes"]
         self.work_minutes.set(result["minutes"])
         # The rituals stick: ladder edits, ladder visibility, the pop-out
@@ -1519,7 +1801,12 @@ class CognitiveOffloadApp(tk.Tk):
             self._focus_window.update_session(
                 "Break — step away" if self._timer_mode == "break"
                 else (task.text if task else ""),
-                task.first_step if task and self._timer_mode == "focus" else "",
+                # With the place, like every other surface that names a step.
+                # The pop-out is the one that is up *while you work*, where
+                # "of 3" is the difference between a step and a step in
+                # something finite.
+                step_with_place(task.first_step, plan_place(task))
+                if task and self._timer_mode == "focus" else "",
                 f"{minutes:02d}:{seconds:02d}",
                 elapsed / self._timer_total if self._timer_total else 0,
                 self._timer_running,
@@ -1590,7 +1877,8 @@ class CognitiveOffloadApp(tk.Tk):
             self.matrix.restore(task)
         self.refresh_matrix()
 
-    def _undo_matrix_change(self, label: str, before: list, ids: list) -> None:
+    def _undo_matrix_change(self, label: str, before: list, ids: list,
+                            steps_before: list | None = None) -> None:
         """Register a matrix change with the same undo stack as everything else.
 
         Without this the stack simply did not hear about matrix work, so the
@@ -1599,8 +1887,13 @@ class CognitiveOffloadApp(tk.Tk):
         instead.
         """
         self.push_undo(label)
-        self.attach_undo(
-            lambda before=before, ids=ids: self._revert_matrix_tasks(before, ids))
+
+        def restore(before=before, ids=ids, steps=steps_before):
+            if steps is not None:
+                self.steps_log = list(steps)
+            self._revert_matrix_tasks(before, ids)
+
+        self.attach_undo(restore)
 
     def _remove_matrix_tasks_by_id(self, ids: list) -> None:
         """Delete matrix tasks by id, resolved fresh from disk."""
@@ -1656,19 +1949,31 @@ class CognitiveOffloadApp(tk.Tk):
                 answer = SessionEndDialog(self, message, task.text,
                                           self.config_store.break_minutes,
                                           first_step=task.first_step,
-                                          parked=parked).show() or {}
+                                          parked=parked,
+                                          rest_of_plan=task.rest_of_plan,
+                                          place=plan_place(task)).show() or {}
                 choice = answer.get("choice", "carry_on")
                 next_step = answer.get("next_step", "")
+                step_done = bool(answer.get("step_done"))
             else:
+                step_done = False
                 choice = "break" if messagebox.askyesno(
                     "Session finished",
                     presenter.break_offer(message, self.config_store.break_minutes),
                 ) else "carry_on"
 
-        if task is not None and choice != "done" and next_step:
+        if task is not None and choice != "done" and (next_step or step_done):
             # Tomorrow's start is already written, while it is still obvious.
             self.push_undo("hand off")
-            task.first_step = next_step
+            # Reword first, then move on — the same order as the task editor,
+            # because the dialog now asks the same question it does: the box
+            # holds what THIS step says, not a description of the next one.
+            # The old blank field conflated the two, so on a task with a plan
+            # the honest answer overwrote the wrong line.
+            if next_step:
+                task.set_current_step(next_step)
+            if step_done:
+                self._advance(task)
             self.refresh_tasks()
             self.mark_dirty()
 
@@ -1727,7 +2032,7 @@ class CognitiveOffloadApp(tk.Tk):
     def show_today(self) -> None:
         """What you actually finished today, plus the minutes you focused."""
         view = presenter.today_view(self.tasks, self.completed_log,
-                                    self.session_log)
+                                    self.session_log, steps_log=self.steps_log)
         if not view.body:
             return
         with self._ask_over_focus():
@@ -1736,7 +2041,7 @@ class CognitiveOffloadApp(tk.Tk):
     def show_week(self) -> None:
         """The last seven days, as evidence — only the days that had anything."""
         view = presenter.week_view(self.tasks, self.completed_log,
-                                   self.session_log)
+                                   self.session_log, steps_log=self.steps_log)
         with self._ask_over_focus():
             WeekReviewDialog(self, view.days, view.total_sessions,
                              view.total_minutes).show()
@@ -1922,7 +2227,7 @@ class CognitiveOffloadApp(tk.Tk):
         banked = self.finish_session_early(interactive=False)
         self._stop_ticking()
         self._focus_task_id = None
-        self.focus_task_var.set("Nothing picked yet")
+        self.set_idle_focus_caption()
         self.timer.reset(self._minutes())
         self.timer_button.config(text="Start")
         self._update_timer_label()
@@ -2009,22 +2314,15 @@ class CognitiveOffloadApp(tk.Tk):
             if data is None:
                 return
         self._autosave_blocked = False
-        dropped = data.get("dropped", 0)
-        if dropped:
+        damage = presenter.damage_report(data.get("dropped", 0),
+                                         data.get("unreadable"),
+                                         self.state_store.path.name)
+        if damage:
             # The amputation must never become permanent silently: autosave
             # stays off until an explicit Save — the user's informed consent
             # to the loss — or a re-load that reads clean.
             self._autosave_blocked = True
-            plural = "s" if dropped != 1 else ""
-            messagebox.showwarning(
-                "Some records were unreadable",
-                f"{dropped} task record{plural} in "
-                f"{self.state_store.path.name} couldn't be read and "
-                f"{'were' if dropped != 1 else 'was'} left out.\n\n"
-                "Auto-save is off so the file stays untouched for now. "
-                "Saving (Ctrl+S) accepts the loss; Export a copy first if "
-                "you want to look at the original.",
-            )
+            messagebox.showwarning("Some records were unreadable", damage)
         self._apply_state(data)
         if not initial:
             self.set_status(f"Loaded {self.state_store.path}")
@@ -2091,11 +2389,13 @@ class CognitiveOffloadApp(tk.Tk):
                         "starts empty. The set-aside file is untouched.",
             )
         self.set_status(f"Started fresh. The unreadable file is kept as {spoiled.name}.")
-        return {"tasks": [], "scratchpad": "", "timer_minutes": 15, "completed_log": []}
+        return {"tasks": [], "scratchpad": "", "timer_minutes": 15,
+                "completed_log": [], "steps_log": []}
 
     def _apply_state(self, data: dict) -> None:
         self.tasks = data["tasks"]
         self.completed_log = list(data.get("completed_log") or [])
+        self.steps_log = list(data.get("steps_log") or [])
         self.set_scratchpad(data["scratchpad"])
         self.work_minutes.set(data["timer_minutes"])
         self._stop_ticking()
@@ -2107,16 +2407,19 @@ class CognitiveOffloadApp(tk.Tk):
         self._timer_remaining = self._timer_total
         if self._focus_task_id and not any(t.id == self._focus_task_id for t in data["tasks"]):
             self._focus_task_id = None
-            self.focus_task_var.set("Nothing picked yet")
+            self.focus_task_var.set(self.IDLE_CAPTION)
         self._undo_stack.clear()
         self._dirty = False
         self.refresh_all()
         self._update_timer_label()
+        if not self._focus_task_id:
+            # After the logs are loaded, not before: this reads them.
+            self.set_idle_focus_caption()
 
     def save_state(self, silent: bool = False) -> bool:
         try:
             self.state_store.save(self.tasks, self.scratchpad_text(), self._minutes(),
-                                  self.completed_log)
+                                  self.completed_log, self.steps_log)
         except StorageError as exc:
             if not silent:
                 messagebox.showerror("Save failed", str(exc))
@@ -2152,19 +2455,14 @@ class CognitiveOffloadApp(tk.Tk):
         # writing it back over the previous session.
         self.state_store.set_path(Path(path))
         self._autosave_blocked = False
-        dropped = data.get("dropped", 0)
-        if dropped:
+        damage = presenter.damage_report(data.get("dropped", 0),
+                                         data.get("unreadable"),
+                                         Path(path).name)
+        if damage:
             # Same consent rule as startup: an opened file with unreadable
             # records must not be lossily rewritten by the next autosave.
             self._autosave_blocked = True
-            plural = "s" if dropped != 1 else ""
-            messagebox.showwarning(
-                "Some records were unreadable",
-                f"{dropped} task record{plural} in {Path(path).name} couldn't "
-                f"be read and {'were' if dropped != 1 else 'was'} left out.\n\n"
-                "Auto-save is off so the file stays untouched for now. "
-                "Saving (Ctrl+S) accepts the loss.",
-            )
+            messagebox.showwarning("Some records were unreadable", damage)
         self._apply_state(data)
         self.set_status(f"Working in {Path(path).name}")
 
@@ -2179,7 +2477,7 @@ class CognitiveOffloadApp(tk.Tk):
             return False
         try:
             StateStore(Path(path)).save(self.tasks, self.scratchpad_text(), self._minutes(),
-                                        self.completed_log)
+                                        self.completed_log, self.steps_log)
         except StorageError as exc:
             messagebox.showerror("Export failed", str(exc))
             return False

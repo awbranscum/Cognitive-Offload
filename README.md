@@ -139,6 +139,26 @@ reinstall from python.org).
 - Sort by priority, creation date, alphabetically, or by completion time.
   Priority sorting keeps open work at the top: unfinished first, pinned first,
   then flagged, then newest.
+- **Break a task into steps.** A task can carry a plan — one step per line in
+  the editor — and the row shows where in it you are (`→ copy the headings
+  across · step 2 of 4`). Ticking a step off moves you down the list and the
+  status line names the next one, so finishing a step is never followed by
+  deciding what to do. There is still only one "what next" on a task: with a
+  plan, the first step **is** the step you are on, so everything that already
+  read the first step — the row, the start dialog, the ranking — keeps
+  working without knowing plans exist. A repeating task with steps is a
+  routine: the plan comes back each round, your place in it does not. Every
+  step is searchable, and handing the task to an agent sends the whole plan
+  with the finished steps ticked. At the end of a focus session the app asks
+  what the step you were on says now, and offers to move you to the next one.
+- **Waiting on someone.** Say who has a task and when you will check back, in
+  the task editor on either tab. It keeps its badge, its place in the list and
+  its place in every search — and stops being offered as the next thing to
+  start, because starting it would duplicate what someone else is already
+  doing. On the check-back day the badge changes to `check back` and it is in
+  the running again. A fact, not a telling-off. Blank date means three days.
+  A person, an agent, a landlord, a GP surgery: the app does not care which,
+  and neither does the badge.
 - `Ctrl+Z` undoes the last change — deletes, edits, bulk moves and all.
 
 **Focus sessions**
@@ -149,8 +169,9 @@ reinstall from python.org).
   you are actually working in. "Done early" banks the minutes you did do.
 - Finished sessions are logged to `sessions.json` and drawn as a 14-day strip.
 - Click the strip (or its summary) for **the week, in evidence**: one line per
-  day that had anything — sessions, minutes, and the tasks finished that day —
-  with days that had nothing simply left out. "I did nothing this week" is a
+  day that had anything — sessions, minutes, the tasks finished that day, and
+  the **steps** ticked off — with days that had nothing simply left out. A day
+  whose only outcome was two steps of something long still counts as a day. "I did nothing this week" is a
   distortion, and the correction is not motivation; it is the record.
 
 **Look and feel**

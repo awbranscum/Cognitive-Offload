@@ -4,6 +4,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -18,6 +19,7 @@ from cognitive_offload.storage import (
     NotASessionError,
     StateStore,
     StorageError,
+    sweep_interrupted_writes,
     atomic_write_text,
     display_path,
     slugify,
@@ -833,3 +835,155 @@ class FirstRunTests(unittest.TestCase):
         loaded = self.config().load()
         self.assertFalse(loaded.first_run)
         self.assertFalse(loaded.calm_mode)
+
+
+class WrongShapedFieldTests(TempDirTest):
+    """A field that is not a list is an unreadable field, not a short one.
+
+    Two bugs lived in `for record in data.get("tasks") or []`. A string was
+    walked character by character, so `"tasks": "nope"` was reported to the
+    person as "4 task records couldn't be read" — a loss count invented from
+    a four-letter string, in an app whose whole promise is telling the truth
+    about their stuff. And a number is not iterable at all, so `"tasks": 42`
+    raised a TypeError past every StorageError the recovery code catches and
+    **the app did not open**.
+    """
+
+    GOOD = {"tasks": [{"text": "Ring the insurance company"}],
+            "scratchpad": "a thought I did not want to lose",
+            "timer_minutes": 15}
+
+    FIELDS = ("tasks", "completed_log", "steps_log")
+    SHAPES = {"a string": "nope", "a dict": {"a": 1, "b": 2, "c": 3},
+              "a number": 42, "a boolean": True}
+
+    def _load(self, field, value):
+        data = dict(self.GOOD)
+        data[field] = value
+        return StateStore.deserialize(data)
+
+    def test_no_shape_raises(self):
+        """The one that stopped the app opening."""
+        for field in self.FIELDS:
+            for label, value in self.SHAPES.items():
+                with self.subTest(field=field, shape=label):
+                    self._load(field, value)  # must not raise
+
+    def test_a_wrong_shaped_field_yields_no_records(self):
+        for field in self.FIELDS:
+            for label, value in self.SHAPES.items():
+                with self.subTest(field=field, shape=label):
+                    out = self._load(field, value)
+                    self.assertEqual(out[field] if field != "tasks"
+                                     else out["tasks"], [])
+
+    def test_no_loss_count_is_invented(self):
+        """`dropped` counts records that existed and could not be read. A
+        field of the wrong type contains no records at all."""
+        for field in self.FIELDS:
+            for label, value in self.SHAPES.items():
+                with self.subTest(field=field, shape=label):
+                    self.assertEqual(self._load(field, value)["dropped"], 0)
+
+    def test_the_wrong_shaped_field_is_named_instead(self):
+        for field in self.FIELDS:
+            for label, value in self.SHAPES.items():
+                with self.subTest(field=field, shape=label):
+                    self.assertEqual(self._load(field, value)["unreadable"],
+                                     [field])
+
+    def test_a_missing_field_is_not_damage(self):
+        data = {"scratchpad": "x"}
+        out = StateStore.deserialize(data)
+        self.assertEqual(out["unreadable"], [])
+        self.assertEqual(out["dropped"], 0)
+
+    def test_a_real_bad_record_is_still_counted(self):
+        """The other half must keep working: a list holding one unreadable
+        record is a genuine loss with a genuine number."""
+        out = StateStore.deserialize(
+            {**self.GOOD, "tasks": [{"text": "kept"}, 42, {"text": "also kept"}]})
+        self.assertEqual(out["dropped"], 1)
+        self.assertEqual(out["unreadable"], [])
+        self.assertEqual([t.text for t in out["tasks"]], ["kept", "also kept"])
+
+    def test_the_rest_of_the_file_still_survives(self):
+        out = self._load("tasks", "nope")
+        self.assertEqual(out["scratchpad"], "a thought I did not want to lose")
+        self.assertEqual(out["timer_minutes"], 15)
+
+
+class SweepInterruptedWritesTests(TempDirTest):
+    """A killed save leaves a temp file. Nothing used to take it away.
+
+    `atomic_write_text` cleans up after any exception, but not after a
+    SIGKILL, a power cut or a lid closed at the wrong moment. The files are
+    harmless — the loaders read a named path and ignore them — but they
+    accumulate for ever in a folder this app puts on screen and invites
+    people into.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.db = self.root / "db"
+        self.db.mkdir(parents=True)
+        self.store = StateStore(self.db / "data.json")
+        self.store.save([Task(text="Ring the insurance company")], "a thought", 15)
+
+    def _aged(self, name, seconds_old):
+        path = self.db / name
+        path.write_text("half a save")
+        when = time.time() - seconds_old
+        os.utime(path, (when, when))
+        return path
+
+    def _names(self):
+        return sorted(p.name for p in self.db.iterdir())
+
+    def test_an_abandoned_temp_file_is_swept_up(self):
+        self._aged(".data.json.abc.tmp", 200_000)
+        self.store.load()
+        self.assertNotIn(".data.json.abc.tmp", self._names())
+
+    def test_a_save_that_may_still_be_running_is_left_alone(self):
+        """A real temp file lives for the milliseconds between fsync and
+        rename. Deleting one in flight would be a far worse bug than litter."""
+        self._aged(".data.json.fresh.tmp", 5)
+        self.store.load()
+        self.assertIn(".data.json.fresh.tmp", self._names())
+
+    def test_the_backup_is_not_litter(self):
+        self._aged("data.json.bak", 200_000)
+        self.store.load()
+        self.assertIn("data.json.bak", self._names())
+
+    def test_another_file_s_leftovers_are_not_ours_to_take(self):
+        self._aged(".sessions.json.xyz.tmp", 200_000)
+        self.store.load()
+        self.assertIn(".sessions.json.xyz.tmp", self._names())
+
+    def test_nothing_else_in_the_folder_is_touched(self):
+        self._aged("notes.txt", 200_000)
+        self._aged(".hidden", 200_000)
+        self.store.load()
+        for name in ("notes.txt", ".hidden", "data.json"):
+            self.assertIn(name, self._names())
+
+    def test_the_session_still_loads_through_all_of_it(self):
+        self._aged(".data.json.abc.tmp", 200_000)
+        data = self.store.load()
+        self.assertEqual([t.text for t in data["tasks"]],
+                         ["Ring the insurance company"])
+        self.assertEqual(data["scratchpad"], "a thought")
+
+    def test_a_folder_that_will_not_be_tidied_does_not_stop_the_app(self):
+        """Swallowed on purpose: a read-only or vanished folder is not a
+        reason to refuse to open a session."""
+        missing = StateStore(self.root / "gone" / "data.json")
+        self.assertEqual(sweep_interrupted_writes(missing.path), 0)
+
+    def test_it_reports_what_it_took(self):
+        self._aged(".data.json.one.tmp", 200_000)
+        self._aged(".data.json.two.tmp", 200_000)
+        self._aged(".data.json.three.tmp", 5)
+        self.assertEqual(sweep_interrupted_writes(self.db / "data.json"), 2)

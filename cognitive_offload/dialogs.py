@@ -21,6 +21,7 @@ from .models import (
     parse_date_input,
     parse_estimate_input,
     repeat_label,
+    snooze_is_live,
     today_iso,
 )
 from .handoff import (
@@ -28,9 +29,11 @@ from .handoff import (
     TARGET_KEY_BY_LABEL,
     TARGET_KEYS,
     TARGET_LABELS,
+    follow_up_date,
     target_for,
 )
-from .queries import suggest_tasks
+from .presenter import step_line
+from .queries import split_lines, suggest_tasks
 from .storage import CATEGORIES, CATEGORY_KEYS
 from .theme import SIZE_BASE, SIZE_LG, SIZE_SM, font, px, style_text, tokens
 
@@ -65,6 +68,11 @@ class ModalDialog(tk.Toplevel):
         self._max_height = None
         self.body = ttk.Frame(self, padding=12)
         self.body.pack(fill="both", expand=True)
+        #: the frame packed directly on the window. A subclass may replace
+        #: ``self.body`` with something nested (see TaskEditorDialog, which
+        #: puts a scrolling canvas in between), and the button row still has
+        #: to pack against the WINDOW rather than inside whatever that is.
+        self._outer = self.body
         self.protocol("WM_DELETE_WINDOW", self.cancel)
         # "or \"break\"" stops the global Escape binding from also pausing a
         # running session behind the dialog.
@@ -85,8 +93,20 @@ class ModalDialog(tk.Toplevel):
         self.geometry(f"{self._fit_width}x{height}")
 
     def button_row(self, ok_text: str = "OK") -> ttk.Frame:
-        row = ttk.Frame(self.body)
-        row.pack(fill="x", pady=(10, 0))
+        """The row that closes the dialog, packed so it cannot be dropped.
+
+        Tk gives each slave its slab in pack order and squeezes what is left,
+        so a row packed last inside an expanding body is the first thing to
+        go when the window is shorter than its content — measured, the task
+        editor's Save and Cancel were **not drawn at all** below 668px. The
+        row is therefore packed against the bottom of the window *before* the
+        body is re-packed to take the rest: whatever else has to give, the
+        way out of the dialog does not.
+        """
+        row = ttk.Frame(self, padding=(12, 0, 12, 12))
+        self._outer.pack_forget()
+        row.pack(side="bottom", fill="x")
+        self._outer.pack(fill="both", expand=True)
         ttk.Button(row, text="Cancel", style="Outline.TButton", command=self.cancel).pack(side="right")
         ttk.Button(row, text=ok_text, style="Default.TButton", command=self.ok).pack(
             side="right", padx=(0, 8)
@@ -153,10 +173,21 @@ class TaskEditorDialog(ModalDialog):
         snoozed_until: str = "",
         handed_to: str = "",
         follow_up_on: str = "",
+        rest_of_plan: list[str] | None = None,
         window_title: str = "Task",
         with_tags: bool = False,
     ):
-        super().__init__(parent, window_title, size=(520, 520))
+        # Width pinned, height fitted — the mechanism ModalDialog already
+        # carries, and whose own comment says why: "a fixed height is always
+        # wrong for someone when the content varies". This dialog varies more
+        # than any other. It wanted 578px with a tag row and got 520, so
+        # **Save and Cancel were simply not drawn**; the only way to keep an
+        # edit was to know you could drag the window taller first. Every
+        # optional row since — the excuse, the handoff, the wait — made it
+        # worse.
+        super().__init__(parent, window_title, size=(520, None))
+        self._max_height = int(self.winfo_screenheight() * 0.8)
+        self._make_scrollable()
         ttk.Label(self.body, text="Title").pack(anchor="w")
         self.title_entry = ttk.Entry(self.body)
         self.title_entry.pack(fill="x", pady=(2, 10))
@@ -174,6 +205,39 @@ class TaskEditorDialog(ModalDialog):
             wraplength=px(self, 470),
             justify="left",
         ).pack(anchor="w", pady=(2, 10))
+
+        # The plan, under the step it heads. The step box owns ONE line and
+        # this owns the rest, so neither can overwrite the other's — which is
+        # why the model keeps the current step out of `rest_of_plan` rather
+        # than showing the whole list twice and picking a winner.
+        rest = list(rest_of_plan or [])
+        ttk.Label(self.body, text="The rest of the plan").pack(anchor="w")
+        self.plan_text = tk.Text(self.body, height=3, wrap="word", undo=True)
+        style_text(self.plan_text)
+        # Not expand=True: pack squeezes the LATER slave when the window is
+        # short, so making this one expand as well changed nothing except to
+        # imply it shares the loss. It does not — see FINDING AR.
+        self.plan_text.pack(fill="x", pady=(2, 0))
+        self.plan_text.insert("1.0", "\n".join(rest))
+        plan_hint = (
+            "One step per line, in order. Optional — and only the top one has "
+            "to be any good."
+        )
+        ttk.Label(self.body, text=plan_hint, style="Muted.TLabel",
+                  wraplength=px(self, 470), justify="left").pack(
+            anchor="w", pady=(2, 10))
+
+        # Ticking a step off is the only thing that moves you down the plan,
+        # and it lives here rather than on the list because it is a decision
+        # about the task, not about the screen.
+        self.step_done_var = None
+        if rest:
+            self.step_done_var = tk.BooleanVar(value=False)
+            ttk.Checkbutton(
+                self.body,
+                text=f"Done — move on to \"{rest[0]}\"",
+                variable=self.step_done_var,
+            ).pack(anchor="w", pady=(0, 10))
 
         row = ttk.Frame(self.body)
         row.pack(fill="x")
@@ -216,7 +280,7 @@ class TaskEditorDialog(ModalDialog):
         # The one exit from "Not today" besides waiting: visible only while
         # a snooze is actually in effect, and still no badge on the list.
         self.unsnooze_var = None
-        if snoozed_until and snoozed_until > today_iso():
+        if snooze_is_live(snoozed_until):
             self.unsnooze_var = tk.BooleanVar(value=False)
             ttk.Checkbutton(
                 self.body,
@@ -226,11 +290,19 @@ class TaskEditorDialog(ModalDialog):
                 variable=self.unsnooze_var,
             ).pack(anchor="w", pady=(0, 10))
 
-        # The exit from a handoff, built exactly like the one from "Not
-        # today" above it: visible only while a handoff is actually in
-        # effect. Carrying the waiting mark onto the main list without this
-        # would have left a task marked as out with nothing able to clear it.
+        # Two directions on one state, and never both on screen at once.
+        #
+        # The way OUT shipped first, and for a while it was the only half
+        # that existed: the way IN was an agent handoff, reachable from one
+        # quadrant of the other tab. So the whole waiting treatment — the
+        # badge, the line under the title, the task quietly stepping out of
+        # the suggestion slot until the day you said you would look again —
+        # could only ever describe an AI agent, while most of what anyone is
+        # actually waiting on is a person. Nothing in the model ever thought
+        # so: `handed_to` is free text and always was.
         self.unwait_var = None
+        self.waiting_entry = None
+        self.check_back_entry = None
         if handed_to:
             self.unwait_var = tk.BooleanVar(value=False)
             waiting = f"Out with {handed_to}"
@@ -241,9 +313,29 @@ class TaskEditorDialog(ModalDialog):
                 text=f"{waiting} — take it back and do it yourself",
                 variable=self.unwait_var,
             ).pack(anchor="w", pady=(0, 10))
+        else:
+            waiting_row = ttk.Frame(self.body)
+            waiting_row.pack(fill="x")
+            ttk.Label(waiting_row, text="Waiting on").pack(side="left")
+            self.waiting_entry = ttk.Entry(waiting_row, width=18)
+            self.waiting_entry.pack(side="left", padx=(6, 16))
+            ttk.Label(waiting_row, text="check back").pack(side="left")
+            self.check_back_entry = ttk.Entry(waiting_row, width=14)
+            self.check_back_entry.pack(side="left", padx=(6, 0))
+            waiting_hint = (
+                "A person or an agent — anyone but you. It keeps its place "
+                "in the list and in every search, and stops being offered as "
+                "the next thing to start until the day you check back. "
+                "Blank means three days from now."
+            )
+            ttk.Label(self.body, text=waiting_hint, style="Muted.TLabel",
+                      wraplength=px(self, 470), justify="left").pack(
+                anchor="w", pady=(2, 10))
 
         ttk.Label(self.body, text="Details").pack(anchor="w")
-        self.content_text = tk.Text(self.body, height=8, wrap="word", undo=True)
+        # Six lines rather than eight: the plan box above took two, and the
+        # details box was the more generously sized of the pair.
+        self.content_text = tk.Text(self.body, height=6, wrap="word", undo=True)
         style_text(self.content_text)
         self.content_text.pack(fill="both", expand=True, pady=(2, 10))
         self.content_text.insert("1.0", content)
@@ -259,6 +351,146 @@ class TaskEditorDialog(ModalDialog):
         self.title_entry.focus_set()
         self.title_entry.bind("<Return>", lambda _e: self.step_entry.focus_set())
 
+    def _make_scrollable(self) -> None:
+        """Put a scrolling canvas between the window and the form.
+
+        This dialog is the one that grows. It is already the tallest in the
+        app and it gains a row every time a task learns something new, and
+        the app supports a 1366x768 laptop on purpose — `_fit_to_screen`
+        exists because the main window used to open 113px past the bottom of
+        one. Measured on that screen the fullest editor wants 828px against a
+        614px ceiling, and Tk's answer to a window shorter than its content
+        is to stop placing widgets: at 614 the details box and the tag row
+        were simply not drawn, at 520 nine controls were missing.
+
+        A ceiling without a scrollbar is just a quieter version of the bug
+        this dialog was fixed for one release ago. Content that fits looks
+        exactly as it did — the canvas is sized to the form and the scrollbar
+        stays hidden.
+        """
+        host = self.body
+        self._canvas = tk.Canvas(host, highlightthickness=0, borderwidth=0,
+                                 background=tokens().background)
+        self._vbar = ttk.Scrollbar(host, orient="vertical",
+                                   command=self._canvas.yview)
+        self._canvas.configure(yscrollcommand=self._on_scrolled)
+        self._canvas.pack(side="left", fill="both", expand=True)
+        form = ttk.Frame(self._canvas)
+        self._form_window = self._canvas.create_window((0, 0), window=form,
+                                                       anchor="nw")
+        self._canvas.bind(
+            "<Configure>",
+            lambda e: self._canvas.itemconfigure(self._form_window, width=e.width))
+        form.bind("<Configure>", lambda _e: self._canvas.configure(
+            scrollregion=self._canvas.bbox("all")))
+        for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            # On the window, so the wheel works wherever the pointer is. Tk
+            # puts the toplevel in every child's bindtags, so one binding
+            # covers the lot.
+            self.bind(sequence, self._on_wheel)
+        # Same trick for focus: tabbing must not put the cursor in a box
+        # that is scrolled out of sight.
+        self.bind("<FocusIn>", lambda e: self._scroll_into_view(e.widget))
+        # Everything built from here lands in the scrolling form instead.
+        self.body = form
+
+    def _on_scrolled(self, first: str, last: str) -> None:
+        """Show the scrollbar only when there is something to scroll to."""
+        if float(first) <= 0.0 and float(last) >= 1.0:
+            self._vbar.pack_forget()
+        else:
+            self._vbar.pack(side="right", fill="y")
+        self._vbar.set(first, last)
+
+    def _scrolls_itself(self, widget) -> bool:
+        """Is the pointer over something that will handle the wheel itself?
+
+        A ``Text``'s own class binding scrolls it and does **not** return
+        "break", so the event carries on to the window binding as well —
+        measured, one notch over the notes box moved the text AND slid the
+        whole form by the same amount. Only true while the widget actually
+        has somewhere to scroll: over a half-empty notes box the wheel
+        should still move the form, or it dies in the middle of the dialog
+        for no reason the person can see.
+        """
+        while widget is not None and widget is not self:
+            if isinstance(widget, tk.Text):
+                try:
+                    first, last = widget.yview()
+                except tk.TclError:
+                    return False
+                return not (first <= 0.0 and last >= 1.0)
+            widget = getattr(widget, "master", None)
+        return False
+
+    def _on_wheel(self, event):
+        if self._scrolls_itself(self.winfo_containing(event.x_root, event.y_root)):
+            return
+        if getattr(event, "num", None) == 4:
+            delta = -1
+        elif getattr(event, "num", None) == 5:
+            delta = 1
+        else:
+            delta = -1 if event.delta > 0 else 1
+        self._canvas.yview_scroll(delta, "units")
+
+    def _scroll_into_view(self, widget) -> None:
+        """Bring a widget that has just taken focus into the visible part.
+
+        Tab moves focus by widget order, not by what is on screen, so on a
+        window short enough to scroll it walked straight into the details
+        box and the tag row while both were below the bottom edge — you type
+        and nothing appears. Same arithmetic as `RowList.see`.
+
+        Widgets outside the form are skipped, which is how Save and Cancel
+        stay put: they are deliberately packed on the window, not in the
+        scrolling area.
+        """
+        if widget is None:
+            return
+        inside = str(widget).startswith(f"{self.body}.")
+        if not inside:
+            return
+        self.update_idletasks()
+        top = widget.winfo_rooty() - self.body.winfo_rooty()
+        bottom = top + widget.winfo_height()
+        room = self._canvas.winfo_height()
+        total = max(1, self.body.winfo_height())
+        seen_from = self._canvas.canvasy(0)
+        if top < seen_from:
+            self._canvas.yview_moveto(top / total)
+        elif bottom > seen_from + room:
+            self._canvas.yview_moveto(max(0.0, (bottom - room) / total))
+
+    def _fit_to_content(self) -> None:
+        """Ask for the height the form wants, then let the ceiling bite.
+
+        The canvas is what stands between the window and the form, so it is
+        the thing that has to *request* the form's full height — otherwise
+        the window fits itself to a canvas of no particular size. Once the
+        ceiling caps the window, the canvas is the widget that gives, and
+        the scrollbar covers the difference.
+        """
+        self.update_idletasks()
+        self._canvas.configure(height=self.body.winfo_reqheight())
+        # Tk recomputes the window's requested height from its children in an
+        # idle task, and the base class reads that number — so without this
+        # the first fit sizes the window to the canvas's OLD height and only
+        # a second call gets it right.
+        self.update_idletasks()
+        super()._fit_to_content()
+        self.update_idletasks()
+        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+
+    def _warn_about_date(self, entry) -> None:
+        """One sentence, both date fields. Said twice it would drift once."""
+        messagebox.showwarning(
+            "Date not understood",
+            "Try 'today', 'tomorrow', a weekday, or a date like 2026-08-01.",
+            parent=self,
+        )
+        entry.focus_set()
+
     def collect(self):
         title = self.title_entry.get().strip()
         if not title:
@@ -267,13 +499,19 @@ class TaskEditorDialog(ModalDialog):
             return None
         scheduled = parse_date_input(self.date_entry.get())
         if scheduled is None:
-            messagebox.showwarning(
-                "Date not understood",
-                "Try 'today', 'tomorrow', a weekday, or a date like 2026-08-01.",
-                parent=self,
-            )
-            self.date_entry.focus_set()
+            self._warn_about_date(self.date_entry)
             return None
+        waiting_on = self.waiting_entry.get().strip() if self.waiting_entry else ""
+        check_back = ""
+        if waiting_on:
+            check_back = parse_date_input(self.check_back_entry.get())
+            if check_back is None:
+                self._warn_about_date(self.check_back_entry)
+                return None
+            # Handing something over and then forgetting it is not delegating,
+            # it is losing it somewhere more respectable. Every wait gets a
+            # date, and the default is the one the agent handoff already uses.
+            check_back = check_back or follow_up_date(today_iso())
         # "junk is just 'no guess', never an error dialog" — that decision
         # stands. What changed is how much counts as junk: "20 mins", "20m",
         # "1h" and "~15" all used to land here and vanish, which is the one
@@ -293,6 +531,13 @@ class TaskEditorDialog(ModalDialog):
             "repeat": REPEAT_KEY_BY_LABEL.get(self.repeat_var.get(), ""),
             "clear_snooze": bool(self.unsnooze_var and self.unsnooze_var.get()),
             "take_back": bool(self.unwait_var and self.unwait_var.get()),
+            "waiting_on": waiting_on,
+            "check_back": check_back,
+            # split_lines already strips bullets, checkboxes and the "[time]"
+            # prefix quick capture adds, which is exactly what someone pastes
+            # in here from a note they made earlier.
+            "rest_of_plan": split_lines(self.plan_text.get("1.0", "end")),
+            "step_done": bool(self.step_done_var and self.step_done_var.get()),
         }
         if self.tags_entry is not None:
             tags = [t.strip().lower() for t in self.tags_entry.get().split(",")]
@@ -413,6 +658,7 @@ class StartFocusDialog(ModalDialog):
         parent: tk.Misc,
         task_text: str = "",
         first_step: str = "",
+        place: str = "",
         minutes: int = 15,
         warmup_steps: list[str] | None = None,
         show_warmup: bool = True,
@@ -441,6 +687,12 @@ class StartFocusDialog(ModalDialog):
         self.step_entry = ttk.Entry(self.body)
         self.step_entry.pack(fill="x", pady=(2, 2))
         self.step_entry.insert(0, first_step)
+        # Where in the plan, and deliberately NOT the plan itself: what comes
+        # after this is a decision, and this is the screen someone is on
+        # because deciding is the part they are struggling with.
+        if place:
+            ttk.Label(self.body, text=place, style="Muted.TLabel").pack(
+                anchor="w", pady=(0, 2))
         ttk.Label(
             self.body,
             text="Name the smallest physical action. You are only committing to this.",
@@ -451,7 +703,14 @@ class StartFocusDialog(ModalDialog):
         self._steps = list(warmup_steps or [])
         self._step_entries: list | None = None  # None = not editing
         self.ladder_frame = ttk.Frame(self.body)
-        if show_warmup and warmup_steps:
+        # `show_warmup`, and NOT "and warmup_steps": clearing all three lines
+        # is the first thing someone replacing them does, and the "Edit
+        # steps…" button lives inside this frame. Building it only when there
+        # were already steps meant emptying the ladder took away the only way
+        # back to it for the rest of the session — a control that removes
+        # itself. The checkbox below is the way to turn the ladder off, and
+        # it is still the only one.
+        if show_warmup:
             self.ladder_frame.pack(fill="x")
             self._build_ladder()
 
@@ -484,10 +743,18 @@ class StartFocusDialog(ModalDialog):
             side="left")
         ttk.Button(heading, text="Edit steps…", style="SmPageGhost.TButton",
                    command=self._edit_steps).pack(side="left", padx=(8, 0))
+        # Both sentences named before one is chosen. Handed straight to
+        # `text=` as a conditional, neither of them appeared in the wording
+        # snapshot — the same disappearing act the matrix row's copy did when
+        # it moved inside a conditional, and the reason `rows.py` carries a
+        # comment about it.
+        rungs_hint = ("Step down towards the task instead of leaping at it. "
+                      "Tick what you've done — skipping them is fine too.")
+        empty_hint = ("No rungs on it at the moment. Edit steps to write your "
+                      "own, or leave it — nothing here is required.")
         ttk.Label(
             self.ladder_frame,
-            text="Step down towards the task instead of leaping at it. "
-                 "Tick what you've done — skipping them is fine too.",
+            text=rungs_hint if self._steps else empty_hint,
             style="Muted.TLabel",
             wraplength=px(self, 470),
             justify="left",
@@ -601,7 +868,8 @@ class SessionEndDialog(ModalDialog):
     """
 
     def __init__(self, parent: tk.Misc, message: str, task_text: str, break_minutes: int = 5,
-                 first_step: str = "", parked: int = 0):
+                 first_step: str = "", parked: int = 0,
+                 rest_of_plan: list[str] | None = None, place: str = ""):
         super().__init__(parent, "Session finished")
         self.resizable(False, False)
         ttk.Label(self.body, text=message, font=font(SIZE_LG, "bold"),
@@ -621,15 +889,49 @@ class SessionEndDialog(ModalDialog):
         # The hand-off. Right now you know what comes next; tomorrow you will
         # be looking at a first step you already did. Optional, and skipping
         # it costs nothing.
-        ttk.Label(self.body, text="Where does it pick up next time?").pack(anchor="w")
+        # A task with a plan is asked a different question, because on one
+        # the honest answer is already written down. Two things can have
+        # happened in the last fifteen minutes — you finished this step, or
+        # you did not — and the old single blank field conflated them: it
+        # invited a description of the NEXT step while the cursor was still
+        # on this one, so typing the honest answer overwrote the wrong line.
+        rest = list(rest_of_plan or [])
+        self.step_done_var = None
+        has_plan = bool(rest) or bool(place)
+        if has_plan:
+            ttk.Label(self.body, text="What does this step say now?").pack(anchor="w")
+        else:
+            ttk.Label(self.body,
+                      text="Where does it pick up next time?").pack(anchor="w")
         self.next_entry = ttk.Entry(self.body, width=44)
         self.next_entry.pack(fill="x", pady=(4, 2))
-        if first_step:
+        if has_plan:
+            # Prefilled, so accepting it unchanged means exactly what it
+            # looks like: nothing. A blank box at the tired end of a block is
+            # a question; a filled one is a confirmation.
+            self.next_entry.insert(0, first_step)
+            if place:
+                ttk.Label(self.body, text=place, style="Muted.TLabel",
+                          wraplength=px(self, 380), justify="left").pack(anchor="w")
+        elif first_step:
             ttk.Label(self.body, text=f"was: {first_step}", style="Muted.TLabel",
                       wraplength=px(self, 380), justify="left").pack(anchor="w")
-        ttk.Label(self.body, text="Leave it blank if you would rather not decide now.",
-                  style="Muted.TLabel", wraplength=px(self, 380), justify="left").pack(
+        # Two hints, because the field means two different things. "Leave it
+        # blank" is an invitation on an empty box and a lie on a filled one:
+        # blanking a prefilled step changes nothing, so the sentence would be
+        # offering an action that does not exist.
+        hint = ("Change it if it needs changing — leaving it as it is is an "
+                "answer." if has_plan
+                else "Leave it blank if you would rather not decide now.")
+        ttk.Label(self.body, text=hint, style="Muted.TLabel",
+                  wraplength=px(self, 380), justify="left").pack(
             anchor="w", pady=(0, 14))
+        if rest:
+            self.step_done_var = tk.BooleanVar(value=False)
+            ttk.Checkbutton(
+                self.body, text=f"Done — move on to \"{rest[0]}\"",
+                variable=self.step_done_var,
+            ).pack(anchor="w", pady=(0, 10))
 
         for label, value, style in (
             ("It's finished — mark it done", "done", "Default.TButton"),
@@ -659,7 +961,11 @@ class SessionEndDialog(ModalDialog):
         self._choose("carry_on")
 
     def _choose(self, value: str) -> None:
-        self.result = {"choice": value, "next_step": self.next_entry.get().strip()}
+        self.result = {
+            "choice": value,
+            "next_step": self.next_entry.get().strip(),
+            "step_done": bool(self.step_done_var and self.step_done_var.get()),
+        }
         self.destroy()
 
     def cancel(self, _event=None):
@@ -670,7 +976,9 @@ class SessionEndDialog(ModalDialog):
             step = self.next_entry.get().strip()
         except tk.TclError:
             pass
-        self.result = {"choice": "carry_on", "next_step": step}
+        self.result = {"choice": "carry_on", "next_step": step,
+                       "step_done": bool(self.step_done_var
+                                         and self.step_done_var.get())}
         self.destroy()
 
 
@@ -743,6 +1051,13 @@ class WeekReviewDialog(ModalDialog):
             for title in entry.titles:
                 ttk.Label(inner, text=f"   ✓ {title}", style="Muted.TLabel",
                           wraplength=px(self, 410), justify="left").pack(anchor="w")
+            # Steps use a different mark from finished tasks, because they
+            # are different evidence: a task done and a step done should not
+            # read as the same thing at a glance.
+            for step, task in entry.steps:
+                ttk.Label(inner, text=f"   · {step_line(step, task)}",
+                          style="Muted.TLabel", wraplength=px(self, 410),
+                          justify="left").pack(anchor="w")
         # Ask for exactly as much room as the days need, up to the ceiling.
         # Without this the canvas asks for nothing and even a quiet week
         # would scroll — trading one wrong answer for another.

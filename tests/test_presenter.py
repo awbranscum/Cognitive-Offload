@@ -11,7 +11,7 @@ import unittest
 from datetime import date, timedelta
 
 from cognitive_offload import presenter
-from cognitive_offload.models import Task, today_iso
+from cognitive_offload.models import MatrixTask, Task, today_iso
 from cognitive_offload.sessions import FocusSession, SessionLog
 
 
@@ -419,13 +419,70 @@ class DueViewTests(unittest.TestCase):
         self.assertEqual(view.tasks[0].text, "today's booking")
 
     def test_scheduled_matrix_tasks_join_the_count(self):
-        class Booked:
-            scheduled_for = today_iso()
-
+        # A real MatrixTask rather than a stub carrying one attribute: the
+        # banner asks a quadrant task the same questions it asks a list task,
+        # and a stub that answers only `scheduled_for` passes tests the real
+        # object would fail.
+        booked = MatrixTask(title="quadrant booking",
+                            scheduled_for=today_iso())
         view = presenter.due_view([make("task", scheduled_for=today_iso())],
-                                  [Booked()])
+                                  [booked])
         self.assertEqual(view.total, 2)
         self.assertEqual(view.text, "2 booked for today →")
+
+
+class PutDownIsNotBookedTests(unittest.TestCase):
+    """A task you have set aside stops being counted as today's.
+
+    Pressing "Not today" on something booked for today is a direct
+    contradiction, and the more recent of the two statements is the one that
+    means something. A task out with someone else is the error the suggestion
+    slot already avoids: the banner's click selects it and says "Booked for
+    today: X", pointing at work that is not yours to do.
+    """
+
+    def _days(self, n):
+        return (date.today() + timedelta(days=n)).isoformat()
+
+    def _view(self, **fields):
+        task = make("ring the insurance company", scheduled_for=today_iso())
+        for name, value in fields.items():
+            setattr(task, name, value)
+        return presenter.due_view([task])
+
+    def test_a_plain_booking_is_still_counted(self):
+        self.assertEqual(self._view().total, 1)
+
+    def test_not_today_takes_it_out_of_the_count(self):
+        view = self._view(snoozed_until=self._days(1))
+        self.assertEqual(view.total, 0)
+        self.assertEqual(view.text, "")
+
+    def test_a_snooze_that_has_run_out_is_counted_again(self):
+        self.assertEqual(self._view(snoozed_until=self._days(-1)).total, 1)
+
+    def test_a_task_out_with_someone_is_not_counted(self):
+        view = self._view(handed_to="Mum", follow_up_on=self._days(3))
+        self.assertEqual(view.total, 0)
+
+    def test_but_it_comes_back_on_the_check_back_day(self):
+        view = self._view(handed_to="Mum", follow_up_on=self._days(-1))
+        self.assertEqual(view.total, 1)
+
+    def test_the_click_lands_on_what_the_count_counted(self):
+        # The count and the click come from one call; dropping a task from
+        # one and not the other is the drift this function exists to stop.
+        put_down = make("out with Mum", scheduled_for=today_iso(),
+                        handed_to="Mum")
+        live = make("still mine", scheduled_for=today_iso())
+        view = presenter.due_view([put_down, live])
+        self.assertEqual(view.total, len(view.tasks) + len(view.scheduled))
+        self.assertEqual([t.text for t in view.tasks], ["still mine"])
+
+    def test_a_quadrant_booking_is_asked_the_same_question(self):
+        booked = MatrixTask(title="quadrant booking",
+                            scheduled_for=today_iso(), handed_to="Codex")
+        self.assertEqual(presenter.due_view([], [booked]).total, 0)
 
 
 class TodayViewTests(unittest.TestCase):
@@ -442,7 +499,7 @@ class TodayViewTests(unittest.TestCase):
     def test_sessions_are_added_as_a_footer_when_there_were_any(self):
         task = make("thing")
         task.set_done(True)
-        log = log_with(FocusSession(minutes=25, started_at=stamp(today_iso())))
+        log = log_with(FocusSession(minutes=25, logged_at=stamp(today_iso())))
         view = presenter.today_view([task], session_log=log)
         self.assertIn("Plus 1 focus session — 25 minutes.", view.body)
 
@@ -461,14 +518,14 @@ class WeekViewTests(unittest.TestCase):
 
     def test_days_with_nothing_are_omitted_never_listed_as_zeros(self):
         log = log_with(
-            FocusSession(minutes=15, started_at=stamp(self.yesterday.isoformat())))
+            FocusSession(minutes=15, logged_at=stamp(self.yesterday.isoformat())))
         view = presenter.week_view([], session_log=log, today=self.today)
         self.assertEqual([d.label for d in view.days], ["Yesterday"])
 
     def test_the_two_nearest_days_are_named_not_dated(self):
         log = log_with(
-            FocusSession(minutes=15, started_at=stamp(self.yesterday.isoformat())),
-            FocusSession(minutes=30, started_at=stamp(self.today.isoformat())),
+            FocusSession(minutes=15, logged_at=stamp(self.yesterday.isoformat())),
+            FocusSession(minutes=30, logged_at=stamp(self.today.isoformat())),
         )
         view = presenter.week_view([], session_log=log, today=self.today)
         self.assertEqual([d.label for d in view.days], ["Yesterday", "Today"])
@@ -476,22 +533,22 @@ class WeekViewTests(unittest.TestCase):
     def test_older_days_use_their_weekday_name(self):
         older = self.today - timedelta(days=3)
         log = log_with(
-            FocusSession(minutes=15, started_at=stamp(older.isoformat())))
+            FocusSession(minutes=15, logged_at=stamp(older.isoformat())))
         view = presenter.week_view([], session_log=log, today=self.today)
         self.assertEqual([d.label for d in view.days], [older.strftime("%A")])
 
     def test_anything_older_than_a_week_is_outside_the_window(self):
         stale = self.today - timedelta(days=10)
         log = log_with(
-            FocusSession(minutes=99, started_at=stamp(stale.isoformat())))
+            FocusSession(minutes=99, logged_at=stamp(stale.isoformat())))
         view = presenter.week_view([], session_log=log, today=self.today)
         self.assertEqual(view.days, [])
         self.assertEqual(view.total_minutes, 0)
 
     def test_totals_add_up_across_the_week(self):
         log = log_with(
-            FocusSession(minutes=15, started_at=stamp(self.yesterday.isoformat())),
-            FocusSession(minutes=30, started_at=stamp(self.yesterday.isoformat(),
+            FocusSession(minutes=15, logged_at=stamp(self.yesterday.isoformat())),
+            FocusSession(minutes=30, logged_at=stamp(self.yesterday.isoformat(),
                                                       "11:00:00")),
         )
         view = presenter.week_view([], session_log=log, today=self.today)
@@ -515,3 +572,45 @@ class WeekViewTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DamageReportTests(unittest.TestCase):
+    """Two different facts, and only one of them used to get said."""
+
+    def test_nothing_wrong_says_nothing(self):
+        self.assertEqual(presenter.damage_report(0, [], "data.json"), "")
+        self.assertEqual(presenter.damage_report(0, None, "data.json"), "")
+
+    def test_one_bad_record_reads_as_one(self):
+        said = presenter.damage_report(1, [], "data.json")
+        self.assertIn("1 task record in data.json was unreadable", said)
+        self.assertNotIn("records were", said)
+
+    def test_several_bad_records_read_as_several(self):
+        said = presenter.damage_report(3, [], "data.json")
+        self.assertIn("3 task records in data.json were unreadable", said)
+
+    def test_a_wrong_shaped_field_is_named_not_counted(self):
+        said = presenter.damage_report(0, ["tasks"], "data.json")
+        self.assertIn("The task list in data.json is not in a shape", said)
+        # The whole point: no number, because there is no honest number.
+        self.assertNotIn("record", said.split("Auto-save")[0])
+
+    def test_each_field_has_a_name_a_person_would_use(self):
+        for field, name in presenter.FIELD_NAMES.items():
+            with self.subTest(field):
+                said = presenter.damage_report(0, [field], "data.json")
+                self.assertIn(name, said)
+                self.assertNotIn(field, said.replace(name, ""))
+
+    def test_both_kinds_of_damage_are_reported_together(self):
+        said = presenter.damage_report(2, ["steps_log"], "data.json")
+        self.assertIn("record of finished steps", said)
+        self.assertIn("2 task records", said)
+
+    def test_anything_it_says_says_autosave_is_off(self):
+        for dropped, unreadable in ((1, []), (0, ["tasks"]), (2, ["steps_log"])):
+            with self.subTest(dropped=dropped, unreadable=unreadable):
+                said = presenter.damage_report(dropped, unreadable, "data.json")
+                self.assertIn("Auto-save is off", said)
+                self.assertIn("Export a copy first", said)

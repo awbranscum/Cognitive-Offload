@@ -53,18 +53,55 @@ def _shared_badges(item) -> list[Badge]:
     return badges
 
 
-def _step_or_summary(first_step: str, body: str) -> str:
+def _step_or_summary(item, body: str) -> str:
     """The line under a task title, in one place for both tabs.
 
     This module's whole reason for existing is that these two subtitles were
     copy-pasted; the drift then arrived exactly as predicted, when the matrix
     copy moved inside a conditional and fell off the wording snapshot while
     the identical string in the main list kept it looking covered.
+
+    A task with a plan says where in it you are. That is the whole visible
+    difference between a task and a wall: "step 2 of 5" is evidence you are
+    part-way through something, on the row, without opening anything. It
+    counts what exists, never what is missing, and it appears only when
+    there is a plan to be part-way through.
     """
+    first_step = getattr(item, "first_step", "")
     if first_step:
-        return f"→ {first_step}"
+        return f"→ {step_with_place(first_step, plan_place(item))}"
     body = (body or "").strip()
     return body.splitlines()[0][:80] if body else ""
+
+
+def plan_place(item) -> str:
+    """"step 2 of 4", or "" for a task with no plan.
+
+    Said in one place because two screens say it now — the row and the
+    session-end dialog — and this module exists precisely because the last
+    sentence that lived in two places drifted.
+
+    `if steps:` and not `len(steps) > 1:` — the model collapses a plan of one
+    back into a plain first step, so the longer test could never tell a
+    different story. A branch no fixture can reach is a branch nothing can
+    check.
+    """
+    steps = getattr(item, "steps", None) or []
+    if not steps:
+        return ""
+    return f"step {getattr(item, 'steps_done', 0) + 1} of {len(steps)}"
+
+
+def step_with_place(first_step: str, place: str) -> str:
+    """``"copy the headings across · step 2 of 3"``, or just the step.
+
+    One composer, because three surfaces say this sentence — the row, the
+    focus card, and the pop-out — and the pop-out had been saying only half
+    of it. `focus_caption`'s own docstring promised the pop-out was covered;
+    the pop-out passed `first_step` raw and never asked for the place. Two
+    copies of a sentence is how a third comes to be missing.
+    """
+    return f"{first_step} · {place}" if first_step and place else first_step
 
 
 def _subtitle(item, body: str) -> str:
@@ -73,8 +110,45 @@ def _subtitle(item, body: str) -> str:
     The waiting line wins: the first step belongs to whoever has the task
     now, and showing it would read as something still on your own plate.
     """
-    return waiting_line(item) or _step_or_summary(
-        getattr(item, "first_step", ""), body)
+    return waiting_line(item) or _step_or_summary(item, body)
+
+
+#: A ceiling on what a row *draws*, not on what a task *keeps*.
+#:
+#: Row height grows about 0.43px per character with nothing stopping it: a
+#: 1000-character paste made a row 437px tall — taller than the whole visible
+#: list at the window's floor — a 4000-character one 1729px, and 8000
+#: characters took the X server's pixmap allocation down with the app. The
+#: same growth on the NEXT UP strip put 694px of title where a 696px window
+#: was, pushing "Where do I start?", the filters and the list off the bottom.
+#:
+#: Three hundred is a guard rail rather than a policy. The longest title
+#: anyone has typed in this project's own fixtures is 138 characters, so this
+#: never touches something a person wrote; it catches the paragraph pasted out
+#: of an email, which is a thing this app openly invites ("Anything in your
+#: head — it does not have to be tidy"). Nothing is lost: the full text is
+#: stored, reloaded byte-identical, searched, and shown in the editor.
+#:
+#: Whether ordinary titles should wrap or ellipsize is a different question
+#: and still an open one. This is not it.
+TITLE_LIMIT = 300
+
+
+def short(text: str, limit: int) -> str:
+    """``text`` cut to ``limit`` characters, on a word boundary where one is
+    near enough to the end that using it does not throw away half the line.
+
+    Lives here rather than in the presenter because two callers now want it
+    and the presenter imports this module, not the other way round.
+    """
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit].rstrip()
+    space = cut.rfind(" ")
+    if space >= limit - 12:
+        cut = cut[:space].rstrip()
+    return cut + "\u2026"
 
 
 def task_row(task: Task) -> Row:
@@ -93,7 +167,8 @@ def task_row(task: Task) -> Row:
     else:
         subtitle = _subtitle(task, task.description)
 
-    return Row(id=task.id, title=task.text, subtitle=subtitle, badges=badges,
+    return Row(id=task.id, title=short(task.text, TITLE_LIMIT),
+               subtitle=subtitle, badges=badges,
                done=task.done, flagged=bool(task.priority))
 
 
@@ -119,15 +194,24 @@ def waiting_line(task, on: str | None = None) -> str:
 
 
 def matrix_row(task) -> Row:
-    return Row(id=task.id, title=task.title,
+    return Row(id=task.id, title=short(task.title, TITLE_LIMIT),
                subtitle=_subtitle(task, task.content),
                badges=_shared_badges(task), marker="·")
 
 
-def focus_caption(task: Task | None, first_step: str) -> str:
+def focus_caption(task: Task | None, first_step: str, place: str = "") -> str:
+    """What the focus card and the pop-out say you are on.
+
+    ``place`` is "step 2 of 4" and only ever appears on a task that has a
+    plan. During a session it is the one thing about the plan worth showing:
+    not what is coming — that is a decision for later and this screen is
+    deliberately light — but where you are in it.
+    """
     if task is None:
         return f"Free focus — {first_step}" if first_step else "Free focus"
-    return f"{task.text}\n→ {first_step}" if first_step else task.text
+    if not first_step:
+        return task.text
+    return f"{task.text}\n→ {step_with_place(first_step, place)}"
 
 
 def sort_label(order: str) -> str:

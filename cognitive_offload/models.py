@@ -275,6 +275,150 @@ def next_occurrence(repeat: str, scheduled_for: str = "", on: str | None = None)
     return date(year, month, day).isoformat()
 
 
+# Fields that belong to the round they were set in, not to the task itself,
+# and so are reset when a repeat books its next round. Everything else on a
+# Task is setup you did once and should carry forward.
+#
+# A mapping rather than a list of names because not everything here resets to
+# "": how far down the plan you got is a number, and blanking it would have
+# put a string where an int belongs — the sort of thing a list of names
+# cannot even express, let alone catch.
+PER_ROUND_FIELDS: dict = {
+    "snoozed_until": "",
+    "handed_to": "",
+    "handed_off_on": "",
+    "follow_up_on": "",
+    # The plan carries forward; your place in it does not. Next week's bins
+    # start at the first step again, which is the whole point of a routine.
+    "steps_done": 0,
+}
+
+
+def as_records(value) -> list:
+    """The records in a field that is meant to hold a list of them.
+
+    Anything that is not a list or tuple is **not** a short list — it is an
+    unreadable field, and this returns nothing for it. Two bugs came from
+    iterating the raw value instead. A string was walked character by
+    character, so ``"tasks": "nope"`` was reported to the person as *"4 task
+    records couldn't be read"* — a loss count invented out of a string's
+    length, in an app whose whole promise is telling the truth about their
+    stuff. And a number is not iterable at all, so ``"tasks": 42`` raised a
+    TypeError out of the loader, past every StorageError the recovery code
+    catches, and the app did not open.
+
+    The two model coercions below have always done this. The store loaders
+    did not, which is the whole distance between "your file is damaged, here
+    is what I saved" and a traceback.
+    """
+    return list(value) if isinstance(value, (list, tuple)) else []
+
+
+def _as_steps(value) -> list[str]:
+    """Coerce whatever was in the file into a list of non-empty steps."""
+    if isinstance(value, str) or not isinstance(value, (list, tuple)):
+        return []
+    return [text for text in (_as_str(v).strip() for v in value) if text]
+
+
+def _fix_steps(item) -> None:
+    """Hold the one invariant this feature rests on.
+
+    ``first_step`` has forty-seven readers across seven modules and is what
+    ``is_ready`` — and so the whole "what should I start?" ranking — is built
+    on. Adding a plan must not add a *second* answer to "what next", so a
+    task with steps defines ``first_step`` as ``steps[steps_done]`` and this
+    is the only place that says so. Self-healing on load: a hand-edited file
+    whose first_step has drifted from its plan is put back rather than
+    believed.
+    """
+    item.steps = _as_steps(item.steps)
+    if len(item.steps) <= 1:
+        # A plan of one step is just a first step, which the app already has
+        # a field, a badge and a whole vocabulary for. Two ways to say the
+        # same thing is how they drift — and a row reading "step 1 of 1" is
+        # the drift arriving. Reachable by deleting the only other step, not
+        # just by hand-editing a file.
+        if item.steps:
+            item.first_step = item.steps[0]
+        item.steps = []
+        item.steps_done = 0
+        return
+    try:
+        cursor = int(item.steps_done)
+    except (TypeError, ValueError):
+        cursor = 0
+    item.steps_done = max(0, min(cursor, len(item.steps) - 1))
+    item.first_step = item.steps[item.steps_done]
+
+
+def _rest_of_plan(item) -> list[str]:
+    """The steps after the one you are on. What the editor shows and edits.
+
+    The current step is NOT in this list, and that is the whole reason the
+    editor can hold both without them fighting: the step box owns one line,
+    the plan box owns the rest, and neither can overwrite the other's.
+    """
+    if not item.steps:
+        return []
+    return list(item.steps[item.steps_done + 1:])
+
+
+def _set_rest(item, rest) -> None:
+    """Replace everything after the current step, keeping your place.
+
+    Rewriting what is left to do must not throw away the fact that you have
+    already done three of them, so the head of the plan — up to and including
+    the step you are on — is kept exactly as it was.
+    """
+    rest = _as_steps(rest)
+    if item.steps:
+        head = list(item.steps[:item.steps_done + 1])
+    else:
+        head = [item.first_step] if item.first_step else []
+    item.steps = head + rest
+    _fix_steps(item)
+
+
+def _set_current_step(item, text: str) -> None:
+    """Reword what you are about to do, wherever it happens to be stored.
+
+    Without this, editing the step box on a task that has a plan would write
+    to ``first_step`` alone and the two would disagree until the next load
+    silently reverted it.
+    """
+    text = _as_str(text).strip()
+    item.first_step = text
+    if item.steps and 0 <= item.steps_done < len(item.steps):
+        item.steps[item.steps_done] = text
+        if not text:
+            # An emptied step is a removed step, not a blank one sitting in
+            # the middle of the plan.
+            del item.steps[item.steps_done]
+            _fix_steps(item)
+
+
+def _advance_step(item) -> bool:
+    """Tick this step off and move to the next. False when there is no next.
+
+    Deliberately a cursor rather than a pop: the plan describes the task, so
+    a repeating task has to be able to hand the *whole* plan to its next
+    round. Steps consumed destructively could not.
+    """
+    if not item.steps or item.steps_done >= len(item.steps) - 1:
+        return False
+    item.steps_done += 1
+    item.first_step = item.steps[item.steps_done]
+    return True
+
+
+def _steps_left(item) -> int:
+    """How many steps come after this one. 0 when there is no plan."""
+    if not item.steps:
+        return 0
+    return max(0, len(item.steps) - item.steps_done - 1)
+
+
 def _is_waiting(item) -> bool:
     """Out with someone (or something) else, and not back yet.
 
@@ -283,6 +427,39 @@ def _is_waiting(item) -> bool:
     — which is the bug this whole area exists to stop.
     """
     return bool(getattr(item, "handed_to", "") or getattr(item, "handed_off_on", ""))
+
+
+def snooze_is_live(snoozed_until: str, on: str | None = None) -> bool:
+    """Is this "not today" date still in the future?
+
+    Takes the date rather than the task, because the task editor holds the
+    value as a plain string and had written the comparison out for itself.
+    That inline copy is how the rule ends up with two answers.
+    """
+    value = (snoozed_until or "").strip()
+    return bool(value) and value > (on or today_iso())
+
+
+def _is_snoozed(item, on: str | None = None) -> bool:
+    """Put down until a later day — "not today", and still not today.
+
+    The rule lived inline in ``rank_for_starting`` while it had one reader.
+    It has two now, and the second one is the focus card, which sits ABOVE
+    the slot that rule protects: two copies of this predicate would let the
+    most prominent thing on the screen go on naming a task the list itself
+    had agreed to stop naming.
+    """
+    return snooze_is_live(getattr(item, "snoozed_until", ""), on)
+
+
+def _is_put_down(item, on: str | None = None) -> bool:
+    """True when you have deliberately set this task aside for now.
+
+    Snoozed, or out with someone and not due back. Both mean the same thing
+    to anything that would otherwise tell you to get on with it: **not now**,
+    decided by you, and the app does not get to reopen the question.
+    """
+    return _is_snoozed(item, on) or (_is_waiting(item) and not _is_due_back(item, on))
 
 
 def _is_due_back(item, on: str | None = None) -> bool:
@@ -342,6 +519,16 @@ class Task:
     handed_to: str = ""
     handed_off_on: str = ""
     follow_up_on: str = ""
+    # The rest of the plan, and how far down it you are. "Write the report"
+    # is a wall; "open last year's, copy the headings, fill in the numbers"
+    # is three things you can start. The task used to hold exactly ONE step,
+    # so the moment it was done the task was a blank wall again and every
+    # transition charged a fresh decision — the one thing this app's own
+    # design rules say not to charge for.
+    #
+    # `steps_done` is a cursor, not a tick list: see _advance_step.
+    steps: list[str] = field(default_factory=list)
+    steps_done: int = 0
 
     def __post_init__(self) -> None:
         self.text = _as_str(self.text).strip()
@@ -362,6 +549,27 @@ class Task:
             self.created_at = now_stamp()
         if not self.done:
             self.completed_at = None
+        # Last, because it can rewrite first_step and needs the coercions
+        # above to have run first.
+        _fix_steps(self)
+
+    # -- the plan ------------------------------------------------------
+    @property
+    def rest_of_plan(self) -> list[str]:
+        return _rest_of_plan(self)
+
+    def set_rest(self, rest) -> None:
+        _set_rest(self, rest)
+
+    def set_current_step(self, text: str) -> None:
+        _set_current_step(self, text)
+
+    def advance_step(self) -> bool:
+        return _advance_step(self)
+
+    @property
+    def steps_left(self) -> int:
+        return _steps_left(self)
 
     @property
     def is_ready(self) -> bool:
@@ -381,6 +589,12 @@ class Task:
 
     def is_waiting(self) -> bool:
         return _is_waiting(self)
+
+    def is_snoozed(self, on: str | None = None) -> bool:
+        return _is_snoozed(self, on)
+
+    def is_put_down(self, on: str | None = None) -> bool:
+        return _is_put_down(self, on)
 
     def is_due_back(self, on: str | None = None) -> bool:
         return _is_due_back(self, on)
@@ -405,8 +619,18 @@ class Task:
         nxt.completed_at = None
         nxt.scheduled_for = when
         # A snooze belongs to the round it was taken in; carrying it forward
-        # would silently excuse the next one too.
-        nxt.snoozed_until = ""
+        # would silently excuse the next one too. The handoff marks are the
+        # same shape and were missed when they were added: the next round
+        # arrived already claiming to be out with an agent that had never
+        # been given it, and every round after that inherited the claim.
+        # `tests/test_repeat_rounds` now classifies every field so the next
+        # one added has to be decided rather than silently inherited.
+        for field_name, blank in PER_ROUND_FIELDS.items():
+            setattr(nxt, field_name, blank)
+        # The resets happen after construction, so the plan invariant has to
+        # be restored by hand: a round that starts at step one must say the
+        # first step, not the last one the previous round reached.
+        _fix_steps(nxt)
         return nxt
 
 
@@ -425,11 +649,18 @@ class Task:
         return True
 
     def matches(self, term: str) -> bool:
-        """Case-insensitive search across title, description and tags."""
+        """Case-insensitive search across everything the person wrote.
+
+        Including **every step of the plan**, not just the one you are on.
+        A step is something you typed, and this app says out loud that a task
+        stays "in every search" and that hiding one is the thing it will not
+        do — so searching for a step and getting nothing back is not a small
+        gap, it is the search box teaching you to distrust it.
+        """
         term = term.strip().lower()
         if not term:
             return True
-        haystack = (self.text, self.description, self.first_step)
+        haystack = (self.text, self.description, self.first_step, *self.steps)
         if any(term in part.lower() for part in haystack):
             return True
         return any(term in tag for tag in self.tags)
@@ -455,6 +686,8 @@ class Task:
             "handed_to": self.handed_to,
             "handed_off_on": self.handed_off_on,
             "follow_up_on": self.follow_up_on,
+            "steps": list(self.steps),
+            "steps_done": self.steps_done,
         }
 
     @classmethod
@@ -482,6 +715,8 @@ class Task:
             handed_to=_as_str(data.get("handed_to")),
             handed_off_on=_as_str(data.get("handed_off_on")),
             follow_up_on=_as_str(data.get("follow_up_on")),
+            steps=_as_steps(data.get("steps")),
+            steps_done=data.get("steps_done", 0),
         )
 
     def copy(self) -> "Task":
@@ -541,6 +776,11 @@ class MatrixTask:
     # through the matrix does not quietly strip them off a task.
     repeat: str = ""
     snoozed_until: str = ""
+    # The plan, and how far down it you are — same meaning as on Task, and
+    # carried for the same reason the handoff marks are: a task broken down
+    # on the main list must not arrive here as a wall again.
+    steps: list[str] = field(default_factory=list)
+    steps_done: int = 0
     # Absolute path of the backing file; assigned by the store, never stored.
     path: object = None
 
@@ -553,6 +793,25 @@ class MatrixTask:
         self.pinned = _as_bool(self.pinned)
         self.estimate_minutes = _as_minutes(self.estimate_minutes)
         self.repeat = self.repeat if self.repeat in REPEATS else ""
+        _fix_steps(self)
+
+    # -- the plan ------------------------------------------------------
+    @property
+    def rest_of_plan(self) -> list[str]:
+        return _rest_of_plan(self)
+
+    def set_rest(self, rest) -> None:
+        _set_rest(self, rest)
+
+    def set_current_step(self, text: str) -> None:
+        _set_current_step(self, text)
+
+    def advance_step(self) -> bool:
+        return _advance_step(self)
+
+    @property
+    def steps_left(self) -> int:
+        return _steps_left(self)
 
     def to_dict(self) -> dict:
         return {
@@ -574,6 +833,8 @@ class MatrixTask:
             "follow_up_on": self.follow_up_on,
             "repeat": self.repeat,
             "snoozed_until": self.snoozed_until,
+            "steps": list(self.steps),
+            "steps_done": self.steps_done,
         }
 
     @classmethod
@@ -597,6 +858,8 @@ class MatrixTask:
             follow_up_on=_as_str(data.get("follow_up_on")),
             repeat=_as_str(data.get("repeat")),
             snoozed_until=_as_str(data.get("snoozed_until")),
+            steps=_as_steps(data.get("steps")),
+            steps_done=data.get("steps_done", 0),
         )
 
     def copy(self) -> "MatrixTask":
@@ -622,6 +885,12 @@ class MatrixTask:
 
     def is_waiting(self) -> bool:
         return _is_waiting(self)
+
+    def is_snoozed(self, on: str | None = None) -> bool:
+        return _is_snoozed(self, on)
+
+    def is_put_down(self, on: str | None = None) -> bool:
+        return _is_put_down(self, on)
 
     def is_due_back(self, on: str | None = None) -> bool:
         return _is_due_back(self, on)
@@ -655,4 +924,6 @@ class MatrixTask:
             handed_to=self.handed_to,
             handed_off_on=self.handed_off_on,
             follow_up_on=self.follow_up_on,
+            steps=list(self.steps),
+            steps_done=self.steps_done,
         )

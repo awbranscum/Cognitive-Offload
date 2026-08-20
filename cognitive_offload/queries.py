@@ -156,17 +156,16 @@ def rank_for_starting(tasks: list[Task], kind: str | None = None, on: str | None
     """
     on = on or today_iso()
     candidates = [t for t in tasks if not t.done]
-    # "Not today" means not today: the task stays on the list and in every
-    # search, it just stops guarding the suggestion slot until tomorrow.
-    candidates = [t for t in candidates if not t.snoozed_until or t.snoozed_until <= on]
-    # A task that is out with an agent is not yours to start — suggesting it
-    # is the app inviting you to duplicate work someone else is already
-    # doing. Same treatment as a snooze, and for the same reason: it stays on
-    # the list, wearing its "waiting" badge, and only stops guarding the
-    # suggestion slot. It comes back into the running on the check-back day,
-    # because from then on picking it up again is a real option.
-    candidates = [t for t in candidates
-                  if not t.is_waiting() or t.is_due_back(on)]
+    # Two ways of putting a task down, one question. "Not today" means not
+    # today: the task stays on the list and in every search, it just stops
+    # guarding the suggestion slot until tomorrow. And a task that is out
+    # with an agent is not yours to start — suggesting it is the app inviting
+    # you to duplicate work someone else is already doing; it stays on the
+    # list wearing its "waiting" badge, and comes back into the running on
+    # the check-back day, because from then on picking it up again is a real
+    # option. The predicate lives on the model because three screens ask it,
+    # and an inline copy here is how two of them came to disagree.
+    candidates = [t for t in candidates if not t.is_put_down(on)]
     if kind:
         candidates = [t for t in candidates if t.kind == kind or t.kind == KIND_UNSET]
 

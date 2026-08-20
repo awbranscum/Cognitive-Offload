@@ -415,22 +415,36 @@ class AppSmokeTests(unittest.TestCase):
                       self.app.status_var.get())
 
     def _matrix_dialog_result(self, **overrides):
+        """Everything TaskEditorDialog.collect() returns, not a subset.
+
+        A stub that omits a key tests the app against a dialog that does not
+        exist. It omitted `repeat` and `estimate_minutes` on the add path,
+        which is how both went straight to the floor untested; the guard
+        against the next one is tests/test_editor_fields.py.
+        """
         result = {"title": "From the dialog", "content": "body text",
                   "first_step": "open it", "kind": "admin",
-                  "scheduled_for": "", "estimate_minutes": 0}
+                  "scheduled_for": "", "estimate_minutes": 0, "repeat": "",
+                  "clear_snooze": False, "take_back": False,
+                  "waiting_on": "", "check_back": ""}
         result.update(overrides)
         return result
 
     def test_matrix_add_carries_every_dialog_field(self):
         with mock.patch("cognitive_offload.app.TaskEditorDialog") as editor:
             editor.return_value.show.return_value = self._matrix_dialog_result(
-                scheduled_for="2026-09-01")
+                scheduled_for="2026-09-01", estimate_minutes=25,
+                repeat="weekly")
             self.app.add_matrix_task("do_first")
         [task] = self.app.matrix.list("do_first")
         self.assertEqual(task.title, "From the dialog")
         self.assertEqual(task.first_step, "open it")
         self.assertEqual(task.kind, "admin")
         self.assertEqual(task.scheduled_for, "2026-09-01")
+        # Typed into the dialog and dropped on the floor until v3.51.0. The
+        # person watched themselves fill both of these in.
+        self.assertEqual(task.estimate_minutes, 25)
+        self.assertEqual(task.repeat, "weekly")
         self.assertEqual(self.app.matrix_lists["do_first"].size(), 1)
 
     def test_matrix_edit_round_trips_the_fields(self):
@@ -1229,6 +1243,10 @@ class AppSmokeTests(unittest.TestCase):
         self.assertIn("still here", self.app.task_list.get(0))
 
     def test_calm_mode_hides_the_extras_without_losing_them(self):
+        # With a task on the list, so the filter row has something to filter:
+        # on an empty list it stays down when calm mode lifts, which is its
+        # own rule and not this test's subject.
+        self.capture("something to filter")
         self.app.calm_var.set(True)
         self.app.apply_calm_mode()
         for widget in (self.app.filter_row, self.app.task_toolbar, self.app.search_row):
@@ -1349,6 +1367,322 @@ class AppSmokeTests(unittest.TestCase):
                              "the title is wider than the list can show")
         # Short rows must not pay for it.
         self.assertEqual(lines(short_label), 1)
+
+    def test_a_long_task_keeps_every_word_however_many_badges_it_carries(self):
+        """The v3.41.0 fix came back through the badge strip.
+
+        The badges sit on the title's own line and are 0-430px wide depending
+        on the row, but one wraplength was applied to the whole pool. So the
+        title wrapped at the full row width, was given only what the badges
+        left, and Tk clipped the difference — a Label wraps at ``wraplength``
+        and does not re-wrap to fit its allocation. Measured before: the same
+        129-character title showed 100% of itself on a bare row and **41%**
+        on a fully-badged one, ending mid-word.
+        """
+        from cognitive_offload.models import today_iso
+
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        long_text = ("call the insurance company back about the rejected claim "
+                     "and ask for a supervisor and get the appeal deadline in "
+                     "writing this time")
+        self.capture(long_text)
+        task = self.app.tasks[0]
+        task.first_step = "ring them"
+        task.kind = "admin"
+        task.scheduled_for = today_iso()
+        task.estimate_minutes = 10
+        task.repeat = "weekly"
+        task.pinned = True
+        self.app.refresh_tasks()
+        self.app.update()
+
+        title = self.app.task_list._pool[0]["title"]
+        self.assertGreater(len(title.cget("text")), 100, "fixture got shorter")
+        # Every word fits in the room it was given: a Label that needs more
+        # width than it has is showing less text than it holds.
+        self.assertLessEqual(
+            title.winfo_reqwidth(), title.winfo_width(),
+            "the title is clipped — it wrapped wider than the badges left it",
+        )
+
+    def test_badges_take_their_room_from_the_title_not_from_the_words(self):
+        """The same task, with and without badges: the badged one must take
+        MORE lines, never fewer words."""
+        import tkinter.font as tkfont
+
+        from cognitive_offload.models import today_iso
+
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        long_text = ("call the insurance company back about the rejected claim "
+                     "and ask for a supervisor")
+        self.capture(long_text)   # bare
+        self.capture(long_text)   # will carry badges
+        badged = self.app.tasks[0]
+        badged.kind = "admin"
+        badged.scheduled_for = today_iso()
+        badged.estimate_minutes = 10
+        badged.pinned = True
+        self.app.refresh_tasks()
+        self.app.update()
+
+        def lines(label):
+            metrics = tkfont.Font(font=label.cget("font")).metrics("linespace")
+            return max(1, round(label.winfo_reqheight() / metrics))
+
+        titles = [self.app.task_list._pool[i]["title"] for i in range(2)]
+        wide, narrow = max(titles, key=lambda w: w.cget("wraplength")), \
+                       min(titles, key=lambda w: w.cget("wraplength"))
+        self.assertLess(narrow.cget("wraplength"), wide.cget("wraplength"),
+                        "the badged row got the same wrap width as the bare one")
+        self.assertGreaterEqual(lines(narrow), lines(wide),
+                                "the badged row lost lines instead of gaining them")
+        for label in titles:
+            self.assertLessEqual(label.winfo_reqwidth(), label.winfo_width(),
+                                 label.cget("text")[:40])
+
+    def test_the_wrap_width_is_right_before_any_further_layout_pass(self):
+        """Measured the moment the row is applied, with no update() after.
+
+        The badge strip's *requested* width is correct as soon as its badges
+        are set; its allocated width is still 1 until the geometry manager
+        runs. Reading the allocated one leaves the title ~187px too wide, and
+        a later <Configure> quietly re-fits it — so a test that calls
+        update() first sees the corrected value and passes over the bug.
+        Nothing guarantees that <Configure> arrives: it only fires when the
+        geometry actually changes.
+        """
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        self.capture("call the insurance company back about the rejected claim")
+        self.app.update()          # settle the list once, deliberately
+        task = self.app.tasks[0]
+        task.kind = "admin"
+        task.pinned = True
+        task.estimate_minutes = 10
+        self.app.refresh_tasks()   # ...and now NO update(): read the decision
+
+        cell = self.app.task_list._pool[0]
+        expected = (self.app.task_list._wrap_at
+                    - cell["badges"].winfo_reqwidth()
+                    - self.app.task_list.BADGE_GAP)
+        self.assertEqual(cell["title"].cget("wraplength"), expected,
+                         "the title was wrapped against the badge strip's "
+                         "allocated width instead of its requested width")
+
+    def _badged_long_task(self):
+        from cognitive_offload.models import today_iso
+
+        long_text = ("call the insurance company back about the rejected claim "
+                     "and ask for a supervisor and get the appeal deadline in "
+                     "writing this time")
+        self.capture(long_text)
+        task = self.app.tasks[0]
+        task.first_step = "ring them"
+        task.kind = "admin"
+        task.scheduled_for = today_iso()
+        task.estimate_minutes = 10
+        task.repeat = "weekly"
+        task.pinned = True
+        task.tags = ["health", "phone"]
+        return task
+
+    def test_one_task_is_never_taller_than_the_list_it_sits_in(self):
+        """Making badges narrow the title instead of clipping it left nothing
+        bounding how narrow. At the app's own minimum width a fully-badged
+        long task rendered ELEVEN lines — 224px, taller than the whole visible
+        list, filling it and pushing every other task out of view."""
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        self._badged_long_task()
+        for width in (1600, 1400, 1240, 1120):
+            with self.subTest(window=width):
+                self.app.geometry(f"{width}x880")
+                self.app.update_idletasks()
+                self.app.refresh_tasks()
+                self.app.update()
+                frame = self.app.task_list._pool[0]["frame"]
+                self.assertLessEqual(
+                    frame.winfo_height(), 140,
+                    f"one row is {frame.winfo_height()}px at {width}px wide",
+                )
+
+    def test_the_badges_give_way_before_the_title_does(self):
+        """The strip is the compressible thing — it already had a "+k" pill,
+        keyed on a count when width is what binds."""
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        task = self._badged_long_task()
+        self.app.geometry("1120x880")
+        self.app.update_idletasks()
+        self.app.refresh_tasks()
+        self.app.update()
+        cell = self.app.task_list._pool[0]
+        from cognitive_offload.rows import task_row
+
+        wanted = len(task_row(task).badges)
+        drawn = cell["badges"]._fit()
+        self.assertLess(len(drawn), wanted, "nothing was collapsed")
+        self.assertTrue(drawn[-1].text.startswith("+"),
+                        f"no overflow pill: {[b.text for b in drawn]}")
+
+    def test_a_short_title_keeps_the_badges_it_has_room_for(self):
+        """Capping by share alone collapsed "Bins" — a four-letter task —
+        down to four badges on a wide screen, for no reason at all."""
+        from cognitive_offload.models import today_iso
+        from cognitive_offload.rows import task_row
+
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        self.capture("Bins")
+        task = self.app.tasks[0]
+        task.first_step = "x"
+        task.kind = "admin"
+        task.scheduled_for = today_iso()
+        task.estimate_minutes = 10
+        task.repeat = "weekly"
+        task.pinned = True
+        self.app.geometry("1240x880")
+        self.app.update_idletasks()
+        self.app.refresh_tasks()
+        self.app.update()
+        cell = self.app.task_list._pool[0]
+        self.assertEqual(len(cell["badges"]._fit()), len(task_row(task).badges),
+                         "a short title lost badges it had room for")
+
+    def test_the_strip_never_draws_wider_than_its_budget(self):
+        """Including the overflow pill: room is reserved for "+k" before the
+        last badge is accepted, so the marker can never bust the budget."""
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        self._badged_long_task()
+        for width in (1600, 1240, 1120):
+            with self.subTest(window=width):
+                self.app.geometry(f"{width}x880")
+                self.app.update_idletasks()
+                self.app.refresh_tasks()
+                self.app.update()
+                strip = self.app.task_list._pool[0]["badges"]
+                self.assertLessEqual(strip.winfo_reqwidth(), strip.max_width,
+                                     [b.text for b in strip._fit()])
+
+    def test_resizing_alone_re_budgets_the_badges(self):
+        """Dragging the window narrower fires a Configure event and nothing
+        else — no refresh, so `_apply_row` never runs. The titles were
+        re-wrapped on that path but the badge budgets were not, so the strip
+        kept the room it was given at the old width and squeezed the title.
+        """
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        self._badged_long_task()
+        self.app.geometry("1600x880")
+        self.app.update_idletasks()
+        self.app.refresh_tasks()
+        self.app.update()
+        wide = self.app.task_list._pool[0]["badges"].max_width
+
+        # Resize only. No refresh_tasks() — this is what a drag does.
+        self.app.geometry("1120x880")
+        self.app.update()
+        cell = self.app.task_list._pool[0]
+        self.assertLess(cell["badges"].max_width, wide,
+                        "the badge budget did not follow the window in")
+        self.assertLessEqual(cell["badges"].winfo_reqwidth(),
+                             cell["badges"].max_width)
+        self.assertLessEqual(cell["title"].winfo_reqwidth(),
+                             cell["title"].winfo_width(),
+                             "the title was clipped after a bare resize")
+
+    def test_the_title_font_is_built_against_this_app_not_a_global_default(self):
+        """A Font belongs to the Tk instance that made it.
+
+        With no ``root=`` it binds to ``tkinter._default_root``, which is a
+        *different* app in a process that built two and ``None`` once the
+        first is destroyed. The badge measurement thirty lines above has
+        carried this guard from the start; the title measurement was added
+        without it.
+        """
+        from tkinter import font as tkfont
+
+        listing = self.app.task_list
+        listing._title_fonts.clear()
+        listing._title_widths.clear()
+        with mock.patch.object(tkfont, "Font", wraps=tkfont.Font) as made:
+            listing._title_width("Chase the insurance claim", bold=True)
+        self.assertTrue(made.called)
+        self.assertIn("root", made.call_args.kwargs,
+                      "the font was built against the global default root")
+
+    def test_a_font_it_cannot_build_lays_out_roughly_rather_than_crashing(self):
+        """This measurement only decides how wide a badge strip may be. Dying
+        on a refresh is far too large a consequence for that; the badge
+        measurement estimates instead, and so does this one now."""
+        from tkinter import font as tkfont
+
+        listing = self.app.task_list
+        listing._title_fonts.clear()
+        listing._title_widths.clear()
+        title = "Chase the insurance claim appeal before Friday"
+        with mock.patch.object(tkfont, "Font",
+                               side_effect=RuntimeError("no default root")):
+            estimated = listing._title_width(title, bold=True)
+        self.assertGreater(estimated, 0)
+        # Erring wide is the safe direction: the budget then falls back to
+        # the share rather than squeezing the title on a guess.
+        self.assertGreaterEqual(estimated, len(title) * 7)
+
+    def test_a_measurement_that_fails_midway_is_also_survivable(self):
+        listing = self.app.task_list
+        listing._title_fonts.clear()
+        listing._title_widths.clear()
+        listing._title_width("warm the cache", bold=False)
+        broken = mock.Mock()
+        broken.measure.side_effect = tk.TclError("font is gone")
+        listing._title_fonts["normal"] = broken
+        self.assertGreater(listing._title_width("a fresh title", bold=False), 0)
+
+    def test_the_title_is_still_never_clipped_at_any_width(self):
+        """The v3.49.0 promise must survive the fix to its own side effect."""
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        self._badged_long_task()
+        for width in (1600, 1400, 1240, 1120):
+            with self.subTest(window=width):
+                self.app.geometry(f"{width}x880")
+                self.app.update_idletasks()
+                self.app.refresh_tasks()
+                self.app.update()
+                title = self.app.task_list._pool[0]["title"]
+                self.assertLessEqual(title.winfo_reqwidth(), title.winfo_width())
+
+    def test_a_row_that_loses_its_badges_gets_its_width_back(self):
+        """Rows come from a pool, so a cell that carried badges is reused for
+        one that does not."""
+        self.app.deiconify()
+        self.addCleanup(self.app.withdraw)
+        self.capture("call the insurance company back about the rejected claim")
+        task = self.app.tasks[0]
+        task.kind = "admin"
+        task.pinned = True
+        task.estimate_minutes = 10
+        self.app.refresh_tasks()
+        self.app.update()
+        narrow = self.app.task_list._pool[0]["title"].cget("wraplength")
+
+        task.kind = ""
+        task.pinned = False
+        task.estimate_minutes = 0
+        task.first_step = ""
+        self.app.refresh_tasks()
+        self.app.update()
+        # The FULL room, not merely "wider than before": a sticky
+        # has-badges flag still subtracts the empty strip's 1px and passed a
+        # greater-than check while being wrong.
+        self.assertEqual(self.app.task_list._pool[0]["title"].cget("wraplength"),
+                         self.app.task_list._wrap_at,
+                         "a row with no badges did not get the full width back")
+        self.assertGreater(self.app.task_list._wrap_at, narrow)
 
     def test_focus_window_grows_to_keep_its_controls_when_the_title_wraps(self):
         """A four-line title used to push Pause and the Park row clean off
@@ -1612,8 +1946,19 @@ class AppSmokeTests(unittest.TestCase):
         # its card down to 1100x670 in the worst legitimate state, so this
         # keeps 20-30px of clearance. The old floor was 1160x790, and 790 is
         # taller than a 768px laptop screen — which is the bug.
-        self.assertEqual(self.app.wm_minsize(),
-                         (px(self.app, 1120), px(self.app, 700)))
+        #
+        # Compared through window_bounds rather than against the two numbers
+        # directly, because the floor is deliberately clamped by the screen:
+        # on a 1024x768 display the app is RIGHT to ask for 1008x696, and a
+        # hard-coded pair turns that correct behaviour into a red suite. The
+        # designed floor is still asserted — it is the first argument.
+        designed = (px(self.app, 1120), px(self.app, 700))
+        _opening, expected = self._sized_for(self.app.winfo_screenwidth(),
+                                             self.app.winfo_screenheight())
+        self.assertEqual(self.app.wm_minsize(), expected)
+        self.assertEqual(
+            tuple(min(d, e) for d, e in zip(designed, expected)), expected,
+            "the floor is no longer the designed one, capped by the screen")
 
     def _sized_for(self, width, height):
         """(opening size, floor) for a screen of this size.
@@ -1871,9 +2216,9 @@ class AppSmokeTests(unittest.TestCase):
         yesterday = (date.today() - timedelta(days=1)).isoformat()
         stale = (date.today() - timedelta(days=10)).isoformat()  # outside the week
         self.app.session_log.sessions = [
-            FocusSession(minutes=15, started_at=f"{yesterday} 09:00:00"),
-            FocusSession(minutes=30, started_at=f"{yesterday} 11:00:00"),
-            FocusSession(minutes=99, started_at=f"{stale} 09:00:00"),
+            FocusSession(minutes=15, logged_at=f"{yesterday} 09:00:00"),
+            FocusSession(minutes=30, logged_at=f"{yesterday} 11:00:00"),
+            FocusSession(minutes=99, logged_at=f"{stale} 09:00:00"),
         ]
         self.capture("finished thing")
         self.select(0)
@@ -2566,7 +2911,13 @@ class AppSmokeTests(unittest.TestCase):
         self.assertIsNotNone(self.app._focus_task_id)
         self.app.reset_timer()
         self.assertIsNone(self.app._focus_task_id)
-        self.assertEqual(self.app.focus_task_var.get(), "Nothing picked yet")
+        # The card no longer claims a task is in progress. What it says
+        # instead depends on whether there is anything to remember: with a
+        # session just banked it is the resume line, and with nothing it is
+        # the idle caption. Both are "not focused on anything".
+        caption = self.app.focus_task_var.get()
+        self.assertTrue(caption == self.app.IDLE_CAPTION
+                        or caption.startswith("Last time:"), caption)
 
     def test_starting_a_second_session_asks_before_dropping_the_first(self):
         self.capture("first")
@@ -3482,6 +3833,350 @@ class AppSmokeTests(unittest.TestCase):
 
 
 @unittest.skipUnless(_display_available(), "tkinter display not available")
+class FilterRowTests(unittest.TestCase):
+    """The filter row appears when there is something to filter.
+
+    On a first run it was six live controls — a search box, Clear, three
+    dropdowns and "Show done" — narrowing an empty list, on the screen a new
+    person meets first. It obeys the rule calm mode already wrote down:
+    never hide a control that is still filtering the list.
+    """
+
+    def setUp(self):
+        from cognitive_offload.app import CognitiveOffloadApp
+        from cognitive_offload.storage import Config
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name)
+        config = Config(root / "config.json")
+        config.db_path = root / "db"
+        config.matrix_db_path = root / "matrix"
+        self.app = CognitiveOffloadApp(config=config)
+        self.app.withdraw()
+        self.addCleanup(self._destroy)
+
+    def _destroy(self):
+        try:
+            self.app.destroy()
+        except tk.TclError:
+            pass
+
+    def _capture(self, text):
+        self.app.capture_entry.insert(0, text)
+        self.app.add_task_from_capture()
+
+    def _shown(self):
+        return self.app.filter_row.winfo_manager() == "grid"
+
+    def test_an_empty_list_has_nothing_to_filter(self):
+        self.assertFalse(self._shown())
+
+    def test_one_task_is_enough_to_bring_it_back(self):
+        self._capture("book the dentist")
+        self.assertTrue(self._shown())
+
+    def test_it_goes_again_when_the_last_task_goes(self):
+        self._capture("book the dentist")
+        self.app.task_list.selection_set(0)
+        self.app.delete_selected()
+        self.assertFalse(self._shown())
+
+    def test_a_search_that_matches_nothing_keeps_the_row(self):
+        """The trap. Hide the row here and the list is empty with no visible
+        reason why, and no way to undo the reason."""
+        self._capture("book the dentist")
+        self.app.search_var.set("nothing matches this")
+        self.app.refresh_tasks()
+        self.assertEqual(self.app.task_list.size(), 0)
+        self.assertTrue(self._shown())
+
+    def test_a_filter_on_an_emptied_list_keeps_the_row(self):
+        self._capture("book the dentist")
+        self.app.search_var.set("dentist")
+        self.app.refresh_tasks()
+        self.app.task_list.selection_set(0)
+        self.app.delete_selected()
+        self.assertFalse(self.app.tasks)
+        self.assertTrue(self._shown(),
+                        "the search term is still set and must stay visible")
+
+    def test_show_done_being_off_counts_as_filtering(self):
+        # Not thought of as a filter, but it hides finished tasks, which is
+        # narrowing — and it is the one filter you can leave on by accident.
+        self.app.show_done_var.set(False)
+        self.app.refresh_tasks()
+        self.assertTrue(self.app.any_filter_active())
+        self.assertTrue(self._shown())
+
+    def test_ctrl_f_pins_it_even_with_nothing_to_search(self):
+        """A shortcut whose whole job is to put the cursor in that box must
+        not leave the box hidden."""
+        self.assertFalse(self._shown())
+        self.app.focus_search()
+        self.assertTrue(self._shown())
+
+    def test_and_it_stays_pinned(self):
+        self.app.focus_search()
+        self.app.refresh_tasks()
+        self.assertTrue(self._shown())
+
+    def test_calm_mode_still_wins(self):
+        self._capture("book the dentist")
+        self.assertTrue(self._shown())
+        self.app.calm_var.set(True)
+        self.app.apply_calm_mode()
+        self.assertFalse(self._shown())
+
+
+@unittest.skipUnless(_display_available(), "tkinter display not available")
+class MatrixActionAvailabilityTests(unittest.TestCase):
+    """The quadrant's buttons grey when they cannot act, like the other tab's.
+
+    The main tab has done this since the first-run audit, and
+    `sync_action_availability` writes down why: an inert control is still a
+    small decision, and the only way to learn a button was not for you was to
+    press it and be told "Select a task to…". This tab answered exactly that
+    way for four of its buttons.
+    """
+
+    def setUp(self):
+        from cognitive_offload.app import CognitiveOffloadApp
+        from cognitive_offload.storage import Config
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name)
+        config = Config(root / "config.json")
+        config.db_path = root / "db"
+        config.matrix_db_path = root / "matrix"
+        self.app = CognitiveOffloadApp(config=config)
+        self.app.withdraw()
+        self.addCleanup(self._destroy)
+
+    def _destroy(self):
+        try:
+            self.app.destroy()
+        except tk.TclError:
+            pass
+
+    def _live(self, group, key="do_first"):
+        return {b.cget("text") for b in getattr(self.app, group).get(key, ())
+                if "disabled" not in b.state()}
+
+    def _all(self, group, key="do_first"):
+        return {b.cget("text") for b in getattr(self.app, group).get(key, ())}
+
+    def _select(self, key="do_first", index=0):
+        self.app.matrix_lists[key].selection_set(index)
+        self.app.sync_matrix_action_availability(key)
+
+    def test_an_empty_quadrant_offers_nothing_that_cannot_act(self):
+        self.assertEqual(self._live("matrix_needs_selection"), set())
+        self.assertEqual(self._live("matrix_needs_rows"), set())
+
+    def test_the_buttons_this_is_about_actually_exist(self):
+        # Without this the test above passes just as well when the buttons
+        # have been renamed and the lists are empty.
+        self.assertEqual(
+            self._all("matrix_needs_selection"),
+            {"Book a time", "Focus on this", "Edit", "Move to…",
+             "Send to tasks", "Delete"})
+        self.assertEqual(self._all("matrix_needs_rows"), {"Copy all to tasks"})
+
+    def test_copy_all_needs_the_quadrant_to_have_something_in_it(self):
+        self.app.matrix.create("do_first", "Ring the insurance company")
+        self.app.refresh_matrix()
+        self.assertEqual(self._live("matrix_needs_rows"), {"Copy all to tasks"})
+        self.assertEqual(self._live("matrix_needs_selection"), set(),
+                         "a task existing is not a task being selected")
+
+    def test_selecting_one_turns_the_rest_on(self):
+        self.app.matrix.create("do_first", "Ring the insurance company")
+        self.app.refresh_matrix()
+        self._select()
+        self.assertEqual(self._live("matrix_needs_selection"),
+                         self._all("matrix_needs_selection"))
+
+    def test_and_letting_go_turns_them_off_again(self):
+        self.app.matrix.create("do_first", "Ring the insurance company")
+        self.app.refresh_matrix()
+        self._select()
+        self.app.matrix_lists["do_first"].selection_clear(0, tk.END)
+        self.app.sync_matrix_action_availability("do_first")
+        self.assertEqual(self._live("matrix_needs_selection"), set())
+
+    def test_a_refresh_keeps_a_selection_that_is_still_there(self):
+        """Measured rather than assumed: `set_rows` restores the selection by
+        row id, so a refresh does not silently drop what you had chosen — and
+        the buttons must not go dark under a task that is still selected."""
+        self.app.matrix.create("do_first", "Ring the insurance company")
+        self.app.refresh_matrix()
+        self._select()
+        self.app.refresh_matrix()
+        self.assertTrue(self.app.matrix_lists["do_first"].curselection())
+        self.assertEqual(self._live("matrix_needs_selection"),
+                         self._all("matrix_needs_selection"))
+
+    def test_but_deleting_the_selected_task_turns_them_off(self):
+        """The case the refresh hook is actually for: the selection cannot
+        survive a task that no longer exists, and `set_rows` does not fire
+        on_select, so nothing else would re-ask."""
+        self.app.matrix.create("do_first", "Ring the insurance company")
+        self.app.refresh_matrix()
+        self._select()
+        with mock.patch("cognitive_offload.app.messagebox.askyesno",
+                        return_value=True):
+            self.app.delete_matrix_tasks("do_first")
+        self.assertEqual(self._live("matrix_needs_selection"), set())
+        self.assertEqual(self._live("matrix_needs_rows"), set(),
+                         "an emptied quadrant has nothing to copy either")
+
+    def test_take_it_back_waits_for_something_to_take_back(self):
+        self.app.matrix.create("delegate", "Chase the plumber")
+        self.app.refresh_matrix()
+        self._select("delegate")
+        self.assertEqual(self._all("matrix_needs_waiting", "delegate"),
+                         {"Take it back"})
+        self.assertEqual(self._live("matrix_needs_waiting", "delegate"), set(),
+                         "nothing has been handed to anyone yet")
+
+        task = self.app._matrix_cache["delegate"][0]
+        self.app.matrix.set_handoff(task, "Mum", "2026-08-19", "2026-08-23")
+        self.app.refresh_matrix()
+        self._select("delegate")
+        self.assertEqual(self._live("matrix_needs_waiting", "delegate"),
+                         {"Take it back"})
+
+    def test_every_quadrant_is_wired_the_same(self):
+        from cognitive_offload.storage import CATEGORY_KEYS
+
+        for key in CATEGORY_KEYS:
+            with self.subTest(key):
+                self.assertTrue(self.app.matrix_needs_selection.get(key),
+                                "a quadrant with no greyable buttons is a "
+                                "quadrant this rule forgot")
+
+
+@unittest.skipUnless(_display_available(), "tkinter display not available")
+class ShortcutsShowWhatTheyChangeTests(unittest.TestCase):
+    """A shortcut fired from the Eisenhower tab used to change the other one.
+
+    `bind_all` means every shortcut fires whichever tab is in front. With the
+    matrix up, Ctrl+P changed the priority of a task on the hidden list,
+    Ctrl+Up pinned one, Ctrl+D opened the editor on one, and Ctrl+B emptied a
+    scratchpad you could not see into tasks you could not see. This app's one
+    rule is that it never changes something you are not looking at.
+
+    Deiconified rather than withdrawn: `event_generate` on a hidden window
+    does not deliver, and a test that fires a key nothing receives passes for
+    the wrong reason.
+    """
+
+    def setUp(self):
+        from cognitive_offload.app import CognitiveOffloadApp
+        from cognitive_offload.storage import Config
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name)
+        config = Config(root / "config.json")
+        config.db_path = root / "db"
+        config.matrix_db_path = root / "matrix"
+        self.app = CognitiveOffloadApp(config=config)
+        self.addCleanup(self._destroy)
+        self.app.deiconify()
+        self.app.update()
+        self.app.capture_entry.insert(0, "book the dentist")
+        self.app.add_task_from_capture()
+        self.task = self.app.tasks[0]
+        self.app.task_list.selection_set(0)
+        self.app.update()
+
+    def _destroy(self):
+        try:
+            self.app.destroy()
+        except tk.TclError:
+            pass
+
+    def _on_the_matrix(self):
+        self.app.notebook.select(1)
+        self.app.update()
+        # X focus follows the pointer when there is no window manager.
+        self.app.event_generate("<Motion>", warp=True, x=40, y=40)
+        self.app.focus_force()
+        self.app.update()
+        self.assertEqual(self.app.notebook.index("current"), 1)
+
+    def _fire(self, sequence):
+        self.app.event_generate(sequence)
+        self.app.update()
+
+    def test_priority_brings_the_list_into_view(self):
+        self._on_the_matrix()
+        before = self.task.priority
+        self._fire("<Control-p>")
+        # The change proves the key arrived; the tab proves it was watched.
+        self.assertNotEqual(self.task.priority, before)
+        self.assertEqual(self.app.notebook.index("current"), 0)
+
+    def test_pinning_brings_the_list_into_view(self):
+        self._on_the_matrix()
+        self._fire("<Control-Up>")
+        self.assertTrue(self.task.pinned)
+        self.assertEqual(self.app.notebook.index("current"), 0)
+
+    def test_the_brain_dump_brings_its_scratchpad_into_view(self):
+        self.app.set_scratchpad("a stray thought\n")
+        self._on_the_matrix()
+        self._fire("<Control-b>")
+        self.assertEqual(len(self.app.tasks), 2)
+        self.assertEqual(self.app.notebook.index("current"), 0)
+
+    def test_the_editor_opens_on_a_task_you_can_see(self):
+        self._on_the_matrix()
+        with mock.patch("cognitive_offload.app.TaskEditorDialog") as editor:
+            editor.return_value.show.return_value = None
+            self._fire("<Control-d>")
+            self.assertEqual(editor.call_count, 1)
+        self.assertEqual(self.app.notebook.index("current"), 0)
+
+    def test_undo_deliberately_leaves_you_where_you_are(self):
+        """The one exception, and it is not an oversight.
+
+        Undo also reverses matrix changes, so yanking someone to the tasks tab
+        to undo what they just did on this one is the same crime facing the
+        other way. It says what it undid instead.
+        """
+        self._on_the_matrix()
+        self._fire("<Control-z>")
+        self.assertEqual(self.app.notebook.index("current"), 1)
+        self.assertTrue(self.app.status_var.get().startswith("Undid:"))
+
+    def test_every_binding_is_classified(self):
+        """The net: a shortcut added later has to answer the question.
+
+        Read off the source rather than the list above, so a new entry with
+        the wrong number of columns fails here rather than at runtime.
+        """
+        import ast
+        import inspect
+        import textwrap
+
+        from cognitive_offload import app as app_module
+
+        source = textwrap.dedent(
+            inspect.getsource(app_module.CognitiveOffloadApp._bind_shortcuts))
+        rows = [n for n in ast.walk(ast.parse(source)) if isinstance(n, ast.List)]
+        self.assertTrue(rows, "the bindings table moved")
+        entries = [e for e in rows[0].elts if isinstance(e, ast.Tuple)]
+        self.assertGreaterEqual(len(entries), 17)
+        for entry in entries:
+            self.assertEqual(len(entry.elts), 4,
+                             "every binding must say whether it shows the tasks tab")
+
+
+@unittest.skipUnless(_display_available(), "tkinter display not available")
 class InstanceGuardTests(unittest.TestCase):
     """Two copies on one session folder is silent last-writer-wins loss."""
 
@@ -3588,6 +4283,186 @@ class InstanceGuardTests(unittest.TestCase):
         app.withdraw()
         app.on_close()
         self.assertFalse((config.db_path / ".lock").exists())
+
+
+@unittest.skipUnless(_display_available(), "tkinter display not available")
+class APastedParagraphHasACeilingTests(unittest.TestCase):
+    """Measured on screen, as a relationship rather than as pixel counts.
+
+    Row height grew about 0.43px per character with nothing stopping it, and
+    8000 characters took the X server down with the app. What matters is not
+    that a row is 133px — that depends on the display this runs on — but that
+    it stops growing.
+    """
+
+    LINE = "Ring the insurance company about the rejected claim. "
+
+    def setUp(self):
+        from cognitive_offload.app import CognitiveOffloadApp
+        from cognitive_offload.storage import Config
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name)
+        config = Config(root / "config.json")
+        config.db_path = root / "db"
+        config.matrix_db_path = root / "matrix"
+        self.app = CognitiveOffloadApp(config=config)
+        self.addCleanup(self._destroy)
+        self.app.deiconify()
+
+    def _destroy(self):
+        try:
+            self.app.destroy()
+        except tk.TclError:
+            pass
+
+    def _row_height(self, chars):
+        for task in list(self.app.tasks):
+            self.app.tasks.remove(task)
+        self.app.capture_entry.delete(0, tk.END)
+        self.app.capture_entry.insert(0, (self.LINE * 400)[:chars])
+        self.app.add_task_from_capture()
+        self.app.update()
+        self.app.update_idletasks()
+        tallest = 0
+
+        def walk(widget):
+            nonlocal tallest
+            for child in widget.winfo_children():
+                # `Label`, not `TLabel`: RowList builds its rows from plain
+                # tk widgets. Filtering on the ttk class found nothing here
+                # and matched the NEXT UP title instead — the same surface
+                # twice, wearing the other one's name.
+                text = child.cget("text") if "text" in child.keys() else ""
+                if (child.winfo_ismapped() and child.winfo_class() == "Label"
+                        and isinstance(text, str) and text.startswith("Ring the")):
+                    tallest = max(tallest, child.winfo_height())
+                walk(child)
+
+        walk(self.app.task_list)
+        return tallest
+
+    def test_a_row_stops_growing_with_the_paste(self):
+        at_1000 = self._row_height(1000)
+        at_8000 = self._row_height(8000)
+        self.assertTrue(at_1000, "no row was drawn — the probe found nothing")
+        self.assertEqual(at_1000, at_8000)
+
+    def test_and_it_is_smaller_than_it_used_to_be(self):
+        """The relationship the fix is for: one row must not be able to fill
+        the list on its own. Compared to the window rather than to a number."""
+        height = self._row_height(4000)
+        self.assertLess(height, self.app.winfo_height() // 2)
+
+    def test_the_next_up_strip_stops_growing_too(self):
+        def strip_height(chars):
+            self._row_height(chars)
+            return self.app.next_frame.winfo_height()
+
+        self.assertEqual(strip_height(1000), strip_height(8000))
+        self.assertLess(strip_height(8000), self.app.winfo_height() // 2)
+
+    def test_the_task_still_holds_the_whole_paragraph(self):
+        self._row_height(4000)
+        self.assertEqual(len(self.app.tasks[0].text), 4000)
+
+
+@unittest.skipUnless(_display_available(), "tkinter display not available")
+class TheAppOpensOnADamagedFileTests(unittest.TestCase):
+    """The recovery code is good; the question is whether it is reached.
+
+    A `data.json` whose `tasks` is a number raised a TypeError out of the
+    loader, past every StorageError the recovery path catches, and the app
+    did not open at all — a traceback, and no way in, with the person's work
+    sitting on disk beside it.
+    """
+
+    SHAPES = {"a number": 42, "a boolean": True, "a string": "nope",
+              "a dict": {"a": 1, "b": 2}}
+
+    def _open_on(self, payload):
+        import json
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        db = root / "db"
+        db.mkdir(parents=True)
+        (db / "data.json").write_text(json.dumps(payload))
+
+        from cognitive_offload.app import CognitiveOffloadApp
+        from cognitive_offload.storage import Config
+
+        config = Config(root / "config.json")
+        config.db_path = db
+        config.matrix_db_path = root / "matrix"
+        with mock.patch("cognitive_offload.app.messagebox.showwarning"), \
+             mock.patch("cognitive_offload.app.messagebox.showerror"), \
+             mock.patch("cognitive_offload.app.messagebox.showinfo"):
+            app = CognitiveOffloadApp(config=config)
+        app.withdraw()
+        self.addCleanup(lambda: self._destroy(app))
+        return app
+
+    def _destroy(self, app):
+        try:
+            app.destroy()
+        except tk.TclError:
+            pass
+
+    def test_it_opens_whatever_shape_the_task_list_is(self):
+        for label, value in self.SHAPES.items():
+            with self.subTest(label):
+                app = self._open_on({"tasks": value, "scratchpad": "kept"})
+                self.assertEqual(app.tasks, [])
+
+    def test_it_opens_whatever_shape_the_logs_are(self):
+        for field in ("completed_log", "steps_log"):
+            for label, value in self.SHAPES.items():
+                with self.subTest(field=field, shape=label):
+                    app = self._open_on({"tasks": [{"text": "kept"}],
+                                         field: value})
+                    self.assertEqual([t.text for t in app.tasks], ["kept"])
+
+    def test_it_opens_whatever_shape_the_session_log_is(self):
+        """Loaded in the constructor too, and it had the same hole."""
+        import json
+
+        for label, value in self.SHAPES.items():
+            with self.subTest(label):
+                tmp = tempfile.TemporaryDirectory()
+                self.addCleanup(tmp.cleanup)
+                root = Path(tmp.name)
+                db = root / "db"
+                db.mkdir(parents=True)
+                (db / "data.json").write_text(json.dumps({"tasks": []}))
+                config_path = root / "config.json"
+
+                from cognitive_offload.app import CognitiveOffloadApp
+                from cognitive_offload.storage import Config
+
+                config = Config(config_path)
+                config.db_path = db
+                config.matrix_db_path = root / "matrix"
+                config.sessions_file.parent.mkdir(parents=True, exist_ok=True)
+                config.sessions_file.write_text(json.dumps({"sessions": value}))
+                with mock.patch("cognitive_offload.app.messagebox.showwarning"):
+                    app = CognitiveOffloadApp(config=config)
+                app.withdraw()
+                self.addCleanup(lambda a=app: self._destroy(a))
+                self.assertEqual(app.session_log.sessions, [])
+
+    def test_the_rest_of_the_file_survives(self):
+        app = self._open_on({"tasks": "nope", "scratchpad": "a thought",
+                             "timer_minutes": 25})
+        self.assertEqual(app.scratchpad_text().strip(), "a thought")
+
+    def test_and_it_refuses_to_write_over_what_it_did_not_understand(self):
+        app = self._open_on({"tasks": "nope", "scratchpad": "a thought"})
+        self.assertTrue(app._autosave_blocked,
+                        "a file the app could not fully read must not be "
+                        "quietly overwritten by the next autosave")
 
 
 @unittest.skipUnless(_display_available(), "tkinter display not available")

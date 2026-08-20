@@ -28,7 +28,7 @@ from .queries import (
     suggest_tasks,
     visible_tasks,
 )
-from .rows import task_row
+from .rows import TITLE_LIMIT, short as _short, task_row
 from .storage import category_label
 from .viewmodels import Row
 
@@ -89,6 +89,10 @@ class WeekDay:
     sessions: int
     minutes: int
     titles: list = field(default_factory=list)
+    #: steps ticked off that day, as (step, task) pairs. A step finished is
+    #: evidence in exactly the way a task finished is; the only reason it was
+    #: not here before is that nothing recorded when one happened.
+    steps: list = field(default_factory=list)
 
 
 @dataclass
@@ -346,6 +350,7 @@ def task_list_view(
     show_done: bool = True,
     kind: str | None = None,
     completed_log: list | None = None,
+    steps_log: list | None = None,
 ) -> TaskListView:
     """The visible rows, plus the counters that describe what was left out."""
     visible = visible_tasks(
@@ -359,7 +364,14 @@ def task_list_view(
     if hidden > 0:
         summary += f" · {hidden} hidden"
 
-    finished = len(completed_titles_today(tasks, completed_log))
+    # Steps as well as tasks, because this number is a PROMISE ABOUT THE
+    # PANEL the pill opens, and that panel lists both. Counting only tasks
+    # made the number disagree with what it opened — and worse, on a day
+    # spent moving through one long task and finishing nothing it read zero,
+    # which hides the pill, which is the panel's only route. The evidence
+    # existed and could not be reached.
+    finished = (len(completed_titles_today(tasks, completed_log))
+                + len(steps_done_on(steps_log, today_iso())))
     # A day with nothing finished says nothing. "0 done today" is the kind of
     # scoreboard this app exists not to keep, so the empty string here is a
     # decision, not a missing value — the caller hides the pill on it.
@@ -389,10 +401,50 @@ def next_up_view(
     task = suggestions[0]
     return NextUpView(
         task_id=task.id,
-        title=task.text,
+        # The same ceiling as a list row, for the same reason and more
+        # urgently: at 1500 characters this strip alone was 694px tall in a
+        # 696px window, so the thing it is *for* — the button beside it, and
+        # everything under it — was off the bottom of the screen.
+        title=_short(task.text, TITLE_LIMIT),
         step=f"→ {task.first_step}" if task.first_step
         else "no first step yet — you'll be asked",
     )
+
+
+#: What each store field is called when the app has to name it to a person.
+FIELD_NAMES = {"tasks": "task list",
+               "completed_log": "record of finished tasks",
+               "steps_log": "record of finished steps"}
+
+
+def damage_report(dropped: int, unreadable: list | None, filename: str) -> str:
+    """What to say about a file that loaded, but not all of it.
+
+    Two different sentences, because they are two different facts and only
+    one of them used to get said. ``dropped`` counts records that were there
+    and could not be read. ``unreadable`` names fields that were not lists at
+    all — a whole section of the file in the wrong shape, where there is no
+    honest number to give. Reporting the second as the first is how
+    ``"tasks": "nope"`` became "4 task records couldn't be read": a loss
+    count taken from the length of a four-letter string.
+
+    Returns "" when there is nothing to report, which is the caller's cue to
+    say nothing at all.
+    """
+    lines = []
+    for name in unreadable or []:
+        lines.append(f"The {FIELD_NAMES.get(name, name)} in {filename} is not "
+                     f"in a shape this app can read, so it was skipped.")
+    if dropped:
+        lines.append(f"{plural(dropped, 'task record')} in {filename} "
+                     f"{'were' if dropped != 1 else 'was'} unreadable and "
+                     f"{'were' if dropped != 1 else 'was'} left out.")
+    if not lines:
+        return ""
+    lines.append("Auto-save is off so the file stays untouched for now. "
+                 "Saving (Ctrl+S) accepts the loss; Export a copy first if "
+                 "you want to look at the original.")
+    return "\n\n".join(lines)
 
 
 def due_view(tasks: list, scheduled: list | None = None,
@@ -404,10 +456,24 @@ def due_view(tasks: list, scheduled: list | None = None,
     oldest overdue task, so the most confident gesture in the feature landed on
     something from two months ago. One function means they cannot disagree
     again.
+
+    **A task you have put down is not counted.** Pressing "Not today" on
+    something booked for today is a direct contradiction, and the more recent
+    of your two statements is the one that means something — the app saying
+    "1 booked for today" about the one thing you just said you would not do
+    today is the forced contact ``snooze_next`` exists to prevent, arriving
+    through a different door. A task out with someone else is the same error
+    the suggestion slot already avoids: the banner's click selects it and
+    says "Booked for today: X", which points you at work that is not yours.
+
+    Not a hiding, either way: the task keeps its place in the list and its
+    "booked" badge. Only the count changes, exactly as with the suggestion
+    slot.
     """
     day = on or today_iso()
-    due = scheduled_today(tasks, on=day)
-    booked = [t for t in (scheduled or []) if t.scheduled_for == day]
+    due = [t for t in scheduled_today(tasks, on=day) if not t.is_put_down(day)]
+    booked = [t for t in (scheduled or [])
+              if t.scheduled_for == day and not t.is_put_down(day)]
     total = len(due) + len(booked)
     return DueView(
         total=total,
@@ -417,26 +483,150 @@ def due_view(tasks: list, scheduled: list | None = None,
     )
 
 
+def steps_done_on(steps_log: list | None, day: str) -> list:
+    """The steps ticked off on ``day``, oldest first, as (step, task) pairs.
+
+    One reader for both screens. The last sentence this app kept in two
+    places drifted, and these two say the same thing about the same day.
+    """
+    found = []
+    for entry in steps_log or []:
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("done_at", ""))[:10] != day:
+            continue
+        step = (entry.get("step") or "").strip()
+        if step:
+            found.append((step, (entry.get("task") or "").strip()))
+    return found
+
+
+def step_line(step: str, task: str) -> str:
+    """A finished step, named with the task it belongs to.
+
+    Without the task a step reads as a fragment — "copy the headings across"
+    is not evidence of anything on its own — and a week review that cannot be
+    understood is not a record.
+    """
+    return f"{step} — {task}" if task else step
+
+
 def today_view(tasks: list, completed_log: list | None = None,
-               session_log=None, on: str | None = None) -> TodayView:
+               session_log=None, on: str | None = None,
+               steps_log: list | None = None) -> TodayView:
     """What you finished today, plus the minutes you focused."""
     day = on or today_iso()
     titles = completed_titles_today(tasks, completed_log, on=day)
+    steps = steps_done_on(steps_log, day)
     sessions = len(session_log.on_day(day)) if session_log is not None else 0
     minutes = (sum(s.minutes for s in session_log.on_day(day))
                if session_log is not None else 0)
-    if not titles:
+    if not titles and not steps:
         return TodayView(titles=[], sessions=sessions, minutes=minutes, body="")
     footer = ""
     if sessions:
         footer = (f"\n\nPlus {sessions} focus session"
                   f"{'s' if sessions != 1 else ''} — {minutes} minutes.")
-    body = "Finished today:\n\n" + "\n".join(f"·  {t}" for t in titles) + footer
+    lines = [f"·  {t}" for t in titles]
+    lines += [f"·  {step_line(step, task)}" for step, task in steps]
+    body = "Finished today:\n\n" + "\n".join(lines) + footer
     return TodayView(titles=titles, sessions=sessions, minutes=minutes, body=body)
+
+# Each of the three pieces the resume line quotes back -- the task, the step
+# you finished, the step that comes next -- is text the user typed, and the
+# user can type a paragraph. The line sits above the timer in a narrow card,
+# so an unbounded piece is not merely ugly: at the window's minimum size a
+# nine-line caption pushed "Where do I start?" and the whole task list off the
+# bottom of the panel. Forty characters is enough to recognise a task you were
+# working on an hour ago, which is all this line is for.
+RESUME_PIECE_LIMIT = 40
+
+
+def short(text: str, limit: int = RESUME_PIECE_LIMIT) -> str:
+    """``text`` cut to ``limit`` characters — the resume line's own default.
+
+    The cutting itself lives in `rows`, because the list rows want the same
+    thing at a very different length and two copies of a rule is how the two
+    answers drift.
+    """
+    return _short(text, limit)
+
+
+def resume_line(session_log=None, steps_log: list | None = None,
+                tasks: list | None = None, shown_as_next: str = "") -> str:
+    """"What was I doing?", answered from the record rather than from memory.
+
+    An interruption costs the context, not the intention — you know you were
+    working, you have lost *what on*. Every piece of the answer was already
+    being written down: the session log knows what you were on and for how
+    long, the step log knows which step you actually finished, and the task
+    itself knows what comes next.
+
+    Three rules shape the sentence.
+
+    **It never counts the days.** "Last time", never "six days ago": an
+    elapsed-time figure on a task you have been avoiding is a reproach, and
+    this app does not keep that kind of score.
+
+    **It never asks anything.** It is a sentence, not an offer — the point of
+    reading it is to be spared a decision, and a prompt at that moment would
+    put one back.
+
+    **It says nothing rather than something empty.** No sessions, or a task
+    since deleted or finished, and the caller keeps whatever it had.
+
+    **It stops pointing at a task you have put down.** The two halves are not
+    the same kind of sentence. "Last time: 20 minutes on X" is a *fact*, and
+    snoozing a task does not change what you were doing yesterday. "Next: Y"
+    is an *instruction*, and this app's rules already say that a task marked
+    "not today" or out with someone else stops guarding the slot that names
+    what to start. That slot is *below* this one. Without this, pressing
+    "Not today" on the task you just spent twenty minutes on emptied the
+    suggestion slot and left the focus card naming the step anyway — the
+    repeated forced contact ``snooze_next`` exists to prevent, delivered from
+    a more prominent place than the thing it was protecting.
+
+    **It does not repeat what the screen is already saying.** ``shown_as_next``
+    is the id of the task the NEXT UP strip is displaying, or "" when the
+    strip is not up. When it is this task, the "Next:" half said the same step
+    NEXT UP was already showing two hundred pixels below, in larger type, with
+    a button beside it — and that is the *ordinary* case, not an edge one,
+    because the ranking warms recently-worked tasks on purpose and scores
+    "already names its first step" highest, which a task you are mid-plan on
+    always is. The "Last time" half stays: the minutes and the step you
+    finished are things NEXT UP does not carry.
+
+    Keyed on what the strip is *showing* rather than on what the ranking would
+    pick, because the strip steps out of sight during a running block while
+    the ranking goes on agreeing — and a line dropped for a box that is not
+    there is information lost for nothing.
+    """
+    sessions = getattr(session_log, "sessions", None) or []
+    last = next((s for s in reversed(sessions) if s.task_id), None)
+    if last is None:
+        return ""
+    task = next((t for t in (tasks or []) if t.id == last.task_id), None)
+    if task is None or task.done:
+        return ""
+    minutes = max(0, int(getattr(last, "minutes", 0) or 0))
+    step = next((e for e in reversed(steps_log or [])
+                 if isinstance(e, dict) and e.get("task_id") == task.id
+                 and (e.get("step") or "").strip()), None)
+    # Each sentence is its own assignment rather than a `+=`, because the
+    # wording extractor cannot see an appended string — two sentences nearly
+    # shipped unwatched that way once already.
+    opening = f"Last time: {plural(minutes, 'minute')} on {short(task.text)}"
+    finished = (f" — you finished \u201c{short(step['step'])}\u201d"
+                if step else "")
+    say_next = (task.first_step and not task.is_put_down()
+                and task.id != shown_as_next)
+    following = f"\nNext: {short(task.first_step)}" if say_next else ""
+    return f"{opening}{finished}.{following}"
 
 
 def week_view(tasks: list, completed_log: list | None = None,
-              session_log=None, today: date | None = None) -> WeekView:
+              session_log=None, today: date | None = None,
+              steps_log: list | None = None) -> WeekView:
     """The last seven days as evidence — only the days that had something.
 
     A day you did nothing is skipped rather than listed with a zero beside it.
@@ -452,7 +642,8 @@ def week_view(tasks: list, completed_log: list | None = None,
         iso = day.isoformat()
         sessions = session_log.on_day(iso) if session_log is not None else []
         titles = completed_titles_today(tasks, completed_log, on=iso)
-        if not sessions and not titles:
+        steps = steps_done_on(steps_log, iso)
+        if not sessions and not titles and not steps:
             continue
         minutes = sum(s.minutes for s in sessions)
         total_sessions += len(sessions)
@@ -464,6 +655,6 @@ def week_view(tasks: list, completed_log: list | None = None,
         else:
             label = day.strftime("%A")
         days.append(WeekDay(label=label, sessions=len(sessions),
-                            minutes=minutes, titles=titles))
+                            minutes=minutes, titles=titles, steps=steps))
     return WeekView(days=days, total_sessions=total_sessions,
                     total_minutes=total_minutes)

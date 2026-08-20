@@ -16,7 +16,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from .models import MatrixTask, Note, Task, now_stamp
+from .models import MatrixTask, Note, Task, as_records, now_stamp
 from .ports import Locations, desktop_locations
 
 STATE_VERSION = 2
@@ -32,6 +32,12 @@ CONFIG_PATH = DEFAULT_LOCATIONS.config_file
 STATE_FILENAME = "data.json"
 SESSIONS_FILENAME = "sessions.json"
 COMPLETED_LOG_LIMIT = 200
+# Steps finished, kept for the same reason the completed log is: the week
+# review reads it, and `steps_done` is a CURSOR, not a history — nothing in
+# the task itself records when a step was ticked, so if this is not written
+# down the evidence does not exist. Roomier than the completed log because a
+# week of steps is many more entries than a week of finished tasks.
+STEPS_LOG_LIMIT = 500
 
 # The bridge out of high-stimulation activity: a few small, concrete steps
 # between where you are and the task, so starting is not one big leap.
@@ -106,6 +112,45 @@ def atomic_write_text(path: Path, text: str) -> None:
         except OSError:
             pass
         raise
+
+
+#: How long a leftover temp file has to sit before it counts as abandoned.
+#: A real one lives for the milliseconds between `os.fsync` and `os.replace`,
+#: so a day is enormous — the margin is deliberate, because deleting a write
+#: that is actually in progress would be a far worse bug than the litter.
+INTERRUPTED_WRITE_GRACE = 86400
+
+
+def sweep_interrupted_writes(path: Path, grace: int = INTERRUPTED_WRITE_GRACE,
+                             now: float | None = None) -> int:
+    """Delete the temp files a killed save left beside ``path``.
+
+    `atomic_write_text` cleans up after any exception, but not after a
+    SIGKILL, a power cut, or a lid closed at the wrong moment — and nothing
+    else ever removed what those leave behind. The files are harmless: the
+    loaders read a named path and ignore them. But they accumulate for ever
+    in a folder this app deliberately invites people into, with the path on
+    screen and a "Change folder" button beside it.
+
+    Deliberately narrow. Only siblings matching this file's own temp pattern,
+    only ones older than ``grace``, and every error is swallowed — a folder
+    that will not let us tidy is not a reason to refuse to open.
+    """
+    path = Path(path)
+    cutoff = (time.time() if now is None else now) - grace
+    removed = 0
+    try:
+        candidates = list(path.parent.glob(f".{path.name}.*.tmp"))
+    except OSError:
+        return 0
+    for stray in candidates:
+        try:
+            if stray.is_file() and stray.stat().st_mtime < cutoff:
+                stray.unlink()
+                removed += 1
+        except OSError:
+            continue
+    return removed
 
 
 def write_json(path: Path, data, indent: int = 2) -> None:
@@ -466,10 +511,14 @@ class StateStore:
 
     def load(self) -> dict:
         """Return ``{"tasks": [...], "scratchpad": str, "timer_minutes": int}``."""
+        # Once per load rather than once per save: an autosave runs every
+        # thirty seconds and has no business scanning a directory.
+        sweep_interrupted_writes(self.path)
         try:
             data = read_json(self.path)
         except FileNotFoundError:
-            return {"tasks": [], "scratchpad": "", "timer_minutes": 15, "completed_log": []}
+            return {"tasks": [], "scratchpad": "", "timer_minutes": 15,
+                    "completed_log": [], "steps_log": []}
         except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             # An unreadable file must never reach _backup(): copying it over
             # the .bak would destroy the last good copy at the exact moment
@@ -535,7 +584,15 @@ class StateStore:
     def deserialize(data: dict) -> dict:
         tasks: list[Task] = []
         dropped = 0
-        for record in data.get("tasks") or []:
+        # `as_records`, not the raw field: a string would be walked character
+        # by character and reported as that many lost records, and a number
+        # would raise straight past every StorageError the recovery code
+        # catches. `unreadable` names the fields that were the wrong shape
+        # entirely, which is a different sentence from "N records were lost".
+        unreadable = [name for name in ("tasks", "completed_log", "steps_log")
+                      if data.get(name) is not None
+                      and not isinstance(data.get(name), (list, tuple))]
+        for record in as_records(data.get("tasks")):
             try:
                 task = Task.from_dict(record)
             except (ValueError, TypeError):
@@ -549,15 +606,30 @@ class StateStore:
         scratchpad = data.get("scratchpad")
         if not isinstance(scratchpad, str):
             # Pre-2.0 files kept a list of timestamped notes instead.
-            notes = [Note.from_dict(n) for n in data.get("notes") or [] if isinstance(n, dict)]
+            notes = [Note.from_dict(n) for n in as_records(data.get("notes"))
+                     if isinstance(n, dict)]
             scratchpad = "\n".join(n.render() for n in notes)
 
         finished = []
-        for record in data.get("completed_log") or []:
+        for record in as_records(data.get("completed_log")):
             if isinstance(record, dict) and isinstance(record.get("text"), str):
                 finished.append({
                     "text": record["text"],
                     "completed_at": record.get("completed_at") or "",
+                })
+
+        steps = []
+        for record in as_records(data.get("steps_log")):
+            if isinstance(record, dict) and isinstance(record.get("step"), str):
+                steps.append({
+                    "step": record["step"],
+                    "task": record.get("task") if isinstance(record.get("task"), str) else "",
+                    # Absent from anything written before v3.56.0, which is
+                    # fine: an entry with no id simply never matches, and a
+                    # record of what happened does not need to be joinable.
+                    "task_id": (record.get("task_id")
+                                if isinstance(record.get("task_id"), str) else ""),
+                    "done_at": record.get("done_at") or "",
                 })
 
         return {
@@ -566,12 +638,15 @@ class StateStore:
             # Short by default: 15 minutes is the length you can agree to.
             "timer_minutes": _int_or(data.get("timer_minutes"), 15, 1, 240),
             "completed_log": finished[-COMPLETED_LOG_LIMIT:],
+            "steps_log": steps[-STEPS_LOG_LIMIT:],
             "dropped": dropped,
+            "unreadable": unreadable,
         }
 
     @staticmethod
     def serialize(tasks: list[Task], scratchpad: str, timer_minutes: int,
-                  completed_log: list | None = None) -> dict:
+                  completed_log: list | None = None,
+                  steps_log: list | None = None) -> dict:
         return {
             "version": STATE_VERSION,
             "tasks": [t.to_dict() for t in tasks],
@@ -580,12 +655,17 @@ class StateStore:
             # What was finished and then cleared away. Kept so "N done today"
             # survives a tidy-up; capped because it is a footnote, not a store.
             "completed_log": list(completed_log or [])[-COMPLETED_LOG_LIMIT:],
+            # Steps finished, for the week review. The task itself keeps only
+            # a cursor, so without this the record does not exist anywhere.
+            "steps_log": list(steps_log or [])[-STEPS_LOG_LIMIT:],
             "saved_at": now_stamp(),
         }
 
     def save(self, tasks: list[Task], scratchpad: str, timer_minutes: int,
-             completed_log: list | None = None) -> None:
-        payload = self.serialize(tasks, scratchpad, timer_minutes, completed_log)
+             completed_log: list | None = None,
+             steps_log: list | None = None) -> None:
+        payload = self.serialize(tasks, scratchpad, timer_minutes,
+                                 completed_log, steps_log)
         try:
             self._backup()
             write_json(self.path, payload)
@@ -797,6 +877,7 @@ class MatrixStore:
             repeat=task.repeat, snoozed_until=task.snoozed_until,
             handed_to=task.handed_to, handed_off_on=task.handed_off_on,
             follow_up_on=task.follow_up_on,
+            steps=list(task.steps), steps_done=task.steps_done,
         )
         created.path = self._new_path(category, created)
         self._write(created)
