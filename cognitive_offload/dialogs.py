@@ -703,7 +703,14 @@ class StartFocusDialog(ModalDialog):
         self._steps = list(warmup_steps or [])
         self._step_entries: list | None = None  # None = not editing
         self.ladder_frame = ttk.Frame(self.body)
-        if show_warmup and warmup_steps:
+        # `show_warmup`, and NOT "and warmup_steps": clearing all three lines
+        # is the first thing someone replacing them does, and the "Edit
+        # steps…" button lives inside this frame. Building it only when there
+        # were already steps meant emptying the ladder took away the only way
+        # back to it for the rest of the session — a control that removes
+        # itself. The checkbox below is the way to turn the ladder off, and
+        # it is still the only one.
+        if show_warmup:
             self.ladder_frame.pack(fill="x")
             self._build_ladder()
 
@@ -736,10 +743,18 @@ class StartFocusDialog(ModalDialog):
             side="left")
         ttk.Button(heading, text="Edit steps…", style="SmPageGhost.TButton",
                    command=self._edit_steps).pack(side="left", padx=(8, 0))
+        # Both sentences named before one is chosen. Handed straight to
+        # `text=` as a conditional, neither of them appeared in the wording
+        # snapshot — the same disappearing act the matrix row's copy did when
+        # it moved inside a conditional, and the reason `rows.py` carries a
+        # comment about it.
+        rungs_hint = ("Step down towards the task instead of leaping at it. "
+                      "Tick what you've done — skipping them is fine too.")
+        empty_hint = ("No rungs on it at the moment. Edit steps to write your "
+                      "own, or leave it — nothing here is required.")
         ttk.Label(
             self.ladder_frame,
-            text="Step down towards the task instead of leaping at it. "
-                 "Tick what you've done — skipping them is fine too.",
+            text=rungs_hint if self._steps else empty_hint,
             style="Muted.TLabel",
             wraplength=px(self, 470),
             justify="left",

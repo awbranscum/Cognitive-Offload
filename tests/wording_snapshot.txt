@@ -236,6 +236,7 @@ dialogs.py | dialog-title | __init__ | Session finished
 dialogs.py | dialog-title | __init__ | Start a focus session
 dialogs.py | dialog-title | __init__ | This week
 dialogs.py | dialog-title | __init__ | Where do I start?
+dialogs.py | empty_hint= | _build_ladder | No rungs on it at the moment. Edit steps to write your own, or leave it — nothing here is required.
 dialogs.py | heading= | __init__ | Move task to:
 dialogs.py | heading= | __init__ | Move {} tasks to:
 dialogs.py | hint= | __init__ | Change it if it needs changing — leaving it as it is is an answer.
@@ -274,6 +275,7 @@ dialogs.py | messagebox.showwarning | _warn_about_date | Try 'today', 'tomorrow'
 dialogs.py | messagebox.showwarning | collect | The title cannot be empty.
 dialogs.py | messagebox.showwarning | collect | Title required
 dialogs.py | plan_hint= | __init__ | One step per line, in order. Optional — and only the top one has to be any good.
+dialogs.py | rungs_hint= | _build_ladder | Step down towards the task instead of leaping at it. Tick what you've done — skipping them is fine too.
 dialogs.py | text= | __init__ |    · {}
 dialogs.py | text= | __init__ |    ✓ {}
 dialogs.py | text= | __init__ | A quiet week is just a quiet week — nothing here counts against you. The strip fills in as sessions happen.
@@ -328,7 +330,6 @@ dialogs.py | text= | __init__ | {} session{} · {} minutes across the week.
 dialogs.py | text= | __init__ | {} thought{} parked in the scratchpad while you worked — safe there.
 dialogs.py | text= | __init__ | {} — take it back and do it yourself
 dialogs.py | text= | _build_ladder | Edit steps…
-dialogs.py | text= | _build_ladder | Step down towards the task instead of leaping at it. Tick what you've done — skipping them is fine too.
 dialogs.py | text= | _build_ladder | Warm-up ladder
 dialogs.py | text= | _edit_steps | Warm-up ladder
 dialogs.py | text= | _edit_steps | Your own downshift, in your own words. Blank lines are dropped; the changes stick for future sessions.

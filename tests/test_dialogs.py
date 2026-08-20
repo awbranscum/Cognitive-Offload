@@ -722,6 +722,87 @@ class DialogCollectTests(unittest.TestCase):
         self.assertIn(f"x{dialog.winfo_reqheight()}", dialog.geometry())
         dialog.destroy()
 
+    # -- the ladder can always be refilled -----------------------------
+    def _start_dialog(self, steps, show=True):
+        from cognitive_offload.dialogs import StartFocusDialog
+
+        dialog = StartFocusDialog(self.root, task_text="Write the report",
+                                  first_step="open last year's report",
+                                  minutes=15, warmup_steps=steps,
+                                  show_warmup=show)
+        self.addCleanup(dialog.destroy)
+        dialog.update_idletasks()
+        if hasattr(dialog, "_fit_to_content"):
+            dialog._fit_to_content()
+        dialog.deiconify()
+        dialog.update()
+        return dialog
+
+    @staticmethod
+    def _labels(widget, kind):
+        found = []
+
+        def walk(parent):
+            for child in parent.winfo_children():
+                if child.winfo_ismapped() and child.winfo_class() == kind:
+                    found.append(child.cget("text"))
+                walk(child)
+
+        walk(widget)
+        return found
+
+    def test_an_emptied_ladder_still_offers_the_way_back(self):
+        """Clearing all three lines is the first thing someone replacing them
+        does. The "Edit steps…" button lives inside the ladder frame, so
+        building the frame only when there were already steps took away the
+        only route back for the rest of the session."""
+        dialog = self._start_dialog([])
+        self.assertIn("Edit steps…", self._labels(dialog, "TButton"))
+
+    def test_a_ladder_with_rungs_offers_it_too(self):
+        dialog = self._start_dialog(["stand up", "close the tabs"])
+        self.assertIn("Edit steps…", self._labels(dialog, "TButton"))
+
+    def test_switching_the_ladder_off_does_hide_all_of_it(self):
+        """The supported off-switch, and it must keep working: the point of
+        the fix is a dead end, not making the ladder impossible to silence."""
+        dialog = self._start_dialog(["stand up"], show=False)
+        self.assertNotIn("Edit steps…", self._labels(dialog, "TButton"))
+
+    def test_and_the_switch_that_brings_it_back_is_still_on_screen(self):
+        dialog = self._start_dialog(["stand up"], show=False)
+        self.assertIn("Show the warm-up ladder before sessions",
+                      self._labels(dialog, "TCheckbutton"))
+
+    def test_a_ladder_with_rungs_says_the_other_thing(self):
+        """The half the empty-state test cannot see. Without it, a ladder
+        that always claimed to be empty passed the whole suite."""
+        dialog = self._start_dialog(["stand up", "close the tabs"])
+        said = " ".join(self._labels(dialog, "TLabel"))
+        self.assertIn("Step down towards the task", said)
+        self.assertNotIn("No rungs on it", said)
+
+    def test_an_empty_ladder_says_so_without_scolding(self):
+        dialog = self._start_dialog([])
+        said = " ".join(self._labels(dialog, "TLabel"))
+        self.assertIn("No rungs on it at the moment", said)
+        self.assertIn("nothing here is required", said)
+        self.assertNotIn("Step down towards the task", said)
+        for scold in ("should", "you have not", "missing", "!"):
+            self.assertNotIn(scold, said.lower())
+
+    def test_an_empty_ladder_can_be_refilled_end_to_end(self):
+        dialog = self._start_dialog([])
+        dialog._edit_steps()
+        dialog.update()
+        self.assertTrue(dialog._step_entries)
+        dialog._step_entries[0].insert(0, "put the kettle on")
+        dialog._step_entries[1].insert(0, "   ")
+        dialog._step_entries[2].insert(0, "read one line of it")
+        collected = dialog.collect()
+        self.assertEqual(collected["warmup_steps"],
+                         ["put the kettle on", "read one line of it"])
+
     # -- the start dialog's rituals ------------------------------------
     def test_untouched_ladder_collects_as_none(self):
         from cognitive_offload.dialogs import StartFocusDialog

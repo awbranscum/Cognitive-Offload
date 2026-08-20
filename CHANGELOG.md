@@ -5,6 +5,30 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.65.0 — The warm-up ladder can always be refilled
+Clearing all three lines is the first thing someone replacing them does. The
+**"Edit steps…"** button lives inside the ladder frame, and the frame was
+only built when there were already steps — so emptying the ladder took away
+the only route back to it for the rest of the session. A control that removes
+itself is a dead end, and this app does not have those.
+
+The ladder now appears whenever it is switched on, empty or not, and an empty
+one says: *"No rungs on it at the moment. Edit steps to write your own, or
+leave it — nothing here is required."*
+
+The supported off-switch is unchanged and still the only one: the **"Show the
+warm-up ladder before sessions"** checkbox, which lives outside the frame,
+persists, and can be ticked again. Emptying the lines never was an off-switch
+— `Config.load` replaces an empty list with the defaults on the next launch,
+which is also why the dead end was only ever a session long.
+
+One thing worth recording about how it was written: handing both sentences
+straight to `text=` as a conditional made **both of them vanish from the
+wording snapshot** — the same disappearing act the matrix row's copy did when
+it moved inside a conditional, which `rows.py` still carries a comment about.
+Naming each sentence before choosing between them puts them back under the
+net. The snapshot caught it, which is what it is for.
+
 ## 3.64.0 — A damaged file must not stop the app opening
 Found by writing seven kinds of damage to a real `data.json` and opening a
 real app on each. Six of the seven were handled beautifully. The seventh was
