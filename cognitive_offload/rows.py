@@ -69,8 +69,7 @@ def _step_or_summary(item, body: str) -> str:
     """
     first_step = getattr(item, "first_step", "")
     if first_step:
-        place = plan_place(item)
-        return f"→ {first_step} · {place}" if place else f"→ {first_step}"
+        return f"→ {step_with_place(first_step, plan_place(item))}"
     body = (body or "").strip()
     return body.splitlines()[0][:80] if body else ""
 
@@ -91,6 +90,18 @@ def plan_place(item) -> str:
     if not steps:
         return ""
     return f"step {getattr(item, 'steps_done', 0) + 1} of {len(steps)}"
+
+
+def step_with_place(first_step: str, place: str) -> str:
+    """``"copy the headings across · step 2 of 3"``, or just the step.
+
+    One composer, because three surfaces say this sentence — the row, the
+    focus card, and the pop-out — and the pop-out had been saying only half
+    of it. `focus_caption`'s own docstring promised the pop-out was covered;
+    the pop-out passed `first_step` raw and never asked for the place. Two
+    copies of a sentence is how a third comes to be missing.
+    """
+    return f"{first_step} · {place}" if first_step and place else first_step
 
 
 def _subtitle(item, body: str) -> str:
@@ -161,8 +172,7 @@ def focus_caption(task: Task | None, first_step: str, place: str = "") -> str:
         return f"Free focus — {first_step}" if first_step else "Free focus"
     if not first_step:
         return task.text
-    step = f"{first_step} · {place}" if place else first_step
-    return f"{task.text}\n→ {step}"
+    return f"{task.text}\n→ {step_with_place(first_step, place)}"
 
 
 def sort_label(order: str) -> str:

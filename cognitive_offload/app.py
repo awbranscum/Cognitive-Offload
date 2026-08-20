@@ -52,7 +52,13 @@ from .storage import (
     category_label,
     display_path,
 )
-from .rows import focus_caption, matrix_row, plan_place, sort_label
+from .rows import (
+    focus_caption,
+    matrix_row,
+    plan_place,
+    sort_label,
+    step_with_place,
+)
 from .theme import apply_theme, px, style_text, tokens
 from .timer import FocusTimer
 from .undo import UndoStack
@@ -1773,7 +1779,12 @@ class CognitiveOffloadApp(tk.Tk):
             self._focus_window.update_session(
                 "Break — step away" if self._timer_mode == "break"
                 else (task.text if task else ""),
-                task.first_step if task and self._timer_mode == "focus" else "",
+                # With the place, like every other surface that names a step.
+                # The pop-out is the one that is up *while you work*, where
+                # "of 3" is the difference between a step and a step in
+                # something finite.
+                step_with_place(task.first_step, plan_place(task))
+                if task and self._timer_mode == "focus" else "",
                 f"{minutes:02d}:{seconds:02d}",
                 elapsed / self._timer_total if self._timer_total else 0,
                 self._timer_running,

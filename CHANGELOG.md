@@ -5,6 +5,44 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.61.0 — "step 1 of 3", on the surface you actually look at
+A small fix and the net that would have caught it.
+
+- **The pop-out timer now says where you are in the plan.** It is the one
+  surface up *while you work*, and it was the only one showing a step without
+  saying it was step 2 of 3 — the list row, the focus card, the start dialog
+  and the session-end dialog all say it. "of 3" is the difference between a
+  step and a step in something finite; being part-way through is cheaper to
+  resume than starting, and the number is the evidence.
+
+  This was a promise the code was not keeping rather than an idea:
+  `focus_caption`'s docstring opens *"What the focus card **and the pop-out**
+  say you are on"*, and calls the place *"the one thing about the plan worth
+  showing"* during a session. The pop-out passed its step through raw.
+
+- **One composer, three surfaces.** The sentence was being assembled inline in
+  two places, which is how the third came to be missing.
+  `rows.step_with_place` now builds it once, and the wording snapshot recorded
+  the consolidation exactly: two `{} · {}` entries became one.
+
+- **`tests/test_plan_place.py` is the net.** Every surface that names a step
+  is checked for the place, and a surface that leaves it out has to be listed
+  with a reason — which the NEXT UP strip now is, marked as an open question
+  rather than a decision. Two of the surfaces are dialogs, so their call sites
+  are read out of the source with `ast`: a third dialog added later is caught
+  the day it appears rather than the day someone opens it.
+
+  It also asserts that each surface really is showing the step, because a net
+  that checks strings for a substring passes beautifully when every string is
+  empty.
+
+Left for the owner: whether the **NEXT UP strip** should say it too. The
+argument for is that "step 2 of 3" there says *you have already started this*,
+which is one of the strongest anti-freeze signals there is. The argument
+against is that the strip is the one card this app keeps deliberately
+lightest. One line of code either way, which is why it should be decided
+rather than drifted into.
+
 ## 3.60.0 — The other tab
 The Eisenhower tab had been the less-audited half of the app for a long time.
 Looked at the way a stranger meets it, two things were wrong, and one of them
