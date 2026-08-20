@@ -29,7 +29,17 @@ DEFAULT_BREAK_MINUTES = 5
 class FocusSession:
     minutes: int
     task: str = ""
-    started_at: str = field(default_factory=now_stamp)
+    #: When the block was written down, which is when it **ended**:
+    #: ``SessionLog.record`` is called from `_bank_session`, and nothing has
+    #: ever passed a start time. The field was called ``started_at`` for a
+    #: long while and meant nothing of the kind — and a name that does not
+    #: match its value is how the next person writes a real bug on top of it.
+    #:
+    #: Which day a block counts for is unchanged by the rename: a block
+    #: finished at 00:05 belongs to the new day, which is the kinder answer
+    #: for a night owl — "1 session today" rather than "none" the moment
+    #: after they stopped.
+    logged_at: str = field(default_factory=now_stamp)
     completed: bool = True
     # Which task the block was on (Task.id) — what makes "the thing you
     # worked on yesterday" findable again tomorrow.
@@ -37,11 +47,11 @@ class FocusSession:
 
     @property
     def day(self) -> str:
-        return self.started_at[:10]
+        return self.logged_at[:10]
 
     def to_dict(self) -> dict:
         record = {
-            "started_at": self.started_at,
+            "logged_at": self.logged_at,
             "minutes": int(self.minutes),
             "task": self.task,
             "completed": bool(self.completed),
@@ -52,7 +62,12 @@ class FocusSession:
 
     @classmethod
     def from_dict(cls, data: dict) -> "FocusSession":
-        started = data.get("started_at")
+        # Files written before the rename say "started_at" and mean exactly
+        # the same instant, so they are read rather than discarded — throwing
+        # away a year of momentum over a key name would be its own bug.
+        stamp = data.get("logged_at")
+        if not isinstance(stamp, str):
+            stamp = data.get("started_at")
         try:
             minutes = int(data.get("minutes", 0))
         except (TypeError, ValueError):
@@ -60,7 +75,7 @@ class FocusSession:
         return cls(
             minutes=max(0, minutes),
             task=data.get("task") if isinstance(data.get("task"), str) else "",
-            started_at=started if isinstance(started, str) else now_stamp(),
+            logged_at=stamp if isinstance(stamp, str) else now_stamp(),
             completed=bool(data.get("completed", True)),
             task_id=data.get("task_id") if isinstance(data.get("task_id"), str) else "",
         )

@@ -680,9 +680,27 @@ class CognitiveOffloadApp(tk.Tk):
                               self.steps_log)
 
     def _advance(self, item) -> bool:
-        """Tick the current step off, recording it on the way past."""
-        self.record_step_done(item)
-        return item.advance_step()
+        """Tick the current step off, recording it on the way past.
+
+        Recorded only when the cursor actually moves. It used to be written
+        first and unconditionally, and `advance_step` refuses at the end of a
+        plan — the model's invariant is `first_step == steps[steps_done]`, so
+        the cursor may never pass the last step. Ticking "Done" on the last
+        step therefore logged a finished step and changed nothing, every
+        time it was pressed: three ticks put the same step in the week review
+        three times, and inflated the "N done today" count with it.
+
+        Padding the record is not a smaller sin than losing it. That screen
+        exists because "I did nothing this week" is a distortion, and it can
+        only correct one by being true.
+        """
+        finished = (getattr(item, "first_step", "") or "").strip()
+        if not item.advance_step():
+            return False
+        # After the move, so `first_step` is now the NEXT step — the one just
+        # completed has to be carried across by hand.
+        self.record_step_done(item, step=finished)
+        return True
 
     #: what the focus card says when nothing is running and there is nothing
     #: to remember either. Three places used to spell it out; one of them is
@@ -704,16 +722,20 @@ class CognitiveOffloadApp(tk.Tk):
                 shown_as_next=self._next_task_id if self._next_up_shown else "")
             or self.IDLE_CAPTION)
 
-    def record_step_done(self, item) -> None:
-        """Write down the step about to be ticked, before it moves.
+    def record_step_done(self, item, step: str = "") -> None:
+        """Write down a step that has been ticked off.
 
         Called from all three places that advance a plan, because three
         hand-written copies of this is precisely the shape of bug the last
         four releases have been fixing. Undo is handled by the stack, which
         snapshots the log alongside the tasks — Ctrl+Z must not put the
         cursor back and leave the evidence behind.
+
+        ``step`` is passed explicitly by `_advance`, which reads it before
+        moving the cursor: afterwards `first_step` names the *next* step, and
+        a log that recorded that would name the wrong one every time.
         """
-        step = (getattr(item, "first_step", "") or "").strip()
+        step = (step or getattr(item, "first_step", "") or "").strip()
         if not step:
             return
         self.steps_log.append({

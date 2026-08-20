@@ -5,6 +5,46 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.62.0 — The record only corrects a distortion by being true
+Two things found by looking at what happens at the *end* of a plan, and at
+what a timestamp actually holds.
+
+- **The last step of a plan could be finished for ever.** Ticking *"Done —
+  move on to X"* on the last step wrote a finished-step entry and changed
+  nothing — every single time it was pressed. Three ticks put the same step
+  in the week review three times, and inflated the "N done today" count with
+  it.
+
+  `advance_step` is right to refuse at the end: the model's invariant is
+  `first_step == steps[steps_done]`, so the cursor may never pass the last
+  step. The bug was that the log was written *before* asking, and
+  unconditionally. It now records only what the cursor actually passes — and
+  it carries the finished step across by hand, because after the move
+  `first_step` names the *next* one.
+
+  **Padding the record is not a smaller sin than losing it.** The week review
+  exists because *"I did nothing this week"* is a distortion, and it can only
+  correct one by being true.
+
+- **A timestamp said "started_at" and held the finish.** `SessionLog.record`
+  is called when a block *ends*, and nothing has ever passed a start time, so
+  the field stamped itself at the moment of recording. It is `logged_at` now.
+
+  Which day a block counts for is deliberately unchanged: a block finished at
+  00:05 belongs to the new day, because someone who stops at five past
+  midnight seeing *"1 session today"* is kinder than seeing *"none"* the
+  moment after they stopped. Files written before the rename still carry
+  `started_at`, mean exactly the same instant, and are read — throwing away a
+  year of momentum over a key name would be its own bug.
+
+Left open on purpose: **what finishing the last step should mean.** With the
+log honest, the final step of a plan is now recorded nowhere — the task sits
+on `step 3 of 3` with no way to say "that's the lot", and the evidence only
+returns when the task itself is marked done. The obvious answer is the
+already-listed idea of the last step offering to finish the task, and it is
+no longer only a nicety; but it is a change to what the app asks you at a
+tender moment, so it waits to be asked for.
+
 ## 3.61.0 — "step 1 of 3", on the surface you actually look at
 A small fix and the net that would have caught it.
 

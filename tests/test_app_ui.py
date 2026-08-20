@@ -2216,9 +2216,9 @@ class AppSmokeTests(unittest.TestCase):
         yesterday = (date.today() - timedelta(days=1)).isoformat()
         stale = (date.today() - timedelta(days=10)).isoformat()  # outside the week
         self.app.session_log.sessions = [
-            FocusSession(minutes=15, started_at=f"{yesterday} 09:00:00"),
-            FocusSession(minutes=30, started_at=f"{yesterday} 11:00:00"),
-            FocusSession(minutes=99, started_at=f"{stale} 09:00:00"),
+            FocusSession(minutes=15, logged_at=f"{yesterday} 09:00:00"),
+            FocusSession(minutes=30, logged_at=f"{yesterday} 11:00:00"),
+            FocusSession(minutes=99, logged_at=f"{stale} 09:00:00"),
         ]
         self.capture("finished thing")
         self.select(0)

@@ -41,7 +41,7 @@ class FakeLog:
 
 def a_session(task_id, minutes=20, task="Write the quarterly report"):
     return FocusSession(minutes=minutes, task=task, task_id=task_id,
-                        started_at="2026-08-19T10:00:00")
+                        logged_at="2026-08-19T10:00:00")
 
 
 def a_step(task_id, step="copy the headings across", day="2026-08-19"):

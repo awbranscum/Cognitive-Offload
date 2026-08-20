@@ -322,6 +322,102 @@ if __name__ == "__main__":  # pragma: no cover
     unittest.main()
 
 
+@unittest.skipUnless(_display_available(), "tkinter display not available")
+class TheEndOfAPlanTests(unittest.TestCase):
+    """The last step cannot be finished twice.
+
+    `advance_step` refuses at the end of a plan — the model's invariant is
+    `first_step == steps[steps_done]`, so the cursor may never pass the last
+    step, and that is deliberate. The log was written *before* that refusal
+    and unconditionally, so ticking "Done" on the last step recorded a
+    finished step and changed nothing, every time it was pressed. Three ticks
+    put the same step in the week review three times and inflated the "N done
+    today" count with it.
+
+    Padding the record is not a smaller sin than losing it: that screen exists
+    because "I did nothing this week" is a distortion, and it can only correct
+    one by being true.
+    """
+
+    def setUp(self):
+        from cognitive_offload.app import CognitiveOffloadApp
+        from cognitive_offload.storage import Config
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name)
+        config = Config(root / "config.json")
+        config.db_path = root / "db"
+        config.matrix_db_path = root / "matrix"
+        self.app = CognitiveOffloadApp(config=config)
+        self.app.withdraw()
+        self.addCleanup(self._destroy)
+        self.app.capture_entry.insert(0, "Write the quarterly report")
+        self.app.add_task_from_capture()
+        self.task = self.app.tasks[0]
+        self.task.set_current_step(PLAN[0])
+        self.task.set_rest(PLAN[1:])
+        self.app.refresh_all()
+
+    def _destroy(self):
+        try:
+            self.app.destroy()
+        except tk.TclError:
+            pass
+
+    def _tick(self):
+        """The editor's "Done — move on to X" checkbox, as the app runs it."""
+        with mock.patch("cognitive_offload.app.TaskEditorDialog") as editor:
+            editor.return_value.show.return_value = {
+                "title": self.task.text, "content": "", "tags": [],
+                "first_step": self.task.first_step, "kind": "",
+                "scheduled_for": "", "estimate_minutes": 0, "repeat": "",
+                "clear_snooze": False, "take_back": False, "waiting_on": "",
+                "check_back": "", "rest_of_plan": self.task.rest_of_plan,
+                "step_done": True}
+            self.app.task_list.selection_set(self.app._visible.index(self.task))
+            self.app.edit_selected_details()
+
+    def _steps(self):
+        return [e["step"] for e in self.app.steps_log]
+
+    def test_walking_the_whole_plan_logs_each_step_once(self):
+        for _ in range(len(PLAN)):
+            self._tick()
+        # The last step is not logged: the cursor never passes it, and this
+        # log records what the cursor passed. What finishing the last step
+        # means is a separate question, deliberately left open.
+        self.assertEqual(self._steps(), PLAN[:-1])
+
+    def test_the_last_step_stays_logged_once_however_often_it_is_ticked(self):
+        for _ in range(len(PLAN) + 5):
+            self._tick()
+        self.assertEqual(self._steps(), PLAN[:-1])
+        self.assertEqual(self.task.first_step, PLAN[-1],
+                         "the cursor should be resting on the last step")
+
+    def test_the_step_logged_is_the_one_that_was_finished(self):
+        """Not the one that comes next.
+
+        The recording happens after the cursor moves, so `first_step` already names
+        the following step by then and the finished one has to be carried
+        across by hand — get that wrong and every entry names the wrong step.
+        """
+        self._tick()
+        self.assertEqual(self._steps(), [PLAN[0]])
+        self.assertEqual(self.task.first_step, PLAN[1])
+
+    def test_the_done_today_count_does_not_inflate(self):
+        for _ in range(len(PLAN) + 5):
+            self._tick()
+        today = presenter.today_iso()
+        done = presenter.steps_done_on(self.app.steps_log, today)
+        self.assertEqual([step for step, _ in done], PLAN[:-1])
+        view = presenter.task_list_view(self.app.tasks,
+                                        steps_log=self.app.steps_log)
+        self.assertEqual(view.done_today, len(PLAN) - 1)
+
+
 class TheDoneTodayPillTests(unittest.TestCase):
     """The number on the pill is a promise about the panel it opens.
 

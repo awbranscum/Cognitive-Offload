@@ -499,7 +499,7 @@ class TodayViewTests(unittest.TestCase):
     def test_sessions_are_added_as_a_footer_when_there_were_any(self):
         task = make("thing")
         task.set_done(True)
-        log = log_with(FocusSession(minutes=25, started_at=stamp(today_iso())))
+        log = log_with(FocusSession(minutes=25, logged_at=stamp(today_iso())))
         view = presenter.today_view([task], session_log=log)
         self.assertIn("Plus 1 focus session — 25 minutes.", view.body)
 
@@ -518,14 +518,14 @@ class WeekViewTests(unittest.TestCase):
 
     def test_days_with_nothing_are_omitted_never_listed_as_zeros(self):
         log = log_with(
-            FocusSession(minutes=15, started_at=stamp(self.yesterday.isoformat())))
+            FocusSession(minutes=15, logged_at=stamp(self.yesterday.isoformat())))
         view = presenter.week_view([], session_log=log, today=self.today)
         self.assertEqual([d.label for d in view.days], ["Yesterday"])
 
     def test_the_two_nearest_days_are_named_not_dated(self):
         log = log_with(
-            FocusSession(minutes=15, started_at=stamp(self.yesterday.isoformat())),
-            FocusSession(minutes=30, started_at=stamp(self.today.isoformat())),
+            FocusSession(minutes=15, logged_at=stamp(self.yesterday.isoformat())),
+            FocusSession(minutes=30, logged_at=stamp(self.today.isoformat())),
         )
         view = presenter.week_view([], session_log=log, today=self.today)
         self.assertEqual([d.label for d in view.days], ["Yesterday", "Today"])
@@ -533,22 +533,22 @@ class WeekViewTests(unittest.TestCase):
     def test_older_days_use_their_weekday_name(self):
         older = self.today - timedelta(days=3)
         log = log_with(
-            FocusSession(minutes=15, started_at=stamp(older.isoformat())))
+            FocusSession(minutes=15, logged_at=stamp(older.isoformat())))
         view = presenter.week_view([], session_log=log, today=self.today)
         self.assertEqual([d.label for d in view.days], [older.strftime("%A")])
 
     def test_anything_older_than_a_week_is_outside_the_window(self):
         stale = self.today - timedelta(days=10)
         log = log_with(
-            FocusSession(minutes=99, started_at=stamp(stale.isoformat())))
+            FocusSession(minutes=99, logged_at=stamp(stale.isoformat())))
         view = presenter.week_view([], session_log=log, today=self.today)
         self.assertEqual(view.days, [])
         self.assertEqual(view.total_minutes, 0)
 
     def test_totals_add_up_across_the_week(self):
         log = log_with(
-            FocusSession(minutes=15, started_at=stamp(self.yesterday.isoformat())),
-            FocusSession(minutes=30, started_at=stamp(self.yesterday.isoformat(),
+            FocusSession(minutes=15, logged_at=stamp(self.yesterday.isoformat())),
+            FocusSession(minutes=30, logged_at=stamp(self.yesterday.isoformat(),
                                                       "11:00:00")),
         )
         view = presenter.week_view([], session_log=log, today=self.today)

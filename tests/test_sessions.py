@@ -50,12 +50,12 @@ class SessionLogTests(unittest.TestCase):
         stale = (date.today() - timedelta(days=5)).isoformat()
         self.log.sessions = [
             FocusSession(minutes=15, task_id="warm-today",
-                         started_at=f"{today} 09:00:00"),
+                         logged_at=f"{today} 09:00:00"),
             FocusSession(minutes=15, task_id="warm-yesterday",
-                         started_at=f"{yesterday} 21:00:00"),
+                         logged_at=f"{yesterday} 21:00:00"),
             FocusSession(minutes=15, task_id="cold",
-                         started_at=f"{stale} 09:00:00"),
-            FocusSession(minutes=15, started_at=f"{today} 10:00:00"),  # no id
+                         logged_at=f"{stale} 09:00:00"),
+            FocusSession(minutes=15, logged_at=f"{today} 10:00:00"),  # no id
         ]
         self.assertEqual(self.log.recent_task_ids(),
                          {"warm-today", "warm-yesterday"})
@@ -80,7 +80,7 @@ class SessionLogTests(unittest.TestCase):
 
     def test_older_sessions_are_included_in_the_right_day(self):
         old_day = (date.today() - timedelta(days=3)).isoformat()
-        self.log.sessions.append(FocusSession(minutes=15, started_at=f"{old_day} 09:00:00"))
+        self.log.sessions.append(FocusSession(minutes=15, logged_at=f"{old_day} 09:00:00"))
         counts = dict(self.log.counts_by_day(days=7))
         self.assertEqual(counts[old_day], 1)
         self.assertEqual(counts[today_iso()], 0)
@@ -115,7 +115,7 @@ class SessionLogTests(unittest.TestCase):
 
     def test_total_minutes_over_a_window(self):
         old_day = (date.today() - timedelta(days=10)).isoformat()
-        self.log.sessions.append(FocusSession(minutes=60, started_at=f"{old_day} 09:00:00"))
+        self.log.sessions.append(FocusSession(minutes=60, logged_at=f"{old_day} 09:00:00"))
         self.log.record(minutes=15)
         self.assertEqual(self.log.total_minutes(days=7), 15)
         self.assertEqual(self.log.total_minutes(days=14), 75)
@@ -150,3 +150,58 @@ class SessionLogTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WhatTheStampMeansTests(unittest.TestCase):
+    """The timestamp is written when the block ENDS, and now says so.
+
+    `SessionLog.record` is called from `_bank_session`, and nothing has ever
+    passed a start time — so the field called ``started_at`` held the finish.
+    A name that does not match its value is how the next person writes a real
+    bug on top of it.
+    """
+
+    def test_a_freshly_recorded_block_is_stamped_now(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log = SessionLog(Path(tmp) / "sessions.json")
+            session = log.record(minutes=15, task="Write the report")
+            self.assertEqual(session.day, today_iso())
+            self.assertTrue(session.logged_at.startswith(today_iso()))
+
+    def test_files_written_before_the_rename_are_still_read(self):
+        """Throwing away a year of momentum over a key name would be its own
+        bug: the old key means exactly the same instant."""
+        session = FocusSession.from_dict({
+            "started_at": "2026-08-19 21:30:00", "minutes": 25,
+            "task": "Write the report", "completed": True})
+        self.assertEqual(session.logged_at, "2026-08-19 21:30:00")
+        self.assertEqual(session.day, "2026-08-19")
+        self.assertEqual(session.minutes, 25)
+
+    def test_the_new_key_wins_when_a_file_somehow_has_both(self):
+        session = FocusSession.from_dict({
+            "logged_at": "2026-08-20 00:05:00",
+            "started_at": "2026-08-19 23:50:00", "minutes": 15})
+        self.assertEqual(session.day, "2026-08-20")
+
+    def test_what_is_written_now_uses_the_honest_name(self):
+        session = FocusSession(minutes=15, logged_at="2026-08-19 21:30:00")
+        record = session.to_dict()
+        self.assertEqual(record["logged_at"], "2026-08-19 21:30:00")
+        self.assertNotIn("started_at", record)
+
+    def test_a_round_trip_keeps_the_day(self):
+        session = FocusSession(minutes=15, logged_at="2026-08-19 21:30:00")
+        self.assertEqual(FocusSession.from_dict(session.to_dict()).day,
+                         session.day)
+
+    def test_a_block_finished_after_midnight_counts_for_the_new_day(self):
+        """Unchanged by the rename, and deliberate: someone who stops at 00:05
+        seeing "1 session today" is kinder than seeing "none" the moment after
+        they stopped."""
+        session = FocusSession.from_dict({"logged_at": "2026-08-20 00:05:00",
+                                          "minutes": 15})
+        self.assertEqual(session.day, "2026-08-20")
