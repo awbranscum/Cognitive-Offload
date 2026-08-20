@@ -17,6 +17,7 @@ from pathlib import Path
 
 from .models import DATE_FORMAT, as_records, now_stamp, today_iso
 from .presenter import momentum_view
+from .storage import sweep_interrupted_writes
 
 # Enough history for the momentum strip and a year of looking back, while
 # keeping the file small.
@@ -94,6 +95,9 @@ class SessionLog:
         self.sessions = []
 
     def load(self) -> "SessionLog":
+        # Same tidy-up as the state file: a killed save leaves a temp file
+        # beside this one too, and nothing else was ever going to remove it.
+        sweep_interrupted_writes(self.path)
         try:
             with open(self.path, "r", encoding="utf-8") as fh:
                 data = json.load(fh)

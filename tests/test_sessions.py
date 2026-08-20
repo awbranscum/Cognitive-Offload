@@ -242,3 +242,29 @@ class WrongShapedSessionsTests(unittest.TestCase):
             42,
             {"logged_at": "2026-08-19 22:00:00", "minutes": 15}]})
         self.assertEqual([s.minutes for s in log.sessions], [25, 15])
+
+
+class SweepInterruptedWritesTests(unittest.TestCase):
+    """The session log gets the same tidy-up as the state file."""
+
+    def test_its_own_leftovers_go(self):
+        import os
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sessions.json"
+            log = SessionLog(path)
+            log.record(minutes=15, task="Write the report")
+            stray = path.with_name(".sessions.json.abc.tmp")
+            stray.write_text("half a save")
+            when = time.time() - 200_000
+            os.utime(stray, (when, when))
+
+            SessionLog(path).load()
+            self.assertFalse(stray.exists())
+            self.assertEqual(len(SessionLog(path).load().sessions), 1)
+
+    def test_a_missing_file_is_still_only_an_empty_log(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = SessionLog(Path(tmp) / "never-written.json").load()
+            self.assertEqual(log.sessions, [])

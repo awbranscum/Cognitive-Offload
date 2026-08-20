@@ -5,6 +5,28 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.67.0 — Sweeping up after an interrupted save
+`atomic_write_text` writes a temp file beside the target, fsyncs it and
+renames it, and cleans up after any exception. It cannot clean up after a
+SIGKILL, a power cut, or a lid closed at the wrong moment — and nothing else
+ever removed what those leave behind, so `.data.json.<random>.tmp` files
+accumulated for ever in a folder this app puts on screen and invites people
+into.
+
+They were harmless: verified that the app opens, reads the real file, keeps
+the scratchpad and saves again with four of them present. Litter rather than
+damage — but litter that nobody but this app could explain.
+
+Both loaders now sweep their own siblings once, on load. Deliberately narrow:
+only files matching that file's own temp pattern, only ones **older than a
+day**, and every error swallowed. A real temp file lives for the milliseconds
+between `fsync` and `rename`, so the margin is enormous on purpose — deleting
+a save that is actually in progress would be a far worse bug than the litter
+it was tidying.
+
+Verified to take the two abandoned files and leave the fresh one, the
+backup, the other file's leftovers, and everything else in the folder.
+
 ## 3.66.0 — A pasted paragraph now has a ceiling
 The capture box says *"Anything in your head — it does not have to be tidy"*,
 and a pasted paragraph is exactly what that invites. Nothing stopped one

@@ -114,6 +114,45 @@ def atomic_write_text(path: Path, text: str) -> None:
         raise
 
 
+#: How long a leftover temp file has to sit before it counts as abandoned.
+#: A real one lives for the milliseconds between `os.fsync` and `os.replace`,
+#: so a day is enormous — the margin is deliberate, because deleting a write
+#: that is actually in progress would be a far worse bug than the litter.
+INTERRUPTED_WRITE_GRACE = 86400
+
+
+def sweep_interrupted_writes(path: Path, grace: int = INTERRUPTED_WRITE_GRACE,
+                             now: float | None = None) -> int:
+    """Delete the temp files a killed save left beside ``path``.
+
+    `atomic_write_text` cleans up after any exception, but not after a
+    SIGKILL, a power cut, or a lid closed at the wrong moment — and nothing
+    else ever removed what those leave behind. The files are harmless: the
+    loaders read a named path and ignore them. But they accumulate for ever
+    in a folder this app deliberately invites people into, with the path on
+    screen and a "Change folder" button beside it.
+
+    Deliberately narrow. Only siblings matching this file's own temp pattern,
+    only ones older than ``grace``, and every error is swallowed — a folder
+    that will not let us tidy is not a reason to refuse to open.
+    """
+    path = Path(path)
+    cutoff = (time.time() if now is None else now) - grace
+    removed = 0
+    try:
+        candidates = list(path.parent.glob(f".{path.name}.*.tmp"))
+    except OSError:
+        return 0
+    for stray in candidates:
+        try:
+            if stray.is_file() and stray.stat().st_mtime < cutoff:
+                stray.unlink()
+                removed += 1
+        except OSError:
+            continue
+    return removed
+
+
 def write_json(path: Path, data, indent: int = 2) -> None:
     atomic_write_text(path, json.dumps(data, indent=indent, ensure_ascii=False))
 
@@ -472,6 +511,9 @@ class StateStore:
 
     def load(self) -> dict:
         """Return ``{"tasks": [...], "scratchpad": str, "timer_minutes": int}``."""
+        # Once per load rather than once per save: an autosave runs every
+        # thirty seconds and has no business scanning a directory.
+        sweep_interrupted_writes(self.path)
         try:
             data = read_json(self.path)
         except FileNotFoundError:

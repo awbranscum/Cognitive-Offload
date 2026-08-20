@@ -4,6 +4,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -18,6 +19,7 @@ from cognitive_offload.storage import (
     NotASessionError,
     StateStore,
     StorageError,
+    sweep_interrupted_writes,
     atomic_write_text,
     display_path,
     slugify,
@@ -909,3 +911,79 @@ class WrongShapedFieldTests(TempDirTest):
         out = self._load("tasks", "nope")
         self.assertEqual(out["scratchpad"], "a thought I did not want to lose")
         self.assertEqual(out["timer_minutes"], 15)
+
+
+class SweepInterruptedWritesTests(TempDirTest):
+    """A killed save leaves a temp file. Nothing used to take it away.
+
+    `atomic_write_text` cleans up after any exception, but not after a
+    SIGKILL, a power cut or a lid closed at the wrong moment. The files are
+    harmless — the loaders read a named path and ignore them — but they
+    accumulate for ever in a folder this app puts on screen and invites
+    people into.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.db = self.root / "db"
+        self.db.mkdir(parents=True)
+        self.store = StateStore(self.db / "data.json")
+        self.store.save([Task(text="Ring the insurance company")], "a thought", 15)
+
+    def _aged(self, name, seconds_old):
+        path = self.db / name
+        path.write_text("half a save")
+        when = time.time() - seconds_old
+        os.utime(path, (when, when))
+        return path
+
+    def _names(self):
+        return sorted(p.name for p in self.db.iterdir())
+
+    def test_an_abandoned_temp_file_is_swept_up(self):
+        self._aged(".data.json.abc.tmp", 200_000)
+        self.store.load()
+        self.assertNotIn(".data.json.abc.tmp", self._names())
+
+    def test_a_save_that_may_still_be_running_is_left_alone(self):
+        """A real temp file lives for the milliseconds between fsync and
+        rename. Deleting one in flight would be a far worse bug than litter."""
+        self._aged(".data.json.fresh.tmp", 5)
+        self.store.load()
+        self.assertIn(".data.json.fresh.tmp", self._names())
+
+    def test_the_backup_is_not_litter(self):
+        self._aged("data.json.bak", 200_000)
+        self.store.load()
+        self.assertIn("data.json.bak", self._names())
+
+    def test_another_file_s_leftovers_are_not_ours_to_take(self):
+        self._aged(".sessions.json.xyz.tmp", 200_000)
+        self.store.load()
+        self.assertIn(".sessions.json.xyz.tmp", self._names())
+
+    def test_nothing_else_in_the_folder_is_touched(self):
+        self._aged("notes.txt", 200_000)
+        self._aged(".hidden", 200_000)
+        self.store.load()
+        for name in ("notes.txt", ".hidden", "data.json"):
+            self.assertIn(name, self._names())
+
+    def test_the_session_still_loads_through_all_of_it(self):
+        self._aged(".data.json.abc.tmp", 200_000)
+        data = self.store.load()
+        self.assertEqual([t.text for t in data["tasks"]],
+                         ["Ring the insurance company"])
+        self.assertEqual(data["scratchpad"], "a thought")
+
+    def test_a_folder_that_will_not_be_tidied_does_not_stop_the_app(self):
+        """Swallowed on purpose: a read-only or vanished folder is not a
+        reason to refuse to open a session."""
+        missing = StateStore(self.root / "gone" / "data.json")
+        self.assertEqual(sweep_interrupted_writes(missing.path), 0)
+
+    def test_it_reports_what_it_took(self):
+        self._aged(".data.json.one.tmp", 200_000)
+        self._aged(".data.json.two.tmp", 200_000)
+        self._aged(".data.json.three.tmp", 5)
+        self.assertEqual(sweep_interrupted_writes(self.db / "data.json"), 2)
