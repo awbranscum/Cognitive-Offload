@@ -5,6 +5,32 @@ Newest first. Versions bump with each delivered change-set; the themes
 throughout are task *initiation*, honest data, and a tone that never
 scolds.
 
+## 3.63.0 — A net over Ctrl+Z
+No behaviour change. `tests/test_undo_completeness.py` reads `app.py` and
+requires that every function opening an undo entry either restores the state
+the snapshot does not hold, or is named with the reason it does not have to.
+
+`push_undo` snapshots two things: the task list and the step log. Anything
+else an action touches — the quadrant files, the completed-tasks log, the
+scratchpad — has to be put back by a callable handed to `attach_undo`, or
+Ctrl+Z restores half the change and leaves the other half standing. That is
+the same shape as the four stale field lists a few releases back: a
+hand-written correspondence with nothing checking it.
+
+**It catches nothing today.** Sixteen functions push an undo entry, seven
+reach outside the snapshot, four of those attach a restore and three are
+exempt with reasons — copying *from* a quadrant leaves the files alone,
+`begin_focus` only reads preferences, and un-banking fifteen minutes you
+actually spent is not what Ctrl+Z is for. The point of writing it now is that
+the next one is caught the day it appears.
+
+Writing it found a blind spot in itself, which is the part worth recording:
+watching for the attribute `note_text` would have missed `clear_notes`, which
+writes the scratchpad through `set_scratchpad`. A net that only watches
+attribute names lets every method call through. It watches both now, and a
+mutation removing that restore is caught — which it would not have been an
+hour ago.
+
 ## 3.62.0 — The record only corrects a distortion by being true
 Two things found by looking at what happens at the *end* of a plan, and at
 what a timestamp actually holds.
